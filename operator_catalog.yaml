@@ -1,0 +1,57 @@
+# operator_catalog.yaml — 全量算子登记与准入状态
+#
+# 字段说明：
+#   id            : 任务 id，<四位序号>_<算子名>，目录同名
+#   name / family : 算子名与家族（elementwise / reduce / norm / gemm / attention / moe / quant / ...）
+#   source        : 来源仓库、commit、相对路径
+#   impl_lang     : hip | triton（aiter 中同一算子可能两套实现，可分别登记两题）
+#   core_compute  : 核心计算实际所在的文件与语言，准入审核的关键证据
+#   external_calls: 实现中调用的外部库（rocblas / miopen / ck / ...），含闭源库调用的不得准入
+#   status        : candidate | admitted | rejected
+#   difficulty    : basic | medium | hard（准入后评定）
+#   note          : 审核备注
+
+operators:
+  # ---- 示例：已准入 ----
+  - id: "0001_vecadd"
+    name: vecadd
+    family: elementwise
+    source:
+      repo: OpenDAS/aiter
+      commit: ""              # TODO: 记录实际快照 commit
+      path: ""                # 示例任务，非来自 aiter
+    impl_lang: hip
+    core_compute: "starter 内置演示题，无外部来源"
+    external_calls: []
+    status: admitted
+    difficulty: basic
+    note: "闭环验证用示例题：打通 hipcc 编译 → 正确性 → 性能计时"
+
+  # ---- 示例：候选（aiter 强项，attention/moe 子集的预期成员） ----
+  - id: "1001_paged_attention"
+    name: paged_attention
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: ""
+      path: "csrc/attention.c / aiter/ops/attention.py"   # TODO: 审核时确认
+    impl_lang: hip
+    core_compute: ""
+    external_calls: []
+    status: candidate
+    difficulty: hard
+    note: "DCU 特色算子集主菜之一"
+
+  - id: "1002_fused_add_rmsnorm_rope"
+    name: fused_add_rmsnorm_rope
+    family: norm
+    source:
+      repo: OpenDAS/aiter
+      commit: ""
+      path: ""
+    impl_lang: hip
+    core_compute: ""
+    external_calls: []
+    status: candidate
+    difficulty: medium
+    note: "融合 Norm+RoPE，aiter 强项"

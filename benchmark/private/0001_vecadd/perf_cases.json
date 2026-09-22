@@ -1,0 +1,8 @@
+{
+  "task_id": "0001_vecadd",
+  "cases": [
+    {"name": "perf_16M_f32", "n": 16777216, "dtype": "float32", "seed": 201},
+    {"name": "perf_64M_f16", "n": 67108864, "dtype": "float16", "seed": 202}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 50, "reduction": "median"}
+}

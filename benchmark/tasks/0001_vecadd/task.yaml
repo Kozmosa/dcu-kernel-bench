@@ -1,0 +1,37 @@
+id: "0001_vecadd"
+name: vecadd
+family: elementwise
+impl_lang: hip
+difficulty: basic
+
+description: >
+  逐元素向量加法：out[i] = a[i] + b[i]。
+  输入 a、b 为等长一维连续张量，输出 out 同形状。
+
+io:
+  inputs:
+    - {name: a, dtype: [float32, float16], layout: contiguous, ndim: 1}
+    - {name: b, dtype: [float32, float16], layout: contiguous, ndim: 1}
+  outputs:
+    - {name: out, dtype: same_as_input, layout: contiguous, ndim: 1}
+
+shape:
+  n: {min: 1, max: 67108864}   # 2^26，覆盖非对齐与超大输入
+  dynamic: true
+
+tolerance:
+  float32: {atol: 0.0, rtol: 0.0}      # 精确加法
+  float16: {atol: 1e-3, rtol: 1e-3}
+
+# static_audit.py 强制执行：提交代码中出现以下符号即判违规
+forbidden:
+  - rocblas
+  - hipblas
+  - hipblaslt
+  - miopen
+  - hipdnn
+  - cublas
+
+source:
+  repo: OpenDAS/aiter
+  commit: ""            # 示例题，无外部来源

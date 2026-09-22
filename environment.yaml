@@ -1,0 +1,29 @@
+# environment.yaml — 评测环境锁定
+# 官方基线与 Agent 生成实现必须在本文件锁定的同一环境内比较。
+# 在真机上落实后，把 placeholder 替换为实测值并随版本更新。
+
+hardware:
+  device: "DCU K100"          # TODO: 真机型号（rocminfo 确认）
+  target_arch:
+    - gfx936
+    - gfx938
+
+software:
+  dtk: "25.04"                # Triton track 的最低版本要求
+  hipcc: ""                   # TODO: hipcc --version
+  python: "3.10"
+  torch: ""                   # TODO: DTK 版 PyTorch 版本号
+  triton: ""                  # TODO: DTK 自带 Triton 版本（仅 triton track 需要）
+
+build:
+  compiler: hipcc
+  cxxstd: c++17
+  default_flags:
+    - "-O3"
+    - "--offload-arch=gfx936"
+    - "--offload-arch=gfx938"
+
+timing:
+  warmup_iters: 10
+  repeat_iters: 50
+  reduction: median           # 预热后重复运行取中位数

@@ -1,0 +1,8 @@
+{
+  "task_id": "0001_vecadd",
+  "cases": [
+    {"name": "small_f32",   "n": 1024,     "dtype": "float32", "seed": 0},
+    {"name": "medium_f32",  "n": 1048576,  "dtype": "float32", "seed": 1},
+    {"name": "unaligned_f16", "n": 1000003, "dtype": "float16", "seed": 2}
+  ]
+}

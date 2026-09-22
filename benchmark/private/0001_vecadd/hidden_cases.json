@@ -1,0 +1,9 @@
+{
+  "task_id": "0001_vecadd",
+  "cases": [
+    {"name": "hidden_small_odd_f32", "n": 999983,   "dtype": "float32", "seed": 101},
+    {"name": "hidden_large_f32",     "n": 33554432, "dtype": "float32", "seed": 102},
+    {"name": "hidden_edge_1_f16",    "n": 1,        "dtype": "float16", "seed": 103},
+    {"name": "hidden_unaligned_f16", "n": 16777217, "dtype": "float16", "seed": 104}
+  ]
+}

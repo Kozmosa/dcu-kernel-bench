@@ -1,0 +1,7 @@
+{
+  "task_id": "0001_vecadd",
+  "status": "placeholder",
+  "note": "在 DCU 真机上用 environment.yaml 锁定环境测量 aiter/DTK PyTorch 基线后填写。",
+  "environment": null,
+  "baselines": []
+}

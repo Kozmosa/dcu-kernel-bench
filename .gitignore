@@ -1,0 +1,17 @@
+# 第三方源码快照不进 git（aiter 等，独立仓库单独管理）
+third_party/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 构建产物
+build/
+*.o
+*.so
+*.co
+
+# 评测输出
+benchmark/evaluator/results/
+*.log
