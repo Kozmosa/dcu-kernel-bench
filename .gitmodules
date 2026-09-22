@@ -1,0 +1,5 @@
+[submodule "third_party/aiter"]
+	path = third_party/aiter
+	url = https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+	branch = das-main
+	ignore = dirty

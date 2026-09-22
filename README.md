@@ -5,7 +5,7 @@
 ## 分层结构
 
 ```
-原始算子层      third_party/aiter/        # 独立子仓，仅维护者审阅，不进 git、不给 Agent
+原始算子层      third_party/aiter/        # git submodule，仅维护者审阅，不给 Agent
        │
 来源审核层      operator_catalog.yaml      # 全量算子登记
                benchmark/sources/         # 准入审核记录：commit、LICENSE、依赖、证据哈希
@@ -23,7 +23,7 @@
 
 | 目录 | 内容 | 可见范围 |
 |---|---|---|
-| `third_party/aiter/` | 原始算子源码快照（独立 git 仓） | 仅维护者，不进 git |
+| `third_party/aiter/` | 原始算子源码快照（git submodule 注册，不 vendor 源码） | 仅维护者 |
 | `operator_catalog.yaml` | 算子登记：来源、语言、核心计算位置、准入状态 | 维护者 |
 | `benchmark/sources/` | 准入审核记录（commit / LICENSE / 依赖 / 证据哈希） | 维护者 |
 | `benchmark/tasks/<id>/` | 任务规格、参考实现、公开案例、Starter 工程 | **Agent 可见** |

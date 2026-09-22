@@ -21,7 +21,7 @@
 | `benchmark/private/` | ✅ | 隐藏案例与基线，**仅评测端使用** |
 | `benchmark/sources/` | ✅ | 准入审核记录 |
 | `benchmark/evaluator/` | ✅ | 评测管线脚本 |
-| `third_party/` | ❌ | 外部仓库快照（aiter 等），不进 git |
+| `third_party/` | submodule | 外部仓库（aiter 等）以 git submodule 注册，**不 vendor 源码**；勿 `git add -f` 子仓内容 |
 | `operator_catalog.yaml` | ✅ | 全量算子登记与准入状态 |
 | `environment.yaml` | ✅ | 硬件/软件版本锁定 |
 

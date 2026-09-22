@@ -1,5 +1,5 @@
-# 第三方源码快照不进 git（aiter 等，独立仓库单独管理）
-third_party/
+# third_party/ 下的外部仓库以 git submodule 注册（只记 URL + commit，不 vendor 源码）。
+# 不要 git add -f 强制把 submodule 内容加进本仓库。
 
 # Python
 __pycache__/
