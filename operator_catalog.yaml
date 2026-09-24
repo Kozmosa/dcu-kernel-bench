@@ -29,18 +29,18 @@ operators:
 
   # ---- 示例：候选（aiter 强项，attention/moe 子集的预期成员） ----
   - id: "1001_paged_attention"
-    name: paged_attention
+    name: paged_attention_decode
     family: attention
     source:
       repo: OpenDAS/aiter
-      commit: ""
-      path: "csrc/attention.c / aiter/ops/attention.py"   # TODO: 审核时确认
-    impl_lang: hip
-    core_compute: ""
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/pa_decode.py"
+    impl_lang: triton
+    core_compute: "pa_decode.py: _paged_attn_decode_v1_wo_dot_kernel / _paged_attn_decode_v1_w_dot_kernel（在线 softmax + tl.dot，纯 Triton，无外部库）"
     external_calls: []
-    status: candidate
+    status: admitted
     difficulty: hard
-    note: "DCU 特色算子集主菜之一"
+    note: "2026-09-25 首次准入。取 Triton decode 路径（v1，max_seq_len<=8192，fp16/bf16 非量化，无 ALiBi/滑窗）；module_pa（vLLM v1/v2 HIP）不在 JIT 构建配置、依赖预编译 aiter_，已排除；chunked prefill 与 v2 flash-decoding 留作后续独立候选。审核记录见 benchmark/sources/1001_paged_attention.yaml"
 
   - id: "1002_fused_add_rmsnorm_rope"
     name: fused_add_rmsnorm_rope

@@ -1,0 +1,42 @@
+{
+  "task_id": "1001_paged_attention",
+  "cases": [
+    {
+      "name": "small_mha_f16",
+      "num_seqs": 4,
+      "num_q_heads": 8,
+      "num_kv_heads": 8,
+      "head_size": 64,
+      "block_size": 16,
+      "max_seq_len": 256,
+      "dtype": "float16",
+      "seed": 0
+    },
+    {
+      "name": "gqa_f16",
+      "num_seqs": 8,
+      "num_q_heads": 32,
+      "num_kv_heads": 8,
+      "head_size": 128,
+      "block_size": 32,
+      "max_seq_len": 512,
+      "dtype": "float16",
+      "seed": 1
+    },
+    {
+      "name": "edge_short_bf16",
+      "num_seqs": 2,
+      "num_q_heads": 2,
+      "num_kv_heads": 1,
+      "head_size": 64,
+      "block_size": 16,
+      "max_seq_len": 17,
+      "dtype": "bfloat16",
+      "seed": 2,
+      "seq_lens": [
+        1,
+        17
+      ]
+    }
+  ]
+}

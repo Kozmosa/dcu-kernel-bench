@@ -1,0 +1,7 @@
+{
+  "task_id": "1001_paged_attention",
+  "status": "placeholder",
+  "note": "在 DCU 真机上用 environment.yaml 锁定环境测量 aiter paged_attention_decode（pa_decode.py v1 路径）基线后填写；不得用 module_pa/预编译 aiter_ 路径替代（见 sources/1001_paged_attention.yaml 的排除说明）。",
+  "environment": null,
+  "baselines": []
+}

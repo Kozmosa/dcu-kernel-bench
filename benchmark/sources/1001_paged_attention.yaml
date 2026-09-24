@@ -1,0 +1,40 @@
+task_id: "1001_paged_attention"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/pa_decode.py
+      sha256: 02bc511ba88a6faef06aa4cd6f348adf0ae8c23a81e18122dada5b399be34bf7
+      role: device_kernel   # 纯 Triton kernel + host launch，核心计算全部在本文件
+    - path: op_tests/triton_tests/test_pa_decode.py
+      sha256: 57d236538f9668b59afeb6f8d5d8aa3d38c5b89ad75a14ea21e6e2d8cfbf8361
+      role: test            # 官方正确性测试 + naive 参考实现 + 输入构造
+    - path: op_tests/op_benchmarks/triton/bench_pa_decode.py
+      sha256: 61eae9e8f6e79fc4fb30c6ec17d71453f2355bc18f865221a3bddf3ee152ca66
+      role: test            # 官方性能基准脚本（性能 case 设计依据）
+    - path: LICENSE
+      sha256: 844e3a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "Codex（首次准入执行 agent）"
+  date: "2026-09-25"
+  note: >
+    准入对象为 aiter 的 Triton decode 路径：paged_attention_decode / paged_attn_decode_v1
+    （aiter/ops/triton/pa_decode.py，2294 行，核心计算在 _paged_attn_decode_v1_wo_dot_kernel
+    与 _paged_attn_decode_v1_w_dot_kernel，在线 softmax + tl.dot，无任何外部库调用，
+    仅依赖 triton/torch 运行时）。
+    审核排除说明：aiter 另有两条 paged attention 路径——(1) ops/attention.py 的
+    module_pa / module_pa_ragged（vLLM v1/v2 HIP kernel），经查不在
+    aiter/jit/optCompilerConfig.json 构建配置中，依赖预编译 aiter_ 扩展，不可独立复现，
+    不符合准入标准；(2) chunked_pa_prefill.py（Triton prefill）语义不同，留作独立候选。
+    任务范围界定：单 token decode、MHA + GQA、fp16/bf16 非量化 KV、无 ALiBi /
+    滑窗 / blocksparse、max_seq_len <= 8192（v1 调度域）；v2 flash-decoding 与
+    fp8/int8 量化变体留作后续独立任务。

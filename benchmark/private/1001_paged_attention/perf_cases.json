@@ -1,0 +1,9 @@
+{
+  "task_id": "1001_paged_attention",
+  "cases": [
+    {"name": "perf_b128_h32kv8_d128_bs32_l4096_f16", "num_seqs": 128, "num_q_heads": 32, "num_kv_heads": 8, "head_size": 128, "block_size": 32, "max_seq_len": 4096, "dtype": "float16", "seed": 201, "seq_lens": [4096]},
+    {"name": "perf_b256_h32kv8_d128_bs32_l2048_f16", "num_seqs": 256, "num_q_heads": 32, "num_kv_heads": 8, "head_size": 128, "block_size": 32, "max_seq_len": 2048, "dtype": "float16", "seed": 202, "seq_lens": [2048]},
+    {"name": "perf_b64_h16kv16_d128_bs32_l8192_bf16", "num_seqs": 64, "num_q_heads": 16, "num_kv_heads": 16, "head_size": 128, "block_size": 32, "max_seq_len": 8192, "dtype": "bfloat16", "seed": 203, "seq_lens": [8192]}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

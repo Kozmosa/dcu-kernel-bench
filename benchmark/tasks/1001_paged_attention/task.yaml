@@ -1,0 +1,66 @@
+id: "1001_paged_attention"
+name: paged_attention_decode
+family: attention
+impl_lang: triton
+difficulty: hard
+
+description: >
+  Decode 阶段（单 token query）的 paged attention，支持 MHA 与 GQA。
+  KV Cache 以固定 block_size 分页存放于物理块池 key_cache / value_cache，
+  每个序列通过 block_tables 中的物理块编号间接寻址；每个序列实际参与
+  attention 的 KV 长度由 seq_lens[s] 给出，物理块池中其余槽位为垃圾数据，
+  不得参与计算。对每个序列 s 的第 h 个 query head（其 KV head 为
+  h // query_group_size）：
+    logits[l] = scale * <query[s,h,:], key_cache[bt[s,l//bs], h_kv, l%bs, :]>
+    p = softmax(logits[0:seq_lens[s]])
+    out[s,h,:] = sum_l p[l] * value_cache[bt[s,l//bs], h_kv, l%bs, :]
+  softmax 采用在线（数值稳定）实现，中间累加为 float32，输出 cast 回输入
+  dtype。语义唯一依据：reference.py（float32 计算）。
+  本题范围：单 token decode、fp16/bf16 非量化 KV、无 ALiBi、无滑窗、
+  max_seq_len <= 8192。
+
+io:
+  inputs:
+    - {name: query,      dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [num_seqs, num_q_heads, head_size]}
+    - {name: key_cache,   dtype: same_as_query,      layout: contiguous, ndim: 4, shape: [num_blocks, num_kv_heads, block_size, head_size]}
+    - {name: value_cache, dtype: same_as_query,      layout: contiguous, ndim: 4, shape: [num_blocks, num_kv_heads, block_size, head_size]}
+    - {name: block_tables, dtype: int32,             layout: contiguous, ndim: 2, shape: [num_seqs, max_blocks_per_seq]}
+    - {name: seq_lens,    dtype: int32,              layout: contiguous, ndim: 1, shape: [num_seqs]}
+    - {name: scale,       dtype: float64,            layout: scalar}
+  outputs:
+    - {name: out, dtype: same_as_query, layout: contiguous, ndim: 3, shape: [num_seqs, num_q_heads, head_size]}
+
+shape:
+  num_seqs:        {min: 1, max: 256}
+  num_kv_heads:    {min: 1, max: 32}
+  query_group_size: {min: 1, max: 16}    # num_q_heads = num_kv_heads * query_group_size，必须整除
+  head_size:       {min: 32, max: 128}   # 非 2 次幂（如 96）也必须支持
+  block_size:      {min: 1, max: 512}    # 以 KB_BLK_SZ 为编译期常数，逐块掩码
+  max_seq_len:     {min: 1, max: 8192}
+  dynamic: true
+  invariants:
+    - "num_q_heads == num_kv_heads * query_group_size"
+    - "block_tables[s, ceil(seq_lens[s]/block_size)] 为该序列全部有效物理块"
+    - "物理块池 num_blocks 可大于实际使用块数；未引用槽位内容不定"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+
+# static_audit.py 强制执行：提交代码中出现以下符号即判违规
+# 核心计算（QK^T / softmax / PV）必须在提交的 Triton kernel 内完成
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+
+source:
+  repo: OpenDAS/aiter
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  path: aiter/ops/triton/pa_decode.py   # 仅维护者溯源用；Agent 上下文中不得出现
