@@ -1,0 +1,34 @@
+[project]
+name = "dcu-kernel-bench"
+version = "0.1.0"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.5.3",
+    "torch>=2.14.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pyyaml>=6.0.3",
+]
+
+# torch 固定走 PyTorch 官方 CPU 轮子源：本仓库在开发机上只做
+# reference/评测逻辑的 CPU 验证；DCU 真机环境见 environment.yaml。
+# explicit = true：该源只服务 torch，numpy 等仍走默认 PyPI，避免索引混淆。
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+# 只跑本仓库自身的测试；third_party/aiter 子模块的测试需要 DCU/ROCm 环境，
+# 由其自己的 CI 负责，绝不在此收集。
+testpaths = ["tests"]
+norecursedirs = [".git", ".venv", "third_party", "build", "benchmark/private"]

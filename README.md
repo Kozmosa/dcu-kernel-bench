@@ -43,3 +43,20 @@
 静态审计 → 编译 → 公开 Case → 隐藏 Case → 边界 Case → 性能计时（预热 + 重复取中位数）。任一隐藏正确性 Case 失败则不进入性能评分。核心指标：Compile Rate / Correctness / Speedup（对 aiter 官方实现）。
 
 详见各目录下的 README 与 [AGENTS.md](AGENTS.md)。
+
+## 本地开发环境（uv）
+
+本仓库用 [uv](https://docs.astral.sh/uv/) 管理 Python 开发环境（`pyproject.toml` + `uv.lock`）：
+
+```bash
+uv sync        # 创建 .venv 并按 lockfile 精确复现依赖
+uv run pytest  # 运行本仓库测试（reference 语义 / case 一致性 / 静态审计回归）
+```
+
+- `torch` 固定来自 PyTorch 官方 **CPU 轮子源**（见 `pyproject.toml` 的
+  `[[tool.uv.index]]`，`explicit = true` 只对 torch 生效）——开发机上只做
+  reference 与评测逻辑验证，不拉 CUDA/DCU 巨型依赖。
+- DCU 真机（gfx936/gfx938）运行环境仍以 `environment.yaml` 锁定为准
+  （DTK ≥ 25.04、DTK 版 PyTorch/Triton）；`uv` 环境不用于性能评测。
+- `tests/` 只覆盖本仓库自身资产；`third_party/aiter` 子模块的测试需要
+  ROCm/DCU 环境，已在 pytest 配置中显式排除，不会被收集。

@@ -15,3 +15,6 @@ build/
 # 评测输出
 benchmark/evaluator/results/
 *.log
+
+# uv 虚拟环境
+.venv/
