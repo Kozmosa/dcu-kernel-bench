@@ -42,12 +42,46 @@ def load_task_forbidden(task_dir: Path) -> list[str]:
     return forbidden
 
 
+def _strip_python_docstrings(text: str) -> str:
+    """用 ast 定位并整行清空 docstring（module/class/function 首个字符串常量）。
+
+    model_class 任务的题面 docstring 会逐字列出 forbidden 禁用项，属于规则
+    声明而非调用；不清空会导致所有框架生成候选被误杀。清空保留行号。
+    """
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    spans: list[tuple[int, int]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = node.body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            spans.append((body[0].lineno, body[0].end_lineno))
+    lines = text.splitlines(keepends=True)
+    for lo, hi in spans:
+        for i in range(lo - 1, min(hi, len(lines))):
+            lines[i] = "\n" if lines[i].endswith("\n") else ""
+    return "".join(lines)
+
+
 def audit_file(path: Path, patterns: list[str]) -> list[dict]:
     text = path.read_text(encoding="utf-8", errors="replace")
-    # 去掉注释，减少注释里提到库名造成的误报
-    text = re.sub(r"//[^\n]*", "", text)
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-    text = re.sub(r"#[^\n]*", "", text) if path.suffix == ".py" else text
+    # 去掉注释与 docstring，减少文档性内容提到库名造成的误报
+    if path.suffix == ".py":
+        text = _strip_python_docstrings(text)
+        text = re.sub(r"#[^\n]*", "", text)
+    else:
+        text = re.sub(r"//[^\n]*", "", text)
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
     hits = []
     for pat in patterns:
         for m in re.finditer(re.escape(pat), text, flags=re.I):

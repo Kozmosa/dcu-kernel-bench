@@ -43,6 +43,20 @@ def test_compat_mirror_in_sync():
     )
 
 
+def test_private_assets_inherit_valid():
+    priv = REPO / "benchmark" / "private" / "1002_paged_attention"
+    for kind in ("hidden", "perf"):
+        data = json.loads((priv / f"{kind}_cases.json").read_text(encoding="utf-8"))
+        assert data["inherit"] == "1001_paged_attention"
+        # 继承目标必须真实存在且为非 inherit 的实体资产
+        target = REPO / "benchmark" / "private" / data["inherit"] / f"{kind}_cases.json"
+        target_data = json.loads(target.read_text(encoding="utf-8"))
+        assert "cases" in target_data and "inherit" not in target_data
+    # 终审工具与来源记录在位
+    assert (REPO / "benchmark" / "evaluator" / "audit_model_class.py").exists()
+    assert (REPO / "benchmark" / "sources" / "1002_paged_attention.yaml").exists()
+
+
 def test_loader_builds_model_class_scaffold():
     spec = _load_task_spec()
     assert spec.function_name == "ModelNew"

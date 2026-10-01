@@ -34,3 +34,30 @@ def test_commented_lib_is_not_flagged(tmp_path: Path):
     ok.write_text("# 我们不用 rocblas\nvalue = 1\n", encoding="utf-8")
     r = run_audit("1001_paged_attention", [ok])
     assert r.returncode == 0, r.stdout
+
+
+def test_docstring_mentioning_forbidden_is_not_flagged(tmp_path: Path):
+    # model_class scaffold 的 docstring 逐字列出禁用项（规则声明），不得误杀
+    src = tmp_path / "scaffold_like.py"
+    src.write_text(
+        'class ModelNew:\n'
+        '    """约束：禁止调用 torch.matmul / torch.einsum / aiter。"""\n'
+        "    def forward(self, x):\n"
+        "        return x + 1\n",
+        encoding="utf-8",
+    )
+    r = run_audit("1002_paged_attention", [src])
+    assert r.returncode == 0, r.stdout
+
+
+def test_real_call_inside_docstringed_file_still_flagged(tmp_path: Path):
+    src = tmp_path / "mixed.py"
+    src.write_text(
+        '"""docstring 提到 torch.matmul 仅说明规则"""\n'
+        "def f(x, y):\n"
+        "    return torch.matmul(x, y)\n",
+        encoding="utf-8",
+    )
+    r = run_audit("1002_paged_attention", [src])
+    assert r.returncode == 1
+    assert "torch.matmul" in r.stdout

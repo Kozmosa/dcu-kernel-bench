@@ -1,0 +1,5 @@
+{
+  "task_id": "1002_paged_attention",
+  "inherit": "1001_paged_attention",
+  "note": "性能 case 复用 1001；生成器 tasks/1001_paged_attention/reference.py::make_inputs"
+}

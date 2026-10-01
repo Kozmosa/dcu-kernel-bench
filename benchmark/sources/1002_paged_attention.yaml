@@ -1,0 +1,32 @@
+task_id: "1002_paged_attention"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/pa_decode.py
+      sha256: 02bc511ba88a6faef06aa4cd6f348adf0ae8c23a81e18122dada5b399be34bf7
+      role: device_kernel   # 与 1001 同源；本题为其 model_class 变体
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  derived_from: "1001_paged_attention"   # 题面语义与准入证据完全继承
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "Codex（变体准入执行 agent）"
+  date: "2026-10-01"
+  note: >
+    1001 的 model_class（KernelBench 兼容）变体：算子语义、来源、commit 与 1001
+    完全一致（同 aiter pa_decode.py v1 Triton decode 路径），形态改为自包含题目
+    文件（Model/get_inputs/get_init_inputs），走 PyramidKernel 原生 model_class
+    路径，零框架改动。与 1001 的输出等价性由 tests/test_1002_model_class.py 保证
+    （相同输入逐位相等）。case 资产经 private/1002 以 inherit 复用 1001。
+    首个真 LLM 端到端（GLM-5.3-flash，2026-10-01，BW/gfx936）：correct，
+    204 us，对 PyTorch eager speedup 17.35x，离线终审见
+    benchmark/evaluator/audit_model_class.py。

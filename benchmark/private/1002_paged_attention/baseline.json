@@ -1,0 +1,17 @@
+{
+  "task_id": "1002_paged_attention",
+  "status": "placeholder",
+  "note": "aiter 基线与 1001 共用，待 DCU 真机构建 aiter 后测量（不得用 module_pa/预编译 aiter_ 路径，见 sources/1001_paged_attention.yaml）。measured_context 为同机信息性参考，口径为题目文件 get_inputs 的固定 shape 族（8/32/8/64/bs16/1024/fp16），非 perf_cases 口径，不作为正式基线。",
+  "environment": null,
+  "measured_context": {
+    "date": "2026-10-01",
+    "device": "HCU BW (gfx936), 64G",
+    "dtk": "26.04",
+    "torch": "2.9.0+das.opt1.dtk2604",
+    "triton": "3.3.0+das.opt1.dtk2604.torch290",
+    "eager_reference_us": 3880,
+    "human_triton_kernel_us": 382,
+    "glm_5_3_flash_triton_kernel_us": 204
+  },
+  "baselines": []
+}
