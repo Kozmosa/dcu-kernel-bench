@@ -4,19 +4,15 @@
 
 ## 分层结构
 
-```
-原始算子层      third_party/aiter/        # git submodule，仅维护者审阅，不给 Agent
-       │
-来源审核层      operator_catalog.yaml      # 全量算子登记
-               benchmark/sources/         # 准入审核记录：commit、LICENSE、依赖、证据哈希
-       │
-任务定义层      benchmark/tasks/<id>/      # Agent 可见：task.yaml / reference.py /
-               │                          # public_cases.json / starter/
-       │       ┌────────────────┐
-参考验证层     reference.py + 公开案例      Agent 生成层   evaluator/generate.py
-               │                          静态审计        evaluator/static_audit.py
-       └───────┴───────────────┘
-统一 Runtime 评测层  benchmark/evaluator/   # hipcc 编译、正确性、稳定性、性能计时
+```mermaid
+flowchart TB
+    raw["原始算子层<br />third_party/aiter/<br />git submodule，仅维护者审阅，不给 Agent"] --> review["来源审核层<br />operator_catalog.yaml（全量算子登记）<br />benchmark/sources/（commit、LICENSE、依赖、证据哈希）"]
+    review --> tasks["任务定义层（Agent 可见）<br />benchmark/tasks/&lt;id&gt;/<br />task.yaml / reference.py / public_cases.json / starter/"]
+    tasks --> validation["参考验证层<br />reference.py + 公开案例"]
+    tasks --> generation["Agent 生成层<br />evaluator/generate.py"]
+    generation --> audit["静态审计<br />evaluator/static_audit.py"]
+    validation --> runtime["统一 Runtime 评测层<br />benchmark/evaluator/<br />hipcc 编译、正确性、稳定性、性能计时"]
+    audit --> runtime
 ```
 
 ## 目录说明
