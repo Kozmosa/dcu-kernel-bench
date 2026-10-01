@@ -5,6 +5,7 @@
 #   name / family : 算子名与家族（elementwise / reduce / norm / gemm / attention / moe / quant / ...）
 #   source        : 来源仓库、commit、相对路径
 #   impl_lang     : hip | triton（aiter 中同一算子可能两套实现，可分别登记两题）
+#   entry         : callable（缺省，函数式 starter）| model_class（KernelBench 兼容形态）
 #   core_compute  : 核心计算实际所在的文件与语言，准入审核的关键证据
 #   external_calls: 实现中调用的外部库（rocblas / miopen / ck / ...），含闭源库调用的不得准入
 #   status        : candidate | admitted | rejected
@@ -42,7 +43,22 @@ operators:
     difficulty: hard
     note: "2026-09-25 首次准入。取 Triton decode 路径（v1，max_seq_len<=8192，fp16/bf16 非量化，无 ALiBi/滑窗）；module_pa（vLLM v1/v2 HIP）不在 JIT 构建配置、依赖预编译 aiter_，已排除；chunked prefill 与 v2 flash-decoding 留作后续独立候选。审核记录见 benchmark/sources/1001_paged_attention.yaml"
 
-  - id: "1002_fused_add_rmsnorm_rope"
+  - id: "1002_paged_attention"
+    name: paged_attention_decode
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/pa_decode.py"   # 与 1001 同源
+    impl_lang: triton
+    entry: model_class
+    core_compute: "与 1001 相同（pa_decode.py v1 Triton decode 路径）；本体为 1001 的 KernelBench 兼容变体"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-01 准入。1001 的 model_class 变体：题目文件 benchmark/tasks/1002_paged_attention/reference.py（自包含 Model/get_inputs/get_init_inputs），镜像到 benchmark/kernelbench_compat/level3/，走 PyramidKernel 原生路径（--level 3 --problem-id 1002），零框架改动。语义与 1001 逐行一致（tests/test_1002_model_class.py 校验输出相等）。在线评测语义为 KernelBench 的（fp32 cast + allclose 1e-4 + 全局 RNG 输入），本评测集的容差/隐藏 case/forbidden 终审标准只在线下生效，终审复用 1001 的 private/ 资产"
+
+  - id: "1003_fused_add_rmsnorm_rope"
     name: fused_add_rmsnorm_rope
     family: norm
     source:
