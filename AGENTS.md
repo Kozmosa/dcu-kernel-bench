@@ -10,28 +10,37 @@
 
 1. **源码隔离**：`third_party/aiter/` 和 `benchmark/private/` 的内容**绝不**进入给生成 Agent 的上下文。Agent 只看 `benchmark/tasks/<id>/`。
 2. **禁止绕过**：生成实现的核心计算必须在提交文件中完成，禁止调用 MIOpen / rocBLAS / hipBLASLt / hipDNN / ATen 完成核心计算（`static_audit.py` 强制检查）。
-3. **统一接口**：所有任务共用同一 Starter 结构，Agent 只补全 kernel 文件与必要的 launch 逻辑。
+3. **统一接口**：同一入口形态的任务共用同一结构——callable 任务共用 Starter（Agent 只补全 kernel 与 launch）；model_class 任务共用框架生成的 `ModelNew` scaffold（Agent 只在锚点区域内编辑）。
 4. **环境一致**：官方基线与生成实现必须在同一机器、同一 `environment.yaml` 锁定环境下比较。
 
 ## 目录结构
 
 | 目录 | 跟踪 | 用途 |
 |---|---|---|
-| `benchmark/tasks/` | ✅ | Agent 可见的任务定义（task.yaml / reference.py / public_cases.json / starter/） |
-| `benchmark/private/` | ✅ | 隐藏案例与基线，**仅评测端使用** |
+| `benchmark/tasks/` | ✅ | Agent 可见的任务定义（task.yaml / reference.py / public_cases.json；callable 形态另有 starter/） |
+| `benchmark/private/` | ✅ | 隐藏案例与基线，**仅评测端使用**（支持 `inherit` 复用同语义任务） |
 | `benchmark/sources/` | ✅ | 准入审核记录 |
-| `benchmark/evaluator/` | ✅ | 评测管线脚本 |
+| `benchmark/evaluator/` | ✅ | 评测管线脚本（static_audit.py / audit_model_class.py / run_eval.py 骨架） |
+| `benchmark/kernelbench_compat/` | ✅ | model_class 形态的框架寻题镜像树（`level{N}/<id>_*.py`，与 tasks 侧 reference.py 逐字节一致，测试强制） |
 | `third_party/` | submodule | 外部仓库（aiter 等）以 git submodule 注册，**不 vendor 源码**；勿 `git add -f` 子仓内容 |
 | `operator_catalog.yaml` | ✅ | 全量算子登记与准入状态 |
 | `environment.yaml` | ✅ | 硬件/软件版本锁定 |
 
 ## 新增一个任务的流程
 
-1. 在 `operator_catalog.yaml` 登记候选算子（来源路径、commit、impl_lang、核心计算位置）。
-2. 完成准入审核，记录写入 `benchmark/sources/<id>.yaml`（确认核心计算在可审查源码中、非闭源库包装）。
-3. 创建 `benchmark/tasks/<id>/`：编写 task.yaml（语义、dtype/shape 范围、容限、禁调用项）、reference.py（纯 PyTorch）、public_cases.json、starter。
-4. 在 `benchmark/private/<id>/` 准备隐藏案例（正确性/边界/极值/性能）与基线占位。
-5. 用 `benchmark/evaluator/run_eval.py` 在 DCU 真机上验证 reference 与基线可复现。
+**第 0 步（定形态）**：在两种入口形态里选一，并在 catalog 的 `entry` 字段登记——
+
+- `callable`（函数式，样板 1001）：题面框架无关，reference.py 提供 `reference()` + `make_inputs()`，starter 为待补全骨架。生成侧需自建 harness（loader/evaluator，尚未实现）。
+- `model_class`（KernelBench 兼容，样板 1002，**当前唯一全链路打通的形态，新任务默认**）：reference.py 为自包含题目文件（`Model` + `get_init_inputs` + `get_inputs`），无 starter——`ModelNew` scaffold 由 PyramidKernel loader 从 Model 自动生成；**Model 的 docstring 就是 Agent 可见题面全文**（语义 + 约束 + forbidden + DCU 目标），不得含 aiter 溯源与 private 路径。
+
+1. `operator_catalog.yaml` 登记（来源路径、commit、impl_lang、core_compute、entry、difficulty）。
+2. 准入审核 → `benchmark/sources/<id>.yaml`：核心计算在可审查源码中、非闭源库包装，记录文件 sha256 证据；同语义变体用 `derived_from` 引用母题（样板：1002 引用 1001）。
+3. 创建 `benchmark/tasks/<id>/`：task.yaml（语义、dtype/shape 域、**容差**、forbidden）、reference.py（按形态）、public_cases.json（callable：公开 case 列表；model_class：get_inputs 固定 shape 族契约）。
+4. model_class 形态镜像到 `benchmark/kernelbench_compat/level{N}/<id>_<name>.py`（level 映射 difficulty：basic=1 / medium=2 / hard=3），与 tasks 侧逐字节一致。
+5. `benchmark/private/<id>/`：hidden_cases.json（边界/极值/正确性）、perf_cases.json、baseline.json 占位；与已有任务同语义时用 `{"inherit": "<task_id>"}` 复用，生成器为母题的 `make_inputs`，不复制内容防漂移。
+6. 写测试进 `tests/`：产物一致性（case/catalog/sources 交叉核对）、reference 语义（独立 oracle）、model_class 另需——镜像字节一致、PyramidKernel loader 构建 scaffold 且静态守卫通过、与母题输出逐位相等、fp32 cast 生存、隔离自检（TaskSpec 全字段无 `pa_decode`/`OpenDAS`/commit/`private` 等溯源词）。
+7. 本地验证（WSL venv，见环境注意）：pytest 全绿。真机验证（部署方式见 `../notes/曙光环境访问.md`）：pytest 全绿 + quick profile mock 冒烟（全部候选过静态守卫、到达评测器、唯一失败原因为环境缺失）。
+8. 离线终审实裁：model_class 用 `benchmark/evaluator/audit_model_class.py`（静态审计 → 隐藏 case 按 task.yaml 容差 → perf 计时）在真机跑 reference 自检与首个生成产物，确认题目包与私有资产可复现。`run_eval.py` 为 callable 形态的终审骨架，其 TODO(dcu) 在该形态接入时补全。
 
 ## 当前进度：生成框架接入（2026-10-01）
 
@@ -46,8 +55,6 @@
 待办：构建 aiter 性能基线（真机装 aiter 后测，填 baseline.json）；扩大真 LLM 实验规模（多任务、多预算、与 aiter 基线对比）。
 
 真机（BW / gfx936，DTK 26.04）已验证（2026-10-01）：测试 26/26 绿；原生路径 quick 冒烟全部节点 correct（mock provider + 真评测器 + cuda_event 计时）；**Triton 3.3.0+das.opt1.dtk2604.torch290 已安装并验证 JIT**（vecadd + tl.dot fp16 矩阵乘）；**首个真 LLM 端到端完成**（GLM-5.3-flash 经 CC Switch 反向隧道，1002 任务 speedup 17.35x，含 debug 修复环路），访问与部署细节见 `../notes/曙光环境访问.md`。
-
-真机（BW / gfx936，DTK 26.04）已验证（2026-10-01）：测试 26/26 绿；原生路径 quick 冒烟全部节点 correct（mock provider + 真评测器 + cuda_event 计时）；**Triton 3.3.0+das.opt1.dtk2604.torch290 已安装并验证 JIT**（vecadd + tl.dot fp16 矩阵乘），访问与部署细节见 `../notes/曙光环境访问.md`。
 
 ## 环境注意
 
