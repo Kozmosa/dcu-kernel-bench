@@ -1,0 +1,86 @@
+id: "2004_fused_qk_concat"
+name: fused_qk_concat
+family: norm_rope_act
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  MLA 风格 QK 预处理融合算子：q/k 各自的 nope 段与 pe 段沿最后一维拼接；
+  rope 模式下先按位置索引 cos/sin 表对 pe 段做旋转位置编码（NEOX / GPTJ
+  两种旋转风格，表宽支持全宽与前半复用两档），再与 nope 段拼接写回；
+  GQA（QH 为 KH 整数倍）下 K 侧每个 KV head 只写一次。两个 __init__ 超参：
+  is_neox（旋转风格）、apply_rope（False 退化为纯拼接）。输出按 head 维
+  打包为单张量 [B, QH+KH, D_nope+D_pe]（KernelBench 评测器要求单张量
+  输出）。memory-bound 单 kernel 语义（一次读入-旋转-拼接-写回 pass，
+  无 attention 分数计算）。本题为自包含 KernelBench 题目文件
+  （reference.py 即题目文件，同时镜像到 benchmark/kernelbench_compat/
+  level2/），可直接走 PyramidKernel 原生 model_class 路径
+  （--kernelbench-root benchmark/kernelbench_compat --level 2
+  --problem-id 2004），无需任何框架改动。starter 由框架 loader 从 Model
+  自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q_nope, dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [B, QH, D_nope]}
+    - {name: q_pe,   dtype: same_as_q_nope,      layout: contiguous, ndim: 3, shape: [B, QH, D_pe]}
+    - {name: k_nope, dtype: same_as_q_nope,      layout: contiguous, ndim: 3, shape: [B, KH, D_nope]}
+    - {name: k_pe,   dtype: same_as_q_nope,      layout: contiguous, ndim: 3, shape: [B, KH, D_pe]}
+    - {name: pos,    dtype: int64,               layout: contiguous, ndim: 1, shape: [B]}
+    - {name: cos,    dtype: same_as_q_nope,      layout: contiguous, ndim: 2, shape: [max_pos, d_freq]}
+    - {name: sin,    dtype: same_as_q_nope,      layout: contiguous, ndim: 2, shape: [max_pos, d_freq]}
+  outputs:
+    - {name: out, dtype: same_as_q_nope, layout: contiguous, ndim: 3, shape: [B, "QH+KH", "D_nope+D_pe"]}
+  init_inputs:
+    - {name: is_neox,    dtype: bool, layout: scalar}   # True=NEOX 旋转 / False=GPTJ
+    - {name: apply_rope, dtype: bool, layout: scalar}   # True=rope+拼接 / False=纯拼接
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见 invariants）
+  fixed_family:
+    B: 8
+    KH: 4
+    QH_PER_KH: 4
+    QH: 16
+    D_nope: 512
+    D_pe: 64
+    d_freq: 32          # 前半复用表
+    max_pos: 1024
+    init: {is_neox: true, apply_rope: true}
+    dtype: bfloat16
+  dynamic: true
+  invariants:
+    - "QH == KH * QH_PER_KH（QH 为 KH 的整数倍，GQA）"
+    - "四张 q/k 张量 batch 维一致；q/k 的 D_nope、D_pe 各自一致"
+    - "D_pe 为偶数（NEOX/GPTJ 半宽旋转）；D_nope、D_pe 可为非 2 次幂（提交 kernel 需自行分块掩码）"
+    - "d_freq == D_pe（全宽表）或 d_freq == D_pe//2（前半复用表）"
+    - "pos[b] ∈ [0, max_pos)"
+    - "apply_rope=False 时 pos/cos/sin 被忽略（纯拼接）"
+    - "nope 段与纯拼接模式的 pe 段为原样拷贝，须逐位一致"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 回输入 dtype 再比较；nope 段与纯拼接模式的 pe 段为纯拷贝，须逐位一致"
+  note: >
+    本评测集标准容差。rope 段为 x*cos+rotate_half(x)*sin 的两次乘加，
+    bf16 逐算子舍入与 fp32 中间计算的最大偏差实测 1 ulp(≈0.016，
+    randn 输入量级)，2e-2 裕量充足。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）。
+# 本题与 attention/gemm/softmax 无关（无矩阵乘、无归一化），标准列表
+# 裁剪后仅保留来源库首项；另加本题的 ATen 捷径：torch.cat /
+# torch.concat（拼接即核心计算，含张量方法 .cat 形态）与
+# index_select（cos/sin 按位置索引属 kernel 内职责）。
+forbidden:
+  - aiter
+  - torch.cat
+  - torch.concat
+  - .cat(
+  - index_select
+
+# 来源仓库、commit 与文件 sha256 等准入证据统一记录在
+# benchmark/sources/2004_fused_qk_concat.yaml（题面文件不内嵌溯源块）。

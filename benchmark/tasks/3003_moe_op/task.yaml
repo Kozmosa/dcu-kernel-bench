@@ -1,0 +1,81 @@
+id: "3003_moe_op"
+name: moe_routed_grouped_gemm
+family: moe
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  MoE（Mixture-of-Experts）路由 grouped GEMM 本体（非量化权重、含路由加权）：
+  每个token按 top-k 路由到 num_experts 个专家之一，各自做一次 GEMM 后乘以
+  路由权重写出，C[m,j,:] = topk_weights[m,j] * A[m] @ B[topk_ids[m,j]].T；
+  输入同时携带块对齐的 grouped GEMM 取数布局（sorted_token_ids /
+  expert_ids / num_tokens_post_padded，block_m=64），Agent 的 Triton kernel
+  需按该布局实现 grouped GEMM（等价于按 topk 语义直接计算）。float32 中间
+  累加，输出 cast 回输入 dtype。自包含题目文件（Model/get_inputs/
+  get_init_inputs），走 PyramidKernel 原生 model_class 路径
+  （--kernelbench-root benchmark/kernelbench_compat --level 3
+  --problem-id 3003）；starter 由框架 loader 从 Model 自动生成 ModelNew
+  scaffold，本任务包不单独提供 starter。
+  本题范围（moe_op 家族基础文件的子集）：非量化 fp16/bf16、含 mul_routed_
+  weight 路由加权；fp8/int8 w8a8、int4 gptq-awq（w4a16/w4a8/channelwise）、
+  splitk/persistent 调度变体、silu/gelu 激活融合、mxfp4、e2e 单 kernel
+  变体均留作后续题。
+
+io:
+  inputs:
+    - {name: A,                       dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [num_tokens, in_features]}
+    - {name: B,                       dtype: same_as_a,           layout: contiguous, ndim: 3, shape: [num_experts, out_features, in_features]}
+    - {name: topk_weights,            dtype: float32,             layout: contiguous, ndim: 2, shape: [num_tokens, top_k]}
+    - {name: topk_ids,                dtype: int32,               layout: contiguous, ndim: 2, shape: [num_tokens, top_k]}
+    - {name: sorted_token_ids,        dtype: int32,               layout: contiguous, ndim: 1, shape: [num_tokens*top_k + num_experts*(block_m-1)]}
+    - {name: expert_ids,              dtype: int32,               layout: contiguous, ndim: 1, shape: [num_tokens*top_k + num_experts]}
+    - {name: num_tokens_post_padded,  dtype: int32,               layout: contiguous, ndim: 1, shape: [1]}
+  outputs:
+    - {name: C, dtype: same_as_a, layout: contiguous, ndim: 3, shape: [num_tokens, top_k, out_features]}
+  init_inputs:
+    - {name: num_experts, dtype: int64, layout: scalar}
+    - {name: top_k,       dtype: int64, layout: scalar}
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {num_tokens: 64, num_experts: 16, top_k: 4, in_features: 512, out_features: 256, block_m: 64}
+  dynamic: true
+  num_tokens:    {min: 1, max: 4096}
+  num_experts:   {min: 1, max: 256}
+  top_k:         {min: 1, max: 8}        # top_k <= num_experts；top_k == num_experts（全专家命中）也必须支持
+  in_features:   {min: 64, max: 7168}    # 非 2 次幂（如 320）也必须支持
+  out_features:  {min: 64, max: 7168}    # 非 2 次幂（如 192）也必须支持
+  block_m: 64                             # sorted 布局块对齐粒度，本题恒定
+  invariants:
+    - "topk_ids[m, j] ∈ [0, num_experts)，且每行内无重复专家"
+    - "sorted_token_ids 为槽位 p=m*top_k+j 按专家升序的重排；每组补齐到 block_m 整数倍，padding 与尾部填哨兵 M*top_k"
+    - "expert_ids[t] 为第 t 块的专家编号（[0, num_experts)）；超出有效块数的尾部为哨兵填充，不得读取"
+    - "num_tokens_post_padded 为 sorted_token_ids 有效长度，恒为 block_m 整数倍"
+    - "kernel 的 BLOCK_SIZE_M 必须整除 block_m（64 的因子）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# static_audit.py 强制执行：提交代码中出现以下符号即判违规
+# 核心计算（grouped GEMM + 路由加权）必须在提交的 Triton kernel 内完成
+forbidden:
+  - aiter
+  - torch.matmul
+  - torch.mm
+  - torch.bmm
+  - torch.baddbmm
+  - torch.addmm
+  - torch.einsum
+  - torch.nn.functional.linear
+
+source:
+  # 完整溯源（repo / commit / path / sha256 / 准入记录）统一维护在
+  # benchmark/sources/3003_moe_op.yaml；题面包文件不内联溯源串
+  record: benchmark/sources/3003_moe_op.yaml

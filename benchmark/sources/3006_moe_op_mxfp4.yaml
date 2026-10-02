@@ -1,0 +1,44 @@
+task_id: "3006_moe_op_mxfp4"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/moe_op_mxfp4.py
+      sha256: e0edcdf6436e8d42f34058324063121daf5441a68995ab6784586cabbb40367e
+      role: device_kernel   # _fused_moe_kernel_mxfp4：mxfp4 打包 A/B × e8m0 块 scale 的 MoE grouped GEMM 主计算在 Triton kernel 内
+    - path: op_tests/triton_tests/test_moe_mx.py
+      sha256: 9a9aeb0bb009a206053561430e77ed5b590352177dd19c2c03952926c87056b6
+      role: official_test   # torch_dynamic_mxfp4_quant + torch_mxfp4_to_fp32 + torch_moe_ref 为语义唯一权威
+
+admission:
+  core_compute_in_source: true    # nibble 解包、e8m0 解码、tl.dot_scaled 分组 GEMM、路由权重乘全在 kernel 内（依赖仅 pid_preprocessing/moe_common 纯 Triton 工具）
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试参考链（量化→反量化→torch_moe_ref）移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：moe_op 家族的 mxfp4 权重变体，且取官方测试唯一实际启用的
+    (a=mxfp4_e2m1, b=mxfp4_e2m1) 组合——A/B 均为 torch_dynamic_mxfp4_quant
+    产出的打包 e2m1 码字（uint8 双 nibble）+ e8m0 块 scale 字节，routed_weight
+    固定 True（乘 topk_weights），M/N/K/E/top_k 为运行参数；与相邻题
+    （moe_op 的 bf16/fp8/int4 权重变体）精度互补，无重叠。输入契约取 kernel
+    的量化后入口（A_mx_scale/B_mx_scale 路径）；moe_align_block_size 调度
+    元数据（sorted_token_ids/expert_ids/num_tokens_post_padded）不进题面——
+    官方 torch_moe_ref 亦不消费它们，输出语义与之无关。语义依据：官方测试
+    test_fused_moe 的参考链 quant→dequant→einsum+routed weight，并
+    assert_close(c_tri, c_ref)（bf16）。冲突处理：①官方参考 GEMM 在 bf16
+    精度（einsum 前 .to(fp16_dtype)），题面 reference 按本集规范以 float32
+    中间计算——差异由 bf16 舍入主导（构建自检实测最大相对偏差 ~0.5%，
+    含 K=16384 case），官方默认容差与本集 2e-2 均覆盖，以测试为准不成立
+    实质冲突；②官方 e8m0 解码的 ==128→nan 分支在本题数据分布下不可达
+    （randn 值域 scale 字节实测 ∈ [125,127]，远离 134/255），不影响语义。
+    官方测试在非 gfx946 架构 skip——但其参考计算无 GPU 依赖，CPU 化移植
+    可行（已实测逐位等价），本题照常出题。留作后续题：a 侧 bf16/fp16/
+    fp8_e5m2 激活（软件模拟路径，bench_moe_mx.py 已支持但官方测试未启用）、
+    routed_weight=False、swizzle_mx_scale 打包 scale 布局、int4_w4a16/fp8
+    路径（归 moe_op 相邻题）。case 由题目文件内 make_inputs(**case) 确定性
+    生成（torch.Generator(seed)，消费顺序 a_raw → b_raw → values）。

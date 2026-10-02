@@ -1,0 +1,33 @@
+task_id: "4007_gemm_a16w16_atomic"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/gemm_a16w16_atomic.py
+      sha256: 23db984d3b8368b498cf9022ea3518b596dc038a72dd5b059f7677023d797605
+      role: device_kernel   # 核心 Triton kernel：_gemm_a16_w16_atomic_kernel
+    - path: op_tests/triton_tests/test_gemm_a16w16.py
+      sha256: 97c6d57874167ffe0784ff1f259277cf5f8d6c6e0d296a85b8ba4a85cdceb252
+      role: official_test   # test_gemm_a16_w16_atomic：Y 与 F.linear(x, w) 对比，atol=rtol=1e-1
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    语义依据为官方测试 test_gemm_a16_w16_atomic：Y = X @ W^T（x [M,K] 与
+    weight [N,K] 行主 TN，fp16/bf16），分片 float32 累加经 tl.atomic_add
+    合并写回；官方测试将累加输出置为 fp32 再整体 cast 回输入 dtype，源码
+    注释自认 bf16 直接原子累加有精度损失，故题面语义取"float32 累加一次、
+    输出单次 dtype 收缩"。题面子集：无 bias、单输出张量、M/N/K 任意正整数
+    （含 1 与非 2 次幂，K 不要求分块对齐）。官方测试中的非 atomic
+    gemm_a16w16 路径、output=True/False 显式传入输出张量、非 TN layout
+    变体不在本题范围，留作后续题。参考实现以 float32 一次性累加等价替代
+    split-K 原子合并，与官方参考 F.linear 在容差内一致；split-K 分片数与
+    并行策略由提交实现自行决定，以输出容差判定。

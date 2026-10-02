@@ -1,0 +1,71 @@
+id: "1019_mha_onekernel_bwd"
+name: mha_onekernel_bwd
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  FlashAttention 反向 one-kernel 实现的自包含 KernelBench 题目文件
+  （reference.py 即题目文件，同时镜像到 benchmark/kernelbench_compat/level3/），
+  可直接走 PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 3 --problem-id 1019）。给定前向输出 o
+  与逐行 log-sum-exp 统计量 lse，由 (q, k, v, o, lse, do) 计算梯度
+  (dq, dk, dv)：dK/dV 与 dQ 在同一 kernel 内完成（先 dK/dV 后 dQ）。支持
+  MHA/GQA（num_q_heads 为 num_kv_heads 整数倍）、右下对齐因果掩码
+  （causal=1，query i 只 attend key j <= i + seqlen_k - seqlen_q，含
+  seqlen_q > seqlen_k 时的全掩码行：p/ds 恒 0）、causal=0 无掩码、
+  delta 由给定 o 计算、float32 中间累加、输出 cast 回输入 dtype。
+  题面不含 varlen、dropout、ALiBi/bias、fp8。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q,   dtype: [float16, bfloat16], layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
+    - {name: k,   dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
+    - {name: v,   dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
+    - {name: o,   dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim], note: "前向输出（全掩码行为 0），供 delta 与语义自洽使用"}
+    - {name: lse, dtype: float32,             layout: contiguous, ndim: 3, shape: [batch, num_q_heads, seqlen_q], note: "缩放后得分的自然对数 log-sum-exp；全掩码行为 0"}
+    - {name: do,  dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
+  outputs:
+    - {name: dq, dtype: same_as_q, layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
+    - {name: dk, dtype: same_as_q, layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
+    - {name: dv, dtype: same_as_q, layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
+  init_inputs:
+    - {name: head_dim, dtype: int64, layout: scalar}   # sm_scale 缺省 1/sqrt(head_dim)
+    - {name: causal,   dtype: int64, layout: scalar, note: "1=右下对齐因果掩码（causal kernel），0=无掩码（noncausal kernel）"}
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；hidden/perf case 覆盖全域）
+  fixed_family: {batch: 2, num_kv_heads: 2, query_group_size: 4, num_q_heads: 8, head_dim: 64, seqlen_q: 128, seqlen_k: 128, causal: 1, dtype: float16}
+  dynamic: true
+  invariants:
+    - "num_q_heads 是 num_kv_heads 的整数倍（相等即 MHA，否则 GQA）"
+    - "1 <= head_dim <= 256（可非 2 次幂）"
+    - "1 <= seqlen_q, seqlen_k；seqlen_q 与 seqlen_k 大小关系任意"
+    - "o 与 lse 是 (q, k, v) 的自洽前向统计量（全掩码行 o=0、lse=0，题面生成器保证）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较；dq/dk/dv 三个输出均需在容差内"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+  - torch.autograd        # 反向题：autograd.grad / .backward( 自动微分捷径一并判负
+
+# 溯源信息（仓库名、版本号、算子文件路径）与准入记录仅保留在维护者侧的
+# benchmark/sources/1019_mha_onekernel_bwd.yaml；本文件为题面契约，不含溯源词。

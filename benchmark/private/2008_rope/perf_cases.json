@@ -1,0 +1,9 @@
+{
+  "task_id": "2008_rope",
+  "cases": [
+    {"name": "perf_s2048_b4_h32_d128_full_neox_f16",     "s": 2048, "b": 4, "h": 32, "d": 128, "rotary_percent": 1.0, "rotate_style": 0, "nope_first": false, "reuse_freqs_front_part": false, "dtype": "float16",  "seed": 201},
+    {"name": "perf_s4096_b8_h32_d128_full_neox_f16",     "s": 4096, "b": 8, "h": 32, "d": 128, "rotary_percent": 1.0, "rotate_style": 0, "nope_first": false, "reuse_freqs_front_part": false, "dtype": "float16",  "seed": 202},
+    {"name": "perf_s4096_b4_h64_d128_partial_gptj_bf16", "s": 4096, "b": 4, "h": 64, "d": 128, "rotary_percent": 0.5, "rotate_style": 1, "nope_first": true,  "reuse_freqs_front_part": false, "dtype": "bfloat16", "seed": 203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

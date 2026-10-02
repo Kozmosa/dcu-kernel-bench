@@ -1,0 +1,11 @@
+{
+  "task_id": "3002_moe_align_block_size",
+  "cases": [
+    {"name": "hidden_min_m1_e2_k1_bs16",     "num_tokens": 1,   "num_experts": 2,   "top_k": 1,  "block_size": 16,  "ids_dtype": "int64", "dist": "topk",    "seed": 302},
+    {"name": "hidden_empty_dup_e32_uniform", "num_tokens": 8,   "num_experts": 32,  "top_k": 2,  "block_size": 16,  "ids_dtype": "int64", "dist": "uniform", "seed": 303},
+    {"name": "hidden_e1_exact_blocks",       "num_tokens": 64,  "num_experts": 1,   "top_k": 1,  "block_size": 16,  "ids_dtype": "int64", "dist": "topk",    "seed": 304},
+    {"name": "hidden_nonpow2_bs24",          "num_tokens": 37,  "num_experts": 48,  "top_k": 4,  "block_size": 24,  "ids_dtype": "int64", "dist": "topk",    "seed": 305},
+    {"name": "hidden_ids_int32_e8_bs64",     "num_tokens": 64,  "num_experts": 8,   "top_k": 2,  "block_size": 64,  "ids_dtype": "int32", "dist": "topk",    "seed": 306},
+    {"name": "hidden_official_large_e224",   "num_tokens": 32,  "num_experts": 224, "top_k": 12, "block_size": 128, "ids_dtype": "int64", "dist": "topk",    "seed": 307}
+  ]
+}

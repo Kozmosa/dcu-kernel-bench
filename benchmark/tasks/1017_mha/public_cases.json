@@ -1,0 +1,17 @@
+{
+  "task_id": "1017_mha",
+  "note": "在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。",
+  "shape_family": {
+    "batch": 2,
+    "seqlen_q": 256,
+    "seqlen_k": 192,
+    "num_kv_heads": 4,
+    "query_group_size": 4,
+    "num_q_heads": 16,
+    "head_dim": 64,
+    "dtype": "float16",
+    "causal": 1,
+    "alibi": "random_slopes_U[0,1)",
+    "note": "seqlen_q > seqlen_k：causal 下前 seqlen_q - seqlen_k = 64 行整行掩码（out=0, lse=0），边界行为进入在线评测"
+  }
+}

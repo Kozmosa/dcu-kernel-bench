@@ -1,0 +1,44 @@
+task_id: "4016_gemm_w8a8"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/gemm_w8a8.py
+      sha256: c3f708da4acec0e31db29a7daf1ef351b10c17e8d8df36ed30ada39984fb9ac4
+      role: device_kernel   # _w8a8_block_int8_matmul：tl.dot 主计算完整在 Triton kernel 内
+    - path: op_tests/test_gemm_a8w8_blockscale_blaslt.py
+      sha256: 9f1f73bb7a0d2ddc78165c5433a6f4a7ac849e4b683603d64e8ebd2df58b810c
+      role: official_test   # run_torch（反量化 + fp32 F.linear）为语义唯一权威
+
+admission:
+  core_compute_in_source: true    # tl.dot int8 主计算 + 逐组 scale 乘全部在 _w8a8_block_int8_matmul
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 run_torch 移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：int8（dtypes.i8）分支、block_shape=(128,128)、A 二维 (M,K) 携带
+    per-token-group（×128）scale、B (N,K) 携带 128×128 块 scale、无 bias、无
+    splitK，输出 bfloat16/float16；输入生成口径沿用官方测试（fp16 randn 激活 →
+    per-token-group int8，randn 权重 → 128×128 块 int8，scale=absmax/127）。
+    语义依据与冲突处理：官方测试在循环中实际比对的是海光 BLASLt（闭源
+    scale_mm，rtol 1e-2/atol 1e-2），run_torch 与 BLASLt 的比对行已被注释；
+    本题以同文件 run_torch 的数学语义（反量化后 fp32 F.linear）为参考真值，
+    其与 kernel 的逐 k 组 int8 点积×scale 顺序在容差内一致（构建自检 oracle
+    验证）。官方测试仅覆盖 K、N 均为 128 倍数的 shape（m∈1..64、n=7168、
+    k=2048）；题面尾块语义（K/N 不整除 128）由算子 wrapper 的 cdiv 断言与
+    kernel 掩码行为（越界按 0、floor 索引 scale）自然延拓，hidden case 含
+    尾块。COMBINE_SCALE_LOAD / USE_MLS_LOAD 为载入优化分支（语义与主分支
+    相同），不构成独立变体。其余变体留作后续题：fp8 分支
+    （per_token_group_quant_fp8）与 gemm_a8w8_blockscale 族高度重叠、由该族
+    出题；gemm_allreduce_w8a8 融合变体已 reject；gemm_a8w8（1D 标量 scale）
+    为不同算子另有题。case 由题目文件内 make_inputs(**case) 确定性生成
+    （torch.Generator(seed)，消费顺序 激活 randn → 权重 randn）。
+    case 兼容键约定：hidden/perf case 携带 dtype（输出 dtype，即容差键）
+    与 head_size（=dtype 的管线兼容别名——audit_model_class.py :78/:79/:104
+    以 case["head_size"] 位置构造 Model，本任务 Model 首参即 out_dtype）；
+    审计器按任务族分发构造实参的泛化修复留待维护者。

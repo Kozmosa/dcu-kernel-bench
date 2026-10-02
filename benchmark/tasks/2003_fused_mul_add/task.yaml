@@ -1,0 +1,74 @@
+id: "2003_fused_mul_add"
+name: fused_mul_add
+family: norm_rope_act
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  逐元素融合乘加 out = a*x + b（单 kernel 单 pass）。a 与 b 各自独立支持
+  Python float/int 标量、单元素张量（numel==1，广播）或与 x 同形的张量，
+  三种形态可任意组合；x 为任意形状（含非 2 次幂、素数规模）的连续浮点
+  张量。中间计算 float32，输出 cast 回 x 的 dtype。本题为自包含的
+  KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 2003），无需任何框架改动。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x, dtype: [float16, bfloat16, float32], layout: contiguous, ndim: any, shape: arbitrary}
+    - {name: a, dtype: "python float | python int | same_as_x", layout: "scalar-or-contiguous", shape: "scalar | numel==1 | same_as_x"}
+    - {name: b, dtype: "python float | python int | same_as_x", layout: "scalar-or-contiguous", shape: "scalar | numel==1 | same_as_x"}
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, shape: same_as_x}
+  init_inputs: []            # 逐元素算子无超参数
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见 invariants）
+  fixed_family:
+    shape: [2048, 4096]
+    dtype: float16
+    a_kind_pool: [scalar_float, scalar_int, tensor1, tensor_full]
+    b_kind_pool: [scalar_float, scalar_int, tensor1, tensor_full]
+    kind_draw: "a/b 形态由全局 RNG 独立等概率抽取（评测器 set_seed 后调用 get_inputs 时消费）"
+  dynamic: true
+  invariants:
+    - "x 任意维数、任意形状（numel >= 1），contiguous"
+    - "a/b 各自为 python 标量 | numel==1 张量 | 与 x 同形张量，可任意组合"
+    - "张量形态的 a/b 与 x 同 dtype 且 contiguous"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  float32:  {atol: 1.0e-4, rtol: 1.0e-4}
+  compare: "reference 以 float32 计算后 cast 回 x.dtype 再比较"
+  note: >
+    fp16/bf16 用本评测集标准容差 2e-2（标量乘子量级可达 ~100，rtol 项主导，
+    fp16/bf16 的表示间距 ~1e-3 相对量，裕量充足）。fp32 档取 1e-4：提交
+    kernel 允许用 FMA 完成 a*x+b，与参考实现的分离乘加存在单次舍入差异
+    （相对 ~1e-7），1e-4 裕量足够。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）。
+# 逐元素算子与 attention/gemm/softmax 无关，标准列表裁剪后仅保留来源库
+# 名条目（见下方列表行），另加本题的 ATen 捷径：addcmul（一次调用即完成
+# b + a*x，覆盖 torch.addcmul / Tensor.addcmul / .addcmul_ 全部形态）、
+# torch.add 与 torch.mul（未融合的逐元素乘/加捷径，torch.add 前缀同时
+# 覆盖 torch.addcmul 调用形态），以及 .add( / .mul( / .add_( / .mul_(
+# 张量方法与原地形式。已知机制缝隙：纯运算符表达式（a * x + b）不受
+# 子串约束，由题面"核心计算必须自写 Triton kernel（单 kernel 单 pass）"
+# 条款兜底——static_audit 为字面子串匹配，无法表达该约束。
+# 来源信息（repo/commit/path/sha256）只记录在 sources/2003_fused_mul_add.yaml。
+forbidden:
+  - aiter
+  - addcmul
+  - torch.add
+  - torch.mul
+  - .add(
+  - .mul(
+  - .add_(
+  - .mul_(

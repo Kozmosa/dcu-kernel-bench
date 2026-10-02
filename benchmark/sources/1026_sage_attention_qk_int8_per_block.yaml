@@ -1,0 +1,46 @@
+task_id: "1026_sage_attention_qk_int8_per_block"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/sage_attention_qk_int8_per_block.py
+      sha256: 3fbd63579aac5530b1f603742776f88ce8f363b32d7ec0d9378caff97d020bf1
+      role: device_kernel   # 核心 kernel：_attn_fwd_inner / _attn_fwd（非 causal sage attention 前向）
+    - path: op_tests/triton_tests/test_sage_attention_qk_int8_pv_fp16.py
+      sha256: 3dd4b84eae019ebb109863070dbb4242107d53fd48f1e9057726c92986b28648
+      role: official_test   # 语义唯一权威：sage 输出 vs SDPA，atol=rtol=2e-2
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面取的变体子集：sage 家族的非 causal 前向（官方测试经 sage_attention
+    入口间接覆盖 _attn_fwd/_attn_fwd_inner），且聚焦量化后 kernel 阶段——
+    forward 直接接收 per-block int8 的 Q/K 码字与 per-block fp32 scale
+    （Q 块 128 行 / K 块 64 行，sm_scale*log2(e) 已折入 q_scale，量化阶段
+    另文件实现、不进本题核心 kernel 清单），V 保持 fp16；单张量输出 out。
+    语义依据：官方测试以 F.scaled_dot_product_attention 为真值、
+    atol=rtol=2e-2 验收 sage 输出，本题 reference 即按同口径的 float32
+    精确注意力（消费 int8 码字反量化值）实现，容差沿用 2e-2。官方测试
+    参数化未覆盖的维度（GQA、bool attn_mask）依据 kernel 源码
+    num_kv_groups / mask 路径并入题面（参考实现为精确语义，无冲突）；
+    bf16 输入变体未取（wrapper 在 kernel 前已把 v 统一 cast 成 fp16，
+    与本题 PV fp16 口径一致）。与官方测试的口径差已在题面固化并记录：
+    bool 掩码（float 加性掩码在 log2 域与自然域的加法位置不同，留作
+    后续题裁定，本题不含）。复核修订（2026-10-02）：① 输出由 (out, lse)
+    二元组改为单张量 out——在线 KernelBench 路径
+    PyramidKernel/KernelBench/src/kernelbench/eval.py:784 与离线
+    audit_model_class.py 均不兼容元组输出（output.shape 抛
+    AttributeError），LSE 输出（RETURN_LSE 路径，含 lse/1.44269504 换算
+    与 smooth_k 的 lse_correction）移出本题、留作后续题；② forbidden
+    扩充 torch.mm / torch.addmm / F.linear 封堵 GEMM ATen 捷径；
+    ③ task.yaml 侧移除溯源 source 块（溯源统一由本 yaml 承载）。其余
+    变体（causal 路径 sage_attention_qk_int8_per_block_causal.py、量化
+    kernel sage_attention_quant_per_block.py）留作后续题。无源码-测试冲突。

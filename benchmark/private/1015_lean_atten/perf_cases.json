@@ -1,0 +1,9 @@
+{
+  "task_id": "1015_lean_atten",
+  "cases": [
+    {"name": "perf_decode_ragged_h16_d128_f16",  "num_seqs": 4, "num_heads": 16, "head_dim": 128, "q_len": 16,   "max_kv_len": 16384, "dtype": "float16",  "causal": 0, "seed": 211, "kv_lens": [16384, 8192, 4096, 2048]},
+    {"name": "perf_causal_prefill_h16_d128_f16", "num_seqs": 2, "num_heads": 16, "head_dim": 128, "q_len": 2048, "max_kv_len": 2048, "dtype": "float16",  "causal": 1, "seed": 212},
+    {"name": "perf_decode_longkv_h16_d64_bf16",  "num_seqs": 2, "num_heads": 16, "head_dim": 64,  "q_len": 16,   "max_kv_len": 32768, "dtype": "bfloat16", "causal": 0, "seed": 213, "kv_lens": [32768, 32768]}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

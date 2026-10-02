@@ -1,0 +1,57 @@
+id: "2006_norm"
+name: fused_add_layernorm
+family: norm_rope_act
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  残差融合 LayerNorm 前向：输入 x 与 residual 逐元素相加得残差和 s（float32
+  加法、舍入回输入 dtype 存储），再对 s 最后一维做 LayerNorm（float32 统计
+  mean 与有偏 var，rstd = 1/sqrt(var+eps)，仿射 weight/bias）。双输出（归一化
+  结果 y 与残差和 residual_out）沿最后一维拼接为单张量 (M, 2N) 输出以适配
+  在线 model_class 单张量契约，dtype 与输入一致。本题为自包含 KernelBench
+  题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 2006），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,        dtype: [float16, bfloat16, float32], layout: contiguous, ndim: 2, shape: [M, N]}
+    - {name: residual, dtype: same_as_x,           layout: contiguous, ndim: 2, shape: [M, N]}
+    - {name: weight,   dtype: same_as_x,           layout: contiguous, ndim: 1, shape: [N]}
+    - {name: bias,     dtype: same_as_x,           layout: contiguous, ndim: 1, shape: [N]}
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: 2, shape: [M, 2N]}   # 前 N 列 y、后 N 列 residual_out
+  init_inputs:
+    - {name: eps, dtype: float, layout: scalar}   # LayerNorm 分母稳定项，默认 1e-5
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {M: 128, N: 1024, dtype: "float16"}
+  dynamic: true
+  invariants:
+    - "M >= 1 且 N >= 1，允许非 2 次幂 N（含 N=1 与超长行，需掩码处理）"
+    - "统计以舍入回输入 dtype 的 residual_out 为基准（与 kernel 写回后重读统计的语义一致）"
+    - "输入值域为常规 randn/rand 量级（无 inf/NaN）；量化与训练反向变体不在本题范围"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  float32:  {atol: 1.0e-5, rtol: 1.0e-5}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较（y 段与 residual_out 段同 dtype）"
+  note: >
+    fp16/bf16 为本评测集验收容差（官方测试取 1e-2，此处更宽）；fp32 沿用
+    官方测试容差 1e-5。在线（搜索循环内）由 KernelBenchPaperEvaluator
+    判定：triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
+    与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - aiter
+  - torch.nn.functional.layer_norm
+  - torch.layer_norm
+  - torch.nn.LayerNorm

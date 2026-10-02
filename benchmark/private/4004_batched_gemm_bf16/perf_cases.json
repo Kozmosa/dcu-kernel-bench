@@ -1,0 +1,9 @@
+{
+  "task_id": "4004_batched_gemm_bf16",
+  "cases": [
+    {"name": "perf_b16_m1024_n1024_k1024_bf16_bias",  "b": 16, "m": 1024, "n": 1024, "k": 1024, "use_bias": true,  "out_dtype": "bfloat16", "seed": 511},
+    {"name": "perf_b2_m4096_n4096_k4096_bf16_nobias", "b": 2,  "m": 4096, "n": 4096, "k": 4096, "use_bias": false, "out_dtype": "bfloat16", "seed": 512},
+    {"name": "perf_b8_m2048_n1280_k8192_fp16_nobias", "b": 8,  "m": 2048, "n": 1280, "k": 8192, "use_bias": false, "out_dtype": "float16",  "seed": 513}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

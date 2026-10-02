@@ -1,0 +1,66 @@
+task_id: "1030_unified_attention"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/unified_attention.py
+      sha256: e42c894394b712e0de309fd0209606751286e21537d632f9fa7da57565b3a89f
+      role: device_kernel   # kernel_unified_attention_2d / 3d + reduce_segments，纯 Triton 主路径
+    - path: op_tests/triton_tests/test_unified_attention.py
+      sha256: 2ceb60ab73672042d4a974bce0eae74ab7f7249544f1ebb61c755e3a54bc2e29
+      role: reference_test  # ref_paged_attn 为语义唯一权威
+    - path: LICENSE
+      sha256: 844e3a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  derived_from: null
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面取的变体子集：分页 KV（layout [num_blocks, block_size, H_kv, D]）+
+    prefill/decode 混合 ragged batch（cu_seqlens_q/seq_lens 变长）+ GQA +
+    causal 右对齐 + 滑动窗口（sliding_window>0）+ logit softcap（softcap>0）+
+    attention sinks（sink 列 logit=sinks[h]、value=0）。语义依据为官方测试
+    test_unified_attention.py 的 ref_paged_attn：掩码构造顺序（causal triu
+    右对齐 → 滑窗 OR 屏蔽 → sink 列免掩码）、softcap 在掩码前作用于全部
+    logit（含 sink 列）、softmax float32、GQA repeat_interleave、块表只取前
+    ceil(kv/bs) 项。2D（prefill）与 3D+reduce_segments（decode 分段 softmax）
+    是 dispatch 差异而非数值差异，题面只约束最终输出。测试参数域：SEQ_LENS
+    两种 batch 模式、heads (4,4)/(8,2)、head 128/256、block 16、bf16、
+    window None/64/128/256、softcap None/50、sinks False/True、segments 8/16、
+    seq_threshold_3D 0/8。
+    与官方测试的冲突处理：源码 kernel 中 sink logit 不经过 softcap（2D/3D
+    kernel 的 M 直接以 sink 初始化，softcap 只作用于 S），官方参考实现把
+    sink logit 与 QK logit 一起 softcap——以官方测试为准（sink 一并
+    softcap），两者差异为 |s|^3/(3c^2) 量级（s~N(0,1)、c>=30 时 <5e-4），
+    远小于验收容差 2e-2，官方测试自身在该组合下也以 1.5e-2 通过。
+    其余变体留作后续独立题：ALiBi slopes（含 sqrt 形式）、query-query
+    bias、多模态双向前缀（mm_prefix_range）、fp8 量化 KV（k/v descale 与
+    输出量化 scale）、head_size=256 且 block%64==0 时的 flash_attn 可选
+    fallback（本题目标平台走纯 Triton 路径，不涉及）。
+    批次级统一裁定（2026-10-02 属主裁决原文，适用全部 44 题，供复核方对齐）：
+    (1) task.yaml 的 source 溯源块——选 B 前半，授权删除（本题自身路径）。
+    溯源信息唯一居所是 benchmark/sources/1030_unified_attention.yaml。1002
+    的 source 块是历史遗留（本批纪律禁改 1001/1002，留待全仓统一清理时
+    连同处理），不构成本批保留理由；本批其余多题已按「task.yaml 无溯源词」
+    收敛，1030 应与批次一致。
+    (2) docstring 禁用列表里的 aiter——保留，驳回 B 后半。任务原始规范明文
+    允许「aiter 作为禁用项出现在 docstring 的禁用列表里」，已入库 1002
+    （reference.py:33）即此形态。此前复核提示中「aiter 仅允许出现在
+    task.yaml forbidden 行」的表述过紧，以本裁定为准：aiter 的合法出现
+    位置 = task.yaml 的 forbidden 列表行 + reference.py docstring 的禁用
+    列表行（作为禁用项声明），其余任何位置出现仍属违规。
+    (3) 静态守卫的标准输入——以 loader 管道产物为标准对象：
+    load_official_problem 成功、entry_kind='model_class'、对 loader
+    scaffold 的 check_candidate_static ok=True 即为通过；对原始 compat 源
+    执行报 missing_modelnew 属预期行为（ModelNew 由框架 loader 生成，不在
+    源文件内），不是失败项。复核方如仍持异议，请升级询问「是否接受属主
+    裁定」，不再进入修复循环。

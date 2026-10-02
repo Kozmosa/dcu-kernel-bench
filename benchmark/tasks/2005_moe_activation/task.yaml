@@ -1,0 +1,66 @@
+id: "2005_moe_activation"
+name: moe_ffn_activation_variants
+family: norm_rope_act
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  MoE FFN 激活变体族：单一 Model(activation, alpha, limit) 入口分派 9 种变体——
+  gated chunked 布局的 silu（标准 / 钳位 / 缩放钳位三门控）、gelu（erf 精确）、
+  gelu_tanh、swiglustep（先 SiLU 后上限钳位），gated interleaved 布局的
+  swiglu_interleaved（gate'*sigmoid(alpha*gate')*(up'+1)），以及 silu_no_mul /
+  gelu_no_mul / gelu_tanh_no_mul / relu2 四种非 gated 逐元素激活。全部 float32
+  中间计算，输出 cast 回输入 dtype；gated 输入 (M, 2N) -> (M, N)，非 gated
+  (M, N) -> (M, N)。本题为自包含 KernelBench 题目文件（reference.py 即题目
+  文件，同时镜像到 benchmark/kernelbench_compat/level2/），可直接走
+  PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 2 --problem-id 2005），无需任何框架改动。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：helpers /
+  init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x, dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [M, n]}
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: 2, shape: "[M, n/2]（gated）/ [M, n]（非 gated）"}
+  init_inputs:
+    - {name: activation, dtype: str, layout: scalar}         # 9 个变体名之一
+    - {name: alpha, dtype: "float|null", layout: scalar}     # 仅缩放钳位门控变体使用
+    - {name: limit, dtype: "float|null", layout: scalar}     # 仅带钳位的变体使用
+
+shape:
+  # get_inputs()/get_init_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {M: 128, n: 4096, activation: "silu", alpha: 1.702, limit: 7.0, dtype: "bfloat16"}
+  dynamic: true
+  invariants:
+    - "M >= 1；gated 变体要求 n 为偶数（N = n/2 无对齐约束，允许非 2 次幂、小于常见块大小）；非 gated 变体 n >= 1 任意"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；钳位与缺省语义（swiglustep limit=7.0、swiglu_interleaved alpha=1.702/limit=7.0）按题面数学定义"
+    - "非法参数组合（gelu/gelu_tanh 带 alpha 或 limit、swiglustep 带 alpha、silu 给 alpha 不给 limit）构造期拒绝"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    官方测试对 fp16 用 (atol=rtol=1e-2)、bf16 用 (2e-2, 2e-2)；本评测集统一
+    验收容差 2e-2/2e-2（fp16 较官方略宽、bf16 相同），仅影响离线终审误报率。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与
+    模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论
+    不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - aiter
+  - torch.nn.functional.silu
+  - torch.nn.functional.gelu
+  - torch.nn.SiLU
+  - torch.nn.GELU
+  - torch.sigmoid
+  - torch.erf
+  - torch.tanh
+  - torch.relu
+  - torch.clamp
+
+# 来源仓库、commit 与文件 sha256 等准入证据统一记录在
+# benchmark/sources/2005_moe_activation.yaml（题面文件不内嵌溯源块）。

@@ -1,0 +1,11 @@
+{
+  "task_id": "2005_moe_activation",
+  "cases": [
+    {"name": "hidden_min_m1_gelu_f16",            "m": 1,   "n": 200,   "activation": "gelu",              "alpha": null,  "limit": null, "dtype": "float16",  "seed": 3101, "scale": 1.0},
+    {"name": "hidden_clamp_m3_n686_silu_bf16",    "m": 3,   "n": 686,   "activation": "silu",              "alpha": null,  "limit": 2.0,  "dtype": "bfloat16", "seed": 3102, "scale": 4.0},
+    {"name": "hidden_m280_n4096_alpha_gate_f16",  "m": 280, "n": 4096,  "activation": "silu",              "alpha": 1.702, "limit": 7.0,  "dtype": "float16",  "seed": 3103, "scale": 8.0},
+    {"name": "hidden_m128_n512_step_bf16",        "m": 128, "n": 512,   "activation": "swiglustep",         "alpha": null,  "limit": 7.0,  "dtype": "bfloat16", "seed": 3104, "scale": 6.0},
+    {"name": "hidden_m96_n1024_interleaved_f16",  "m": 96,  "n": 1024,  "activation": "swiglu_interleaved", "alpha": 1.702, "limit": 7.0,  "dtype": "float16",  "seed": 3105, "scale": 5.0},
+    {"name": "hidden_m160_n1536_gelu_tanh_nomul_bf16", "m": 160, "n": 1536, "activation": "gelu_tanh_no_mul", "alpha": null, "limit": null, "dtype": "bfloat16", "seed": 3106, "scale": 2.0}
+  ]
+}

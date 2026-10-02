@@ -1,0 +1,50 @@
+task_id: "2006_norm"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/norm.py
+      sha256: 4248394b4cabaf0114be87b36d9026489445fa3f2bed8426594378e7fa6bfa0c
+      role: device_kernel   # _fused_add_layernorm_kernel：残差加 + LayerNorm 统计/归一化/仿射完整在 Triton kernel 内
+    - path: op_tests/triton_tests/test_layernorm.py
+      sha256: c1e8bf41e98ee422e2436a7cd326bfa42a0e30e3fd686b42ceb17603bdd54dbd
+      role: official_test   # test_fused_add_layernorm 的 run_torch 为语义唯一权威
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # 残差加、mean/var 统计、归一化、仿射全部在 kernel 内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 run_torch（F.layer_norm(input+residual)）移植进题目文件 Model
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：LayerNorm 家族的残差融合前向（layernorm2d_fwd_with_add /
+    _fused_add_layernorm_kernel）——residual_out = x + residual（float32
+    加法、舍入回输入 dtype 存储），y = LayerNorm(residual_out)（float32 的
+    mean / 有偏 var / rsqrt(var+eps) / 仿射）。双输出 (y, residual_out) 沿
+    最后一维拼接为单张量 (M, 2N) 以适配在线 model_class 单张量输出契约
+    （KernelBench 在线评测器对输出做 output.shape 与 allclose，不支持元组），
+    两段 dtype 一致，语义与官方二元组完全一致。语义依据：官方测试
+    test_fused_add_layernorm 的 run_torch（residual_out = input + residual
+    后 F.layer_norm）为唯一权威，容差 fp16/bf16 1e-2、fp32 1e-5；本评测集
+    终审 fp16/bf16 取 2e-2（更宽）、fp32 沿用 1e-5。与源码的无冲突差异：
+    题面参考实现以舍入回输入 dtype 后的 residual_out 为统计基准，与源码
+    kernel 先写回 res_out 再重读统计的语义一致；官方 torch 参考以原生 dtype
+    加法和为基准，二者相差至多 1 ulp（fp16 原生加与 float32 加后舍入在
+    CPU 实测逐位相等），远在容差内。其余变体留作后续题：量化前向
+    （dynamicquant / smoothquant 与 fused_add 组合，int8/fp8 码字 int8 +
+    fp32 scale 多 dtype 输出无法拼成单张量，且官方测试对码字自身取
+    atol=1 的边界舍入容差——test_layernorm.py:251 等，在线
+    allclose(atol=rtol=1e-4) 无法表达该口径）；训练反向
+    （_layernorm_bwd_dx_fused_triton / _layernorm_bwd_dwdb_triton(_v2)）；
+    无残差纯 layer_norm 前向（_layernorm_kernel）。与 rmsnorm（仅均方、
+    无 mean）、fused_rmsnorm_rope（ops/ 顶层文件）互不重叠，按算子独立
+    成题；_per_token_quant 为 jit 量化 helper，不在本题核心清单。case 由
+    题目文件内 make_inputs(**case) 确定性生成（torch.Generator(seed)，
+    消费顺序 x / residual / weight / bias）。

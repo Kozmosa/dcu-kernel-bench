@@ -1,0 +1,10 @@
+{
+  "task_id": "4010_gemm_a8w8_blockscale",
+  "note": "head_size 为离线终审 harness 的单参构造形态 [group_k, group_n, out_dtype]（audit_model_class.py:104 ModelNew(case[\"head_size\"])），dtype 为容差查找键，两者均与显式参数一致性断言。",
+  "cases": [
+    {"name": "perf_m4096_n4096_k4096_g128_bf16", "m": 4096, "n": 4096, "k": 4096, "group_k": 128, "group_n": 128, "out_dtype": "bfloat16", "seed": 511, "head_size": [128, 128, "bfloat16"], "dtype": "bfloat16"},
+    {"name": "perf_m2048_n1280_k8192_g128_bf16", "m": 2048, "n": 1280, "k": 8192, "group_k": 128, "group_n": 128, "out_dtype": "bfloat16", "seed": 512, "head_size": [128, 128, "bfloat16"], "dtype": "bfloat16"},
+    {"name": "perf_m4096_n8192_k1024_g128_fp16", "m": 4096, "n": 8192, "k": 1024, "group_k": 128, "group_n": 128, "out_dtype": "float16",  "seed": 513, "head_size": [128, 128, "float16"], "dtype": "float16"}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

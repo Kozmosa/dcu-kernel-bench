@@ -1,0 +1,11 @@
+{
+  "task_id": "4017_group_quant_int8",
+  "cases": [
+    {"name": "hidden_min_1x128_gs128_f16",     "rows": 1,    "cols": 128,  "group_size": 128, "dtype": "float16",  "seed": 417},
+    {"name": "hidden_nonpow2_3x192_gs64_f16",  "rows": 3,    "cols": 192,  "group_size": 64,  "dtype": "float16",  "seed": 418},
+    {"name": "hidden_bf16_64x7168_gs128",      "rows": 64,   "cols": 7168, "group_size": 128, "dtype": "bfloat16", "seed": 419},
+    {"name": "hidden_gs1_16x256_f16",          "rows": 16,   "cols": 256,  "group_size": 1,   "dtype": "float16",  "seed": 420},
+    {"name": "hidden_eps_zero_rows_f16",       "rows": 8,    "cols": 512,  "group_size": 128, "dtype": "float16",  "seed": 421, "eps": 1.0e-2, "value_scale": 1.0e-4, "zero_rows": 3},
+    {"name": "hidden_nonpow2_rows_37x1152_f16","rows": 37,   "cols": 1152, "group_size": 128, "dtype": "float16",  "seed": 422}
+  ]
+}

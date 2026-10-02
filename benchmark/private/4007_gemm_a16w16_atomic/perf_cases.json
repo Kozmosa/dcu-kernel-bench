@@ -1,0 +1,8 @@
+{
+  "task_id": "4007_gemm_a16w16_atomic",
+  "cases": [
+    {"name": "perf_llm_mlp_deep_k_f16", "m": 4096, "n": 1280, "k": 8192, "dtype": "float16", "seed": 407},
+    {"name": "perf_wide_out_f16",       "m": 9728, "n": 8192, "k": 1024, "dtype": "float16", "seed": 408}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

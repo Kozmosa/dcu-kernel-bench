@@ -1,0 +1,11 @@
+{
+  "task_id": "4008_gemm_a16w4",
+  "cases": [
+    {"name": "hidden_m1_gemv_g64",       "m": 1,  "n": 512,  "k": 512,  "group_size": 64,  "seed": 401},
+    {"name": "hidden_nonpow2_n576_g64",  "m": 37, "n": 576,  "k": 1536, "group_size": 64,  "seed": 402},
+    {"name": "hidden_group128",          "m": 16, "n": 1024, "k": 2048, "group_size": 128, "seed": 403},
+    {"name": "hidden_group32",           "m": 8,  "n": 768,  "k": 512,  "group_size": 32,  "seed": 404},
+    {"name": "hidden_perchannel_g_eq_k", "m": 5,  "n": 512,  "k": 256,  "group_size": 256, "seed": 405},
+    {"name": "hidden_decode_2x7168x2304_g64", "m": 2, "n": 7168, "k": 2304, "group_size": 64, "seed": 406}
+  ]
+}

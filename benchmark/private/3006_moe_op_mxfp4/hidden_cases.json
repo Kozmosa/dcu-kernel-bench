@@ -1,0 +1,11 @@
+{
+  "task_id": "3006_moe_op_mxfp4",
+  "cases": [
+    {"name": "hidden_min_m1_e1_topk1_bf16",        "M": 1,   "N": 128,  "K": 128,   "E": 1,   "top_k": 1, "dtype": "bfloat16", "seed": 601},
+    {"name": "hidden_many_experts_e128_topk4_bf16", "M": 16,  "N": 256,  "K": 256,   "E": 128, "top_k": 4, "dtype": "bfloat16", "seed": 602},
+    {"name": "hidden_nonpow2_k800_e3_topk1_f16",    "M": 32,  "N": 704,  "K": 800,   "E": 3,   "top_k": 1, "dtype": "float16",  "seed": 603},
+    {"name": "hidden_odd_factor_n7186_f16",         "M": 8,   "N": 7186, "K": 128,   "E": 8,   "top_k": 2, "dtype": "float16",  "seed": 604},
+    {"name": "hidden_longk_m1_k16384_bf16",         "M": 1,   "N": 1024, "K": 16384, "E": 2,   "top_k": 1, "dtype": "bfloat16", "seed": 605},
+    {"name": "hidden_m128_n256_f16",                "M": 128, "N": 256,  "K": 128,   "E": 8,   "top_k": 2, "dtype": "float16",  "seed": 606}
+  ]
+}

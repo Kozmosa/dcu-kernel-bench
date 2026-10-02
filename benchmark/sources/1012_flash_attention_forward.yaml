@@ -1,0 +1,41 @@
+task_id: "1012_flash_attention_forward"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/flash_attention_forward.py
+      sha256: 3ae6731a443ec04bdc925221feb671361a0a82997bb932a9f7987bdb46ce9da3
+      role: device_kernel   # 核心计算全部在源文件内的 Triton kernel（_attn_fwd_inner / attn_fwd）
+    - path: op_tests/triton_tests/test_flash_attention_forward.py
+      sha256: fb769ccb318783775f4e94230425bfd9b1792016ec69bb94c5e65bc075a0d312
+      role: official_test   # 语义唯一权威（含 PyTorch 参考实现 pytorch_flash_attention_reference）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：varlen（cu_seqlens_q/k 分段）FlashAttention v2 前向，
+    fp16/bf16 非量化输入，MHA/GQA，causal 两态（右下对齐因果掩码
+    diagonal = L_k - L_q + 1），sm_scale = head_dim^-0.5，输出仅 O（不含 LSE）。
+    语义依据：官方测试 test_op_fwd 的参考实现 pytorch_flash_attention_reference
+    （QK^T 先乘 sm_scale 再掩码再 softmax、GQA 用 repeat_interleave 按
+    h//group 共享 KV）与被测 kernel attn_fwd（在线 softmax、float32 累加、
+    USE_FP8/BIA S/DROPOUT 分支不在子集内）。is_mls_avail 仅选择 load 变体
+    （USE_MLS constexpr），不影响数学语义，未纳入题面。
+    与官方测试的差异处理：① 官方测试仅参数化 causal=True / bias=False /
+    无 dropout，causal=False 的语义依据源码 IS_CAUSAL=False 分支（不施加
+    掩码），与参考实现 causal=False 路径一致，无冲突；② kernel 在 causal 且
+    L_q > L_k 时整块早退输出 0，而参考实现 softmax 产生 NaN——官方测试全部
+    用例满足 L_q <= L_k（seq_lens_q=[4096,4096]/seq_lens_k=[4096,8192] 等），
+    未覆盖该冲突区，题面据此显式约束每条序列 0 < L_q <= L_k，冲突形态不纳入。
+    其余变体（bias/ALiBi、dropout/philox 掩码、fp8 scale、LSE/encoded_softmax
+    输出、稠密 4D batch 形态）留作后续题。题面不含官方测试用例的 8192 大规模
+    （归入 perf case）与 head_dim 非 2 次幂的注释态 corner（kernel 以
+    PADDED_HEAD 支持但源码头声明不支持，题面已用 hidden case 覆盖 d=96）。

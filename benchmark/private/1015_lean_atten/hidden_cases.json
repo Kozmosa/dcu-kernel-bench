@@ -1,0 +1,11 @@
+{
+  "task_id": "1015_lean_atten",
+  "cases": [
+    {"name": "hidden_min_q1_kv1_f16",       "num_seqs": 1, "num_heads": 8,  "head_dim": 64,  "q_len": 1,   "max_kv_len": 1,     "dtype": "float16",  "causal": 0, "seed": 111, "kv_lens": [1]},
+    {"name": "hidden_ragged_nonpow2_f16",   "num_seqs": 3, "num_heads": 8,  "head_dim": 128, "q_len": 16,  "max_kv_len": 333,   "dtype": "float16",  "causal": 0, "seed": 112, "kv_lens": [1, 200, 333]},
+    {"name": "hidden_causal_square_f16",    "num_seqs": 2, "num_heads": 8,  "head_dim": 128, "q_len": 256, "max_kv_len": 256,   "dtype": "float16",  "causal": 1, "seed": 113},
+    {"name": "hidden_longkv_decode_f16",    "num_seqs": 4, "num_heads": 8,  "head_dim": 128, "q_len": 16,  "max_kv_len": 8192,  "dtype": "float16",  "causal": 0, "seed": 114, "kv_lens": [8161, 8191, 8192, 4097]},
+    {"name": "hidden_causal_nonpow2_bf16",  "num_seqs": 2, "num_heads": 8,  "head_dim": 64,  "q_len": 333, "max_kv_len": 333,   "dtype": "bfloat16", "causal": 1, "seed": 115},
+    {"name": "hidden_head_dim16_f16",       "num_seqs": 2, "num_heads": 16, "head_dim": 16,  "q_len": 16,  "max_kv_len": 1024,  "dtype": "float16",  "causal": 0, "seed": 116, "kv_lens": [1024, 1]}
+  ]
+}

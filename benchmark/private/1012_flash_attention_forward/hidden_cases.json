@@ -1,0 +1,11 @@
+{
+  "task_id": "1012_flash_attention_forward",
+  "cases": [
+    {"name": "hidden_min_len1_f16",           "num_seqs": 1, "num_q_heads": 8,  "num_kv_heads": 8,  "head_dim": 64,  "max_seq_len_q": 1,    "max_seq_len_k": 1,    "dtype": "float16",  "causal": 1, "seed": 101, "seq_lens_q": [1],        "seq_lens_k": [1]},
+    {"name": "hidden_mha_equal_nonpow2_f16",  "num_seqs": 2, "num_q_heads": 16, "num_kv_heads": 16, "head_dim": 64,  "max_seq_len_q": 333,  "max_seq_len_k": 333,  "dtype": "float16",  "causal": 1, "seed": 102, "seq_lens_q": [333, 128], "seq_lens_k": [333, 128]},
+    {"name": "hidden_nonpow2_head_gqa_bf16",  "num_seqs": 3, "num_q_heads": 8,  "num_kv_heads": 2,  "head_dim": 96,  "max_seq_len_q": 200,  "max_seq_len_k": 256,  "dtype": "bfloat16", "causal": 1, "seed": 103},
+    {"name": "hidden_shortq_longk_gqa_f16",   "num_seqs": 2, "num_q_heads": 32, "num_kv_heads": 4,  "head_dim": 128, "max_seq_len_q": 128,  "max_seq_len_k": 4096, "dtype": "float16",  "causal": 1, "seed": 104, "seq_lens_q": [128, 1],   "seq_lens_k": [4096, 512]},
+    {"name": "hidden_noncausal_mixed_bf16",   "num_seqs": 4, "num_q_heads": 16, "num_kv_heads": 8,  "head_dim": 64,  "max_seq_len_q": 257,  "max_seq_len_k": 300,  "dtype": "bfloat16", "causal": 0, "seed": 105, "seq_lens_q": [1, 64, 256, 257]},
+    {"name": "hidden_long_8192_f16",          "num_seqs": 2, "num_q_heads": 16, "num_kv_heads": 4,  "head_dim": 128, "max_seq_len_q": 8192, "max_seq_len_k": 8192, "dtype": "float16",  "causal": 1, "seed": 106, "seq_lens_q": [8191, 4097], "seq_lens_k": [8192, 8192]}
+  ]
+}

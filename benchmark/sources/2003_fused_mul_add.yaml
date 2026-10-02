@@ -1,0 +1,49 @@
+task_id: "2003_fused_mul_add"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/fused_mul_add.py
+      sha256: fcb58763975e047fd5becd85e3355df2035ba4f375ed57aae6ad9edd418c94b2
+      role: device_kernel   # _fused_mul_add_kernel：单 kernel 单 pass 逐元素乘加，a/b 标量-单元素-同形三形态
+    - path: op_tests/triton_tests/test_fused_mul_add.py
+      sha256: f98792e05f7719e24b68bc100a501aab9ed22b48b28c8114d8284ccd8a809fb1
+      role: official_test   # 语义唯一权威：ref_mul_add + a/b 四形态 × in/out × fp16/bf16/fp32 全参数化
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面取官方测试的变体子集：out = a*x + b 逐元素、单 kernel 单 pass；
+    a/b 各自支持 Python float/int 标量、单元素张量（numel==1 广播）或与
+    x 同形张量，形态可任意组合；dtype 覆盖 fp16/bf16/fp32。语义唯一依据为
+    官方测试的 ref_mul_add：(a * x.to(float32) + b).to(x.dtype)，中间
+    float32、输出 cast 回 x.dtype；官方 shape 族（(1,)/(500,)/(10000,)/
+    (32,7168)/(16,50,4186)）全部纳入隐藏/性能 case 口径。留作后续题的
+    变体：官方 kernel 的原地路径（out=None 写回 x）与预分配 out= 入参——
+    model_class 契约为 out-of-place 返回新张量，故不在本题面。源码与测试
+    无语义冲突：kernel 侧 assert（contiguous、numel∈[1,N]）只收紧输入
+    合法性，与测试参考一致；BLOCK_SIZE_N 取 max(min(next_pow2(N),32),1024)
+    属实现细节，不进题面。get_inputs 的 a/b 形态经全局 RNG 抽样（官方四
+    形态等概率），在线评测因此覆盖标量/单元素/同形组合。隐藏 case 6 个覆盖
+    四种形态在 a/b 双侧的全部出现与 6 种不同组合；4×4 全组合 × 4 个种子
+    （fp16×2 / bf16 / fp32，非 2 次幂 shape）的复核纳入构建自检脚本
+    （agent-kernel-dcu/tmp/build_check/2003.py），不在本文件重复罗列。
+    已知链路缺口（复核方实证）：benchmark/evaluator/audit_model_class.py
+    为 1002 族硬编码——:73-74 对 make_inputs 强传 seq_lens、:78 强取
+    case['head_size'] 并以单参构造 Model、:82 容差映射表仅含
+    float16/bfloat16、:75 对输入逐项 .to(device)——对本题（__init__ 无超参、
+    a/b 含 Python 标量、含 fp32 case）四处均崩，离线终审需评测器侧泛化后才
+    可运行；在线 model_class 路径（loader + 静态守卫 + KernelBench 评测）
+    不受影响，已验证可用。family=norm_rope_act 同族边界：本题是独立逐元素
+    算子，与 norm/rmsnorm 的 fused_add_* 残差融合变体无关，无重叠。

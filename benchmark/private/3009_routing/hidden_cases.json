@@ -1,0 +1,11 @@
+{
+  "task_id": "3009_routing",
+  "cases": [
+    {"name": "hidden_min_m1_k16_n16_fused_bf16",    "m": 1,    "k": 16,  "n": 16,  "fused_shared_experts": true,  "dtype": "bfloat16", "dist": "int", "seed": 3101},
+    {"name": "hidden_max_m8192_k16_n128_fused_bf16", "m": 8192, "k": 16,  "n": 128, "fused_shared_experts": true,  "dtype": "bfloat16", "dist": "int", "seed": 3102},
+    {"name": "hidden_nonpow2_m97_k96_n24_fused_f16", "m": 97,   "k": 96,  "n": 24,  "fused_shared_experts": true,  "dtype": "float16",  "dist": "int", "seed": 3103},
+    {"name": "hidden_nofuse_m333_k128_n16_f16",      "m": 333,  "k": 128, "n": 16,  "fused_shared_experts": false, "dtype": "float16",  "dist": "int", "seed": 3104},
+    {"name": "hidden_tie_rich_m512_k8_n8_fused_bf16", "m": 512, "k": 8,   "n": 8,   "fused_shared_experts": true,  "dtype": "bfloat16", "dist": "int", "seed": 3105},
+    {"name": "hidden_square_m2048_k128_n128_fused_bf16", "m": 2048, "k": 128, "n": 128, "fused_shared_experts": true, "dtype": "bfloat16", "dist": "int", "seed": 3106}
+  ]
+}

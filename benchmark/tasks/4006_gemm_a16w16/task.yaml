@@ -1,0 +1,65 @@
+id: "4006_gemm_a16w16"
+name: gemm_a16w16
+family: quant_gemm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3（level 3）
+
+description: >
+  无 bias 16 位浮点矩阵乘 gemm_a16w16（常规分块 store GEMM）的 model_class
+  （KernelBench 兼容）题目。算子语义：x [M,K] 与 weight [N,K]（线性层权重布局，行主 TN），
+  out[m,n] = sum_k x[m,k]*weight[n,k]，无 bias；每个输出 tile 由单一
+  program 在 float32 中完整归约 K 维后掩码写回一次（K 尾越界按 0 累加，
+  M/N 边界掩码），无 split-K、无原子加，输出只经历一次 dtype 收缩。
+  本题为自包含的 KernelBench 题目文件（reference.py 即题目文件，同时镜像
+  到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 4006），无需任何框架改动。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,      dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [m, k]}
+    - {name: weight, dtype: same_as_x,           layout: contiguous, ndim: 2, shape: [n, k]}
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: 2, shape: [m, n]}
+  init_inputs:
+    - {name: in_features,  dtype: int64, layout: scalar}   # 对应 K
+    - {name: out_features, dtype: int64, layout: scalar}   # 对应 N
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见 invariants）
+  fixed_family: {m: 256, n: 8192, k: 1024, dtype: bfloat16}
+  dynamic: true
+  invariants:
+    - "weight.shape[1] == x.shape[1]（K 维一致）"
+    - "m / n / k 均为任意正整数（含 1 与非 2 次幂，k 不要求与分块大小对齐）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。官方测试对同一算子取
+    atol=rtol=1e-1，因其 case 族 K 最大到 65536（bf16 输入、矩阵规模数十
+    MiB 级）；本题 case 族 K <= 16384，fp32 累加 + 单次 cast 下 2.0e-2 有
+    充裕余量（校验脚本实测最大偏差见构建记录）。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.addmm
+  - torch.einsum
+  - torch.nn.functional.linear
+  - F.linear
+  - aiter
+
+source:
+  # 完整溯源（repo / commit / path / sha256 / 准入记录）统一维护在
+  # benchmark/sources/4006_gemm_a16w16.yaml；题面包文件不内联溯源串
+  record: benchmark/sources/4006_gemm_a16w16.yaml

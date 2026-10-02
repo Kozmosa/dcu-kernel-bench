@@ -1,0 +1,11 @@
+{
+  "task_id": "4007_gemm_a16w16_atomic",
+  "cases": [
+    {"name": "minimal_1x1_f16",      "m": 1,   "n": 1,    "k": 1,     "dtype": "float16",  "seed": 401},
+    {"name": "tiny_odd_dims_f16",    "m": 3,   "n": 5,    "k": 7,     "dtype": "float16",  "seed": 402},
+    {"name": "gemv_m1_f16",          "m": 1,   "n": 1280, "k": 8192,  "dtype": "float16",  "seed": 403},
+    {"name": "nonpow2_dims_f16",     "m": 97,  "n": 513,  "k": 2050,  "dtype": "float16",  "seed": 404},
+    {"name": "bf16_deep_k",          "m": 256, "n": 1280, "k": 7168,  "dtype": "bfloat16", "seed": 405},
+    {"name": "splitk_regime_bf16",   "m": 32,  "n": 640,  "k": 16384, "dtype": "bfloat16", "seed": 406}
+  ]
+}

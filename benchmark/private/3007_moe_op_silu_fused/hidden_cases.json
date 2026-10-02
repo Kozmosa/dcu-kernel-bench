@@ -1,0 +1,11 @@
+{
+  "task_id": "3007_moe_op_silu_fused",
+  "cases": [
+    {"name": "hidden_min_m1_topk1_f16",     "m": 1,   "n": 32,  "k": 64,  "e": 4,  "top_k": 1, "block_size_m": 16, "mul_routed_weight": true,  "quant": "dense",     "dtype": "float16",  "seed": 3101},
+    {"name": "hidden_nonpow2_noroute_bf16", "m": 5,   "n": 100, "k": 96,  "e": 6,  "top_k": 3, "block_size_m": 16, "mul_routed_weight": false, "quant": "dense",     "dtype": "bfloat16", "seed": 3102},
+    {"name": "hidden_fp8_block128_bf16",    "m": 16,  "n": 128, "k": 256, "e": 8,  "top_k": 4, "block_size_m": 32, "mul_routed_weight": true,  "quant": "fp8_block", "block_n": 128, "block_k": 128, "dtype": "bfloat16", "seed": 3103},
+    {"name": "hidden_fp8_block64_f16",      "m": 7,   "n": 96,  "k": 192, "e": 4,  "top_k": 2, "block_size_m": 8,  "mul_routed_weight": true,  "quant": "fp8_block", "block_n": 64,  "block_k": 64,  "dtype": "float16",  "seed": 3104},
+    {"name": "hidden_bsm1_nopad_f16",       "m": 3,   "n": 48,  "k": 64,  "e": 3,  "top_k": 2, "block_size_m": 1,  "mul_routed_weight": true,  "quant": "dense",     "dtype": "float16",  "seed": 3105},
+    {"name": "hidden_sparse_experts_bf16",  "m": 9,   "n": 160, "k": 320, "e": 24, "top_k": 2, "block_size_m": 16, "mul_routed_weight": true,  "quant": "dense",     "dtype": "bfloat16", "seed": 3106}
+  ]
+}

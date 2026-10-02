@@ -1,0 +1,9 @@
+{
+  "task_id": "3002_moe_align_block_size",
+  "cases": [
+    {"name": "perf_m4096_e8_k2_bs128",    "num_tokens": 4096,    "num_experts": 8,   "top_k": 2,  "block_size": 128, "ids_dtype": "int64", "dist": "topk",    "seed": 502},
+    {"name": "perf_m131072_e128_k8_bs64", "num_tokens": 131072,  "num_experts": 128, "top_k": 8,  "block_size": 64,  "ids_dtype": "int64", "dist": "topk",    "seed": 503},
+    {"name": "perf_m2000000_e64_k8_bs64",  "num_tokens": 2000000, "num_experts": 64,  "top_k": 8,  "block_size": 64,  "ids_dtype": "int64", "dist": "uniform", "seed": 504}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

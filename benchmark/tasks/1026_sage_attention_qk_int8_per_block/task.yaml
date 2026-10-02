@@ -1,0 +1,74 @@
+id: "1026_sage_attention_qk_int8_per_block"
+name: sage_attention_qk_int8_pv_fp16_fwd
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  SageAttention 风格非 causal attention 前向的自包含 KernelBench 题目文件
+  （reference.py 即题目文件，同时镜像到 benchmark/kernelbench_compat/level3/），
+  可直接走 PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 3 --problem-id 1026）。题面取量化后
+  kernel 阶段子集：Q/K 以 per-block int8 码字 + per-block float32 scale 给出
+  （Q 沿序列每 128 行一块、K 每 64 行一块，softmax scale 与 log2(e) 已折入
+  q_scale），V 保持 fp16；kernel 需做 int8 QK^T 的整数累加、按块反量化、
+  在线 softmax（exp2 域语义等价于自然域 softmax）、PV（源算子数值方案为
+  fp16 分片矩阵乘 + float32 累加），单张量输出 out（不含 LSE）。支持
+  MHA/GQA、HND/NHD 布局、bool 掩码（[qo_len, kv_len] 对 batch/头共享）；
+  qo_len 与 kv_len 可不相等、可非分块整数倍。验收与官方测试同口径：以
+  float32 精确注意力参考实现 + atol/rtol 2e-2 终审。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q_int8,    dtype: int8,            layout: contiguous, ndim: 4, shape: "HND [batch, num_q_heads, qo_len, head_dim] / NHD [batch, qo_len, num_q_heads, head_dim]"}
+    - {name: k_int8,    dtype: int8,            layout: contiguous, ndim: 4, shape: "HND [batch, num_kv_heads, kv_len, head_dim] / NHD [batch, kv_len, num_kv_heads, head_dim]"}
+    - {name: v,         dtype: float16,         layout: contiguous, ndim: 4, shape: "与 k_int8 同布局同头数"}
+    - {name: q_scale,   dtype: float32,         layout: contiguous, ndim: 3, shape: "[batch, num_q_heads, ceil(qo_len/128)]"}
+    - {name: k_scale,   dtype: float32,         layout: contiguous, ndim: 3, shape: "[batch, num_kv_heads, ceil(kv_len/64)]"}
+    - {name: attn_mask, dtype: bool,            layout: contiguous, ndim: 2, shape: "[qo_len, kv_len]"}
+  outputs:
+    - {name: out, dtype: float16, layout: contiguous, ndim: 4, shape: "与 q_int8 同形状"}
+  init_inputs:
+    - {name: tensor_layout, dtype: str, layout: scalar, note: "HND / NHD"}
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；hidden/perf case 覆盖全域）
+  fixed_family: {batch: 2, num_kv_heads: 4, query_group_size: 2, num_q_heads: 8, qo_len: 256, kv_len: 512, head_dim: 64, tensor_layout: HND, mask_mode: random}
+  dynamic: true
+  invariants:
+    - "num_q_heads 是 num_kv_heads 的整数倍（GQA；相等即 MHA）"
+    - "head_dim ∈ {64, 128}"
+    - "q_scale.shape == [batch, num_q_heads, ceil(qo_len/128)]，k_scale.shape == [batch, num_kv_heads, ceil(kv_len/64)]"
+    - "qo_len, kv_len >= 1 且可不相等、可非分块整数倍（尾块照常参与）"
+    - "attn_mask 每行至少一个 True（softmax 分母恒正）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  float32:  {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较（单张量输出 out）"
+  note: >
+    与官方测试同口径（量化前 fp16 输入 vs 精确注意力，atol=rtol=2e-2）。
+    本题 reference 直接消费 int8 码字（量化误差已在输入侧确定），out 的
+    残余偏差只来自 kernel 数值方案（如 fp16 分片 PV），2e-2 覆盖官方
+    测试观察到的量化 + fp16 PV 全部误差。以上为本评测集的验收容差，用于
+    离线终审。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
+    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
+    与上表不同——在线结论不能替代终审（采用 fp16 分片 PV 的实现可能
+    只能通过离线终审）。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.addmm
+  - F.linear
+  - torch.einsum
+  - torch.softmax

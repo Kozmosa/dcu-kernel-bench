@@ -1,0 +1,45 @@
+task_id: "2005_moe_activation"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/moe_activation.py
+      sha256: f9bb1757302b85dbf1c98b9d8f605007fdb40f102589fd1c937feaf05f985e9e
+      role: device_kernel   # 全部 6 个核心 Triton kernel（activation_and_mul / activation_no_mul_1d / gelu_tanh_and_mul / gelu_tanh_no_mul_1d / swiglu_variant_1d / swiglu_oai_interleaved_1d）都在该文件内
+    - path: op_tests/test_swiglu_variant_compare.py
+      sha256: d1cba22c0dfc8905d1dd1b5e97f97c66c2d454726e9cf0dfb0917f610294e06c
+      role: official_test   # torch_swiglu_variant（mode 0/1/2）为语义唯一权威
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0f6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # 激活原语、钳位、门控乘、chunked/interleaved 取数全部在 Triton kernel 内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 torch 参考移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：moe_activation.py 的 MoE FFN 激活分派全集——gated chunked 布局
+    silu 三门控（无参=SiLU(gate)*up；limit=SiLU(gate')*up'，即官方 mode 1；
+    alpha+limit=gate'*sigmoid(alpha*gate')*(up'+1)，即官方 mode 0）、gelu
+    （erf 精确）、gelu_tanh、swiglustep（官方 mode 2，先 SiLU 后上限钳位）、
+    gated interleaved 布局 swigluoai（题面更名 swiglu_interleaved 以规避
+    溯源词），以及非 gated 的 silu_no_mul / gelu_no_mul / gelu_tanh_no_mul /
+    relu2；覆盖全部 6 个核心 kernel。语义依据与冲突处理：mode 0/1/2
+    （alpha/limit 钳位族）以官方测试 torch_swiglu_variant 为唯一权威逐行
+    移植；其余变体官方测试未覆盖，按源码 kernel 公式（tl.exp / tl.erf /
+    tl.sigmoid 链）移植并在构建自检中与题目 Model 交叉验证。gelu_tanh 的
+    tanh 源码写作 2*sigmoid(2x)-1，题面参考用 torch.tanh（同一公式，fp32
+    偏差 ~1e-7，远小于容差）；源码 _apply_activation 的非法参数组合校验
+    发生在调用期，题面移到 Model 构造期（等价、更早暴露），非法组合不在
+    任何 case 中出现。_ACTIVATION_ALIASES 别名（gelu_pytorch_tanh* / situ）
+    与显式 is_gated 交叉分派未入题面，留作后续题；与 activation.py
+    （silu/gelu 原语 + MXFP4 融合，2001）、add_swiglu.py（带 Add 与反向，
+    2002）同族不同形态、互不重叠，各自独立成题。case 由题目文件内
+    make_inputs(**case) 确定性生成（torch.Generator(seed)，消费顺序
+    x = randn * scale 后 cast；scale 仅放大输入幅度以覆盖钳位边界）。

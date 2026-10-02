@@ -1,0 +1,49 @@
+task_id: "3010_topk"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/topk.py
+      sha256: 0f27b4555b076c964c519a8c72ed23436357500bb1f1dc9ba251247f41fe88e5
+      role: device_kernel   # _topk_kernel（1-stage 短行）+ topk_stage1/stage2 + bitonic argsort（2-stage 长行）
+    - path: op_tests/triton_tests/test_topk.py
+      sha256: cfaca5ac882d449d5ad53cc391bb3bbddf1c49b3424b93e968341e09f08cef5e
+      role: official_test   # 语义唯一权威（torch.topk 参照 + 下标精确相等）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面取源算子 dispatcher topk() 的 last-dim / largest=True / sorted=True
+    全语义（值 + 原始列下标），即官方测试 test_topk 实际启用的参数域
+    （fp32；batch 1..1335；hiddensize 16/128256；k 2/8；输入为 arange 的
+    行内随机置换——互异无平局）。语义依据：官方参考 torch.topk(x, k,
+    largest=True)，下标 assert_equal（atol=0/rtol=0）、值 assert_close
+    （atol=1e-4*dim, rtol=1.3e-6）；本题输出按评测协议单张量打包为
+    (B, 2k) float32（[values|indices]），列下标 < 2^24 在 fp32 中精确，
+    验收整体取逐位精确档——与官方下标判定一致、严于官方值容差。与官方
+    测试无冲突（其 FLOAT_DTYPES 中被注释的 fp16/bf16 档按同一互异值分布
+    外延为 dtype 变体，仅为扩大覆盖、非权威域；低精度下 arange 不再互异，
+    生成器改用 binade 铺值保持互异）。largest=False / sorted=False /
+    dim!=-1 被源 dispatcher 显式 ValueError 排除，kpool_topk（池化变体）
+    留作后续题。机械按关键词归入 moe 家族（MoE 门控 top-k 路由为主要
+    用途），语义为通用行内 top-K 选择算子。
+    独立复核修复（2026-10-02）：task.yaml 不再重复维护 source 溯源块——来源
+    （repo / commit / files / sha256）以本文件为唯一记录，task.yaml 内不含任何
+    溯源词（含维护侧资产目录名与库名，二者原在注释中出现）；reference.py 与
+    compat 镜像的 docstring 禁用列表保留源库名，系题面四要素规范明确要求的
+    规则声明（static_audit 审计前剥离 docstring，不参与匹配）。另据复核发现
+    的框架层缺口（static_audit 为大小写不敏感裸子串匹配，函数名形式
+    torch.topk 抓不到 Tensor 方法形式 x.topk(），本题 forbidden 增补带点方法
+    形式 .topk( / .sort( / .argsort( / .kthvalue(，同时覆盖函数与方法两种
+    写法。已知代价：.sort( 同样命中 Triton 原语 tl.sort(——该原语只排序值、
+    无法产出本题必需的下标通道，对完整解无贡献，禁用无损；.mode( 未收录
+    （mode 取众数并非 topk 捷径）。该方法形式缺口影响全部任务的
+    static_audit，属评测框架层问题，此处仅在题目层面以 forbidden 条目收窄。

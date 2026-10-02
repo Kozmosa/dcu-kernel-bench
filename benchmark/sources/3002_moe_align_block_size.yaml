@@ -1,0 +1,54 @@
+task_id: "3002_moe_align_block_size"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/moe_align_block_size.py
+      sha256: f950b961fff08ab75e3f29ac4c4788d0096a200883c7b949cf2b9350b485b279
+      role: device_kernel   # stage1-4 Triton kernel：分桶计数/前缀扫描/块数前缀和/散射写排布全部在 tl.jit kernel 内完成
+    - path: op_tests/triton_tests/test_moe_align_block_size.py
+      sha256: 094ab42ce98b84d9fd31baab73b2d885e4c0c99ad712f14064f7f2d832cba87a
+      role: official_test   # _torch_moe_align_block_size / torch_moe_align_block_size 为语义唯一权威
+    - path: LICENSE
+      sha256: 844e3a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # 四 stage（计数→扫描→前缀和→散射）全部在 Triton tl.jit kernel 内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 torch 参考实现移植进题目文件 Model（向量化 eager，逐位等价）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：纯 Triton 独立实现的 moe_align_block_size（topk_ids 已给定，
+    token 按专家分桶 + block_size 对齐排布，产出 sorted_token_ids /
+    expert_ids / num_tokens_post_pad 三件套），不含 grouped GEMM 本体、不含
+    路由打分；覆盖官方测试全部 (M, E, top_k, block_size) 族的语义，并按
+    官方算法的天然定义域扩展边界 case（空专家、行内重复专家、E=1 且计数
+    恰为 block_size 倍数、非 2 次幂 block_size、int32 ids）。语义依据为
+    官方测试 _torch_moe_align_block_size（逐行移植为向量化 eager，构建自检
+    oracle 实测最大绝对偏差 0）。与官方测试的三处差异均记录如下——
+    (1) 输出生效区域：官方 wrapper 中 expert_ids 为 torch.empty 且只写前
+    sum_e n_blocks_e 个位置，尾部为未定义内存，官方测试也只比较
+    expert_ids[:E]；本题为可判定把尾部 [S/B, L2) 定义为 -1 哨兵（题面
+    docstring 明示，实现只需初始化为 -1）。sorted_token_ids 的尾部在官方
+    参考中已定义为哨兵 N，题面沿用。(2) 题面新增全域形状约束 L1 =
+    N + E*(B-1) <= 2^24 与 fp32 三段打包输出协议：KernelBench 单张量输出
+    协议要求全部整数输出（含哨兵 N 与 S <= L1）在 fp32 中精确表示，官方
+    测试最大 case L1 = 28832 远低于该界，不构成对官方语义的收窄；perf
+    case 的规模上限（N = 1600 万）即按此界选取。(3) 输入分布：官方
+    input_helper 用
+    fp16 softmax + topk（行内专家互不相同），题面 make_inputs 的 dist=topk
+    与其同分布（fp16 打分值上的 fp32 softmax）；另设 dist=uniform 覆盖行内
+    重复（官方 kernel 对重复值同样按展平下标独立处理，无额外约束）。
+    (4) 官方测试的 torch.eq 断言表达式未加 assert 且 sorted/expert 只做
+    部分比较，本题以逐位精确匹配全量比较收严。fused_moe.py 内嵌的
+    moe_align_block_size_stage1-4 为本文件的副本，以本文件为准。其余变体
+    留作后续：grouped GEMM 本体与 topk 路由打分归同族 moe 姊妹题，
+    vLLM/SGLang 的 CUDA/hip 实现及 sglang 大 E 变体不进题面。case 由题目
+    文件内 make_inputs(**case) 确定性生成（torch.Generator(seed)，topk 分布
+    单次 randn、uniform 分布单次 randint）。

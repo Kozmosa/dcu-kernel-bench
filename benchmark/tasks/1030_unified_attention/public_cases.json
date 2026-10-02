@@ -1,0 +1,22 @@
+{
+  "task_id": "1030_unified_attention",
+  "note": "model_class 题目：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族与 init 超参，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。",
+  "shape_family": {
+    "num_seqs": 4,
+    "num_kv_heads": 2,
+    "query_group_size": 4,
+    "num_q_heads": 8,
+    "head_size": 128,
+    "block_size": 16,
+    "max_seq_len": 512,
+    "query_lens": [1, 24, 1, 9],
+    "max_blocks_per_seq": 32,
+    "num_blocks": 136,
+    "total_q": 35,
+    "sliding_window": 64,
+    "softcap": 50.0,
+    "use_sinks": true,
+    "dtype": "bfloat16"
+  },
+  "init_inputs": [128, 64, 50.0, true]
+}

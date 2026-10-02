@@ -1,0 +1,11 @@
+{
+  "task_id": "4006_gemm_a16w16",
+  "cases": [
+    {"name": "minimal_1x1x1_bf16",   "m": 1,     "n": 1,    "k": 1,     "dtype": "bfloat16", "seed": 301},
+    {"name": "odd_dims_f16",         "m": 37,    "n": 53,   "k": 131,   "dtype": "float16",  "seed": 302},
+    {"name": "gemv_m1_f16",          "m": 1,     "n": 4096, "k": 2048,  "dtype": "float16",  "seed": 303},
+    {"name": "ktail_k1000_bf16",     "m": 64,    "n": 512,  "k": 1000,  "dtype": "bfloat16", "seed": 304},
+    {"name": "skinny_32_256_7168_f16", "m": 32,  "n": 256,  "k": 7168,  "dtype": "float16",  "seed": 305},
+    {"name": "deep_k_bf16",          "m": 128,   "n": 4096, "k": 16384, "dtype": "bfloat16", "seed": 306}
+  ]
+}

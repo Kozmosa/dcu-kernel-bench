@@ -1,0 +1,11 @@
+{
+  "task_id": "2002_add_swiglu",
+  "cases": [
+    {"name": "hidden_empty_batch_f16",    "num_rows": 0,   "width": 64,     "dtype": "float16",  "seed": 101},
+    {"name": "hidden_minimal_bf16",       "num_rows": 1,   "width": 2,      "dtype": "bfloat16", "seed": 102},
+    {"name": "hidden_nonpow2_f16",        "num_rows": 17,  "width": 66,     "dtype": "float16",  "seed": 103},
+    {"name": "hidden_odd_halfwidth_bf16", "num_rows": 33,  "width": 1026,   "dtype": "bfloat16", "seed": 104},
+    {"name": "hidden_llm_width_f16",      "num_rows": 257, "width": 28672,  "dtype": "float16",  "seed": 105},
+    {"name": "hidden_single_row_wide_bf16", "num_rows": 1, "width": 16384,  "dtype": "bfloat16", "seed": 106}
+  ]
+}

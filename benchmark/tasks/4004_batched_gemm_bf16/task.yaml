@@ -1,0 +1,73 @@
+id: "4004_batched_gemm_bf16"
+name: batched_gemm_bf16
+family: quant_gemm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  batch 维 bf16×bf16 GEMM：激活 (B,M,K) × 权重 (B,N,K)（行主存放，转置 GEMM
+  语义），float32 累加，可选 bias (B,1,N)（融合顺序：fp32 结果先 cast 到输入
+  dtype 再加 bias），输出 (B,M,N)，dtype 为 bfloat16/float16。batched_gemm_*
+  组内唯一的无量化成员（纯 bf16 输入、无 scale 反量化）。本题为自包含的
+  KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 4004），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,      dtype: bfloat16,                  layout: contiguous, ndim: 3, shape: [B, M, K]}
+    - {name: weight, dtype: bfloat16,                  layout: contiguous, ndim: 3, shape: [B, N, K]}
+    - {name: bias,   dtype: bfloat16,                  layout: contiguous, ndim: 3, shape: [B, 1, N]}   # use_bias=False 时为占位张量，forward 忽略
+  outputs:
+    - {name: out, dtype: [bfloat16, float16], layout: contiguous, ndim: 3, shape: [B, M, N]}
+  init_inputs:
+    - {name: use_bias,  dtype: bool, layout: scalar}
+    - {name: out_dtype, dtype: str,  layout: scalar}   # "bfloat16" | "float16"
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见下）
+  fixed_family: {B: 8, M: 128, N: 256, K: 512, use_bias: true, out_dtype: "bfloat16"}
+  dynamic: true
+  invariants:
+    - "x.shape[2] == weight.shape[2]（K 维一致）"
+    - "bias 形状 (B, 1, N)，dtype bfloat16；use_bias=False 时可被忽略"
+    - "输入值域：x/weight 为 [-20, 20) 整数、bias 为 [0, 10) 均匀值（均以 bfloat16 表示）"
+    - "B/M/N/K >= 1，允许非 2 次幂与 K 不整除 tile"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 GEMM 累加、按 kernel 融合顺序 cast 后比较输出 dtype"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。bf16 输入提升 fp32 后乘积累加误差
+    可忽略，误差主要来自输出 dtype 的舍入（bf16 相对精度约 4e-3）与 bias 分支
+    的提前 cast，2.0e-2 覆盖且无需更宽。已知差异记录：无 bias + float16
+    输出路径，本题 Model 与设备 kernel 一致地采用 fp32 结果单次 cast 到
+    out_dtype 的 epilogue；官方测试参考实现是先存 bf16 缓冲再转 float16
+    的双舍入，两者至多相差 1 个 bf16 ulp（元素量级 ~2^14 处实测最大绝对
+    偏差 128，rtol 2e-2 覆盖、容差外元素 0）。官方测试仅参数化 bf16 输出，
+    该路径无官方 oracle，按 compare 行以 kernel 融合顺序为准。在线（搜索
+    循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一
+    cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代
+    终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+# torch.baddbmm：bias 融合 ATen 捷径（beta*input + alpha*(b1@b2) 一步实现
+# 本题全部语义），static_audit 为逐 token 子串匹配，torch.bmm 拦不住它
+forbidden:
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.addmm
+  - torch.baddbmm
+  - torch.einsum
+  - F.linear
+  - functional.linear
+  - aiter
+
+# 溯源信息（repo/commit/文件哈希）由维护者在题面之外的准入记录中维护，
+# 不随题面分发（隔离检查要求 task.yaml 不含溯源词）。

@@ -1,0 +1,74 @@
+id: "3002_moe_align_block_size"
+name: moe_align_block_size
+family: moe
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  MoE grouped GEMM 的调度前置（model_class / KernelBench 兼容形态）：把路由
+  输出的 topk_ids（[num_tokens, top_k] 的专家编号）按专家分桶，每桶按
+  block_size 向上取整对齐，产出 grouped GEMM 调度三件套——
+  sorted_token_ids（对齐排布后的展平 token 下标，填充哨兵 = N =
+  num_tokens*top_k）、expert_ids（每个对齐块的专家编号，尾部 -1 哨兵）、
+  num_tokens_post_pad（填充后总槽位数，恒为 block_size 的倍数）。官方实现
+  为四个串行 Triton stage（分桶计数 -> 按专家前缀扫描 -> 对齐块数前缀和 ->
+  散射写排布 + 块专家表），本题为该调度前置本身，不含 grouped GEMM、不含
+  路由打分。输出按 KernelBench 单张量协议三段打包为一维 float32
+  （[sorted_token_ids | expert_ids | num_tokens_post_pad]）。本题为自包含的
+  KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 3002），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: topk_ids, dtype: [int64, int32], layout: contiguous, ndim: 2, shape: [num_tokens, top_k]}   # 元素 ∈ [0, num_experts)
+  outputs:
+    - {name: out, dtype: float32, layout: contiguous, ndim: 1, shape: [L1 + L2 + 1]}   # [sorted_token_ids | expert_ids | num_tokens_post_pad] 三段打包
+  init_inputs:
+    - {name: num_experts, dtype: int64, layout: scalar}
+    - {name: block_size, dtype: int64, layout: scalar}
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见下）
+  fixed_family: {num_tokens: 256, num_experts: 16, top_k: 4, block_size: 32, ids_dtype: int64,
+                 L1: 1520, L2: 48, out_len: 1569}
+  dynamic: true
+  invariants:
+    - "topk_ids 元素 ∈ [0, num_experts)；行内允许重复；num_tokens/top_k >= 1 且 top_k <= num_experts"
+    - "num_experts >= 1、block_size >= 1，均允许非 2 次幂（语义只依赖 ceil 除法）"
+    - "L1 = num_tokens*top_k + num_experts*(block_size-1)；L2 = ceil(L1/block_size)；S = sum_e ceil(cnt_e/block_size)*block_size <= L1"
+    - "L1 <= 2^24（保证输出全部整数值——哨兵 N <= L1、下标 < N、专家编号 < E、S <= L1、L2 <= L1——在 fp32 中精确表示，不受 fp32 就近舍入影响）"
+    - "输出打包契约：out[:L1] = sorted（哨兵 N=num_tokens*top_k），out[L1:L1+L2] = 块专家 id（前 S/B 个有效、尾部 -1），out[L1+L2] = S"
+
+tolerance:
+  float32:  {atol: 0, rtol: 0}
+  compare: >
+    输出为单个一维 float32 张量（整数三段打包）：排序下标/哨兵 N/块专家
+    id/-1 尾哨兵/总槽位数全部是整数且绝对值 <= 2^24（shape 全域约束
+    L1 <= 2^24 保证），在 fp32 中精确表示，任何一位偏差都是语义错误——
+    要求逐位精确匹配（atol=0 / rtol=0）。
+  note: >
+    本题无浮点算术（纯整数调度计算），不适用 fp16/bf16 的 2.0e-2 档；
+    整数输出按验收规范精确匹配。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，整数偏差 >=1 必然超差——在线结论不能
+    替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）；标准列表中 attention/
+# GEMM/softmax 类捷径与本纯整数调度算子无关，按题裁剪，另加分桶/排序
+# ATen 捷径（它们一步即给出核心结果）
+forbidden:
+  - aiter
+  - torch.sort
+  - torch.argsort
+  - torch.bincount
+  - torch.cumsum
+  - torch.histc
+  - torch.unique
+  - torch.repeat_interleave
+
+# 维护者溯源与准入证据见 benchmark/sources/3002_moe_align_block_size.yaml

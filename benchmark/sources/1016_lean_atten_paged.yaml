@@ -1,0 +1,56 @@
+task_id: "1016_lean_atten_paged"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/lean_atten_paged.py
+      sha256: c103ace042f9c876ffa22afecd89ba30d839a32e60de17ee314631c4b3b47193
+      role: device_kernel   # 核心计算全部在源文件内的 Triton kernel（la_persistent_paged / _attn_lean_tile）
+    - path: op_tests/triton_tests/test_la_paged.py
+      sha256: a42f2d101a3be4d3550a7ea4744b0c1eee0dd8bd59353088f397f2cc4cab616f
+      role: official_test   # 语义唯一权威（test_persistent_lean_attention 内含 PyTorch 参考实现）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：Lean Attention 的分页 KV 变体（ragged batch decode）。取
+    官方测试 test_persistent_lean_attention 全部 17 组参数化共同覆盖的语义：
+    每 head 一张独立物理块表（随机置换）、batch_num_block_n 累积块数切分
+    请求、n_ctx_q=16、MHA（q/k/v 同 head 数）、fp16（题面另放开 bf16）、
+    sm_scale 由 init 传入（官方恒 0.5，题面缺省亦取 0.5）、每请求 n_ctx 为
+    BLOCK_N 整数倍、page_size（=kernel 的 BLOCK_N）固定 64（官方主体配置；
+    BLOCK_N=256 长上下文形态留作后续题）。
+    语义依据：官方测试的 PyTorch 参考实现——按块表顺序以
+    block_id*BLOCK_N+offset 展开行索引 gather K/V，QK^T*sm_scale 后 fp32
+    softmax、p cast 回 q.dtype 再 PV；被测 kernel la_persistent_paged 经
+    _attn_lean_tile 做等价的 exp2 在线 softmax（qk_scale=sm_scale*log2e），
+    数学等价无冲突。
+    与官方测试的差异处理：① 官方测试块表是全部物理块的完整置换（无垃圾
+    块），题面推广为"物理块池可大于已用块数、未引用块为垃圾"（与本评测集
+    1001/1002 的分页语义一致）；kernel 只经表访问块，语义良定义，无冲突；
+    ② 源文件头明示"N_CTX with non-integer number of BLOCK_N"为待加特性，
+    官方用例 n_ctx 全为 BLOCK_N 整数倍，题面显式约束 KV 长度为 page_size
+    正整数倍，尾部半块形态不纳入；③ kernel 的 n_ctx_q>BLOCK_M（多 m 块）
+    路径在 batch=1 时 req_size 取 tiles_per_head=num_m_blocks*num_n_blocks，
+    会越过块表宽度读取（未测试的退化区），官方用例全部 n_ctx_q=16=BLOCK_M，
+    题面固定 n_ctx_q=16；④ GQA 官方未实现（源码头"To be added: GQA"），
+    题面固定 MHA。kernel 的 persistent 调度参数（total_programs/BLOCK_M/
+    waves_per_eu/num_warps）与工作区张量（Mp/Lp/Op/locks）是 launch 细节，
+    不进入题面接口。容差：官方 fp16 atol=1e-2/rtol=3e-3，题面沿用本评测集
+    统一的 2e-2/2e-2（见 task.yaml note）。
+    接口对齐离线终审 audit_model_class.py 约定（2026-10-02 复核修复）：case
+    携带 head_size 字段供 Model(case["head_size"]) 单参构造（page_size 固定
+    64 成为题面常量、sm_scale 缺省 0.5），make_inputs 接受 seq_lens 别名形参
+    （与 ctx_lens 等价）；task.yaml 不含溯源 source 块，溯源仅记录于本文件；
+    forbidden 列表另列 Tensor 方法与 F.xxx 捷径形式（.matmul( / F.softmax /
+    torch.baddbmm 等），与 static_audit 的子串匹配方式匹配。
+    其余变体留作后续题：非分页稠密布局的 lean_atten（同族另题）、GQA、
+    尾部半块掩码、fp8 KV、autotune 配置族。

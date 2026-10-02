@@ -1,0 +1,65 @@
+id: "2009_softmax"
+name: softmax_rowwise_online
+family: norm_rope_act
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  2D 行级 softmax（数值稳定 online 形态）：对 (M, N) 输入逐行计算
+  y = exp(x - max_row(x)) / sum(exp(x - max_row(x)))，max / exp / 求和
+  全程 float32，输出 cast 回输入 dtype。目标实现为单个 Triton kernel 内
+  两遍行内分块扫描：第一遍 online 维护运行最大值 m 与重标定部分和
+  s <- s * exp(m_old - m_new) + sum_block exp(x - m_new)，第二遍写出
+  exp(x - m) / s。fp16/bf16 输入，M、N 任意（含 N=1、非 2 的幂、超出单
+  block 上限的超长行，需掩码 / 分块循环；fp16/bf16 的单 block 上限为
+  65536/element_size = 32768 个元素）。本题为自包含 KernelBench 题目文件
+  （reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 2009），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x, dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [M, N]}
+  outputs:
+    - {name: y, dtype: same_as_x, layout: contiguous, ndim: 2, shape: [M, N]}
+  init_inputs: []            # softmax 前向无超参数
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见 invariants）
+  fixed_family: {M: 1024, N: 8192, dtype: "float16"}
+  dynamic: true
+  invariants:
+    - "M >= 1 且 N >= 1（允许非 2 的幂、非 16 对齐；N 超出单 block 归约上限时需分块循环，行尾越界元素不得参与 max 与求和）"
+    - "行间完全独立；N=1 时该行输出恒为 1"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；归一化全程 float32"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审，与官方测试对 fp16/bf16 输出
+    采用的 atol=rtol=1e-2 相容。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - aiter
+  - torch.softmax
+  - torch.nn.functional.softmax
+  - torch.nn.Softmax
+  - torch.log_softmax
+  - torch.nn.functional.log_softmax
+  - torch.nn.LogSoftmax
+  - torch.special.softmax
+  - torch.special.log_softmax
+
+source:
+  repo: OpenDAS/aiter
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  path: aiter/ops/triton/softmax.py   # 仅维护者溯源用

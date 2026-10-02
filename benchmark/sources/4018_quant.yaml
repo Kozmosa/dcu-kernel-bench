@@ -1,0 +1,51 @@
+task_id: "4018_quant"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/quant.py
+      sha256: f95d4f81f54af62a3f0570d48fc6110c20ed9a2a357dea2c9a1aac768b951b6c
+      role: device_kernel   # 静态/动态 per-tensor、动态 per-token（1D/n128/4row 三分块路径）的 fp8/int8 量化 kernel 全部为 tl.jit 实现
+    - path: op_tests/triton_tests/test_quant.py
+      sha256: eddff9d2c47670a6617bd23c7a0a1882fc062bec42aed38b87ba341a760c4344
+      role: official_test   # 三个 torch_* 参考函数为语义唯一权威
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # amax 归约、scale、nearbyint/cast 量化码字全部在 tl.jit kernel 内完成
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 torch_* 参考移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：官方测试覆盖的全部三个公开 API——static_per_tensor（给定
+    scale）、dynamic_per_tensor（absmax 归约 atomic_max 求单一 scale，无除零
+    保护）、dynamic_per_token（逐行 scale，clamp(1e-10) 保护）——的目标 dtype
+    取 int8（round_half_even）与 fp8 e4m3 两条线；输入取官方测试的
+    fp16/bf16 族（含 193x75、93x75、1281x1232 等非 2 次幂与 32x8192 宽行、
+    257x128 全零行边界）。官方测试对 fp32 输入的参数化与评测器 fp32-cast
+    路径重合（fp16/bf16 在 fp32 中精确表示），题面 dtype 族取 fp16/bf16。
+    输出为适配 KernelBench 单张量协议的两段打包一维 float32（码字段在前、
+    scale 段在后），打包属输出整理不属核心计算。语义依据为官方测试
+    torch_static/dynamic_per_tensor_quant_fp8_i8 与
+    torch_dynamic_per_token_quant_fp8_i8（逐行移植）；与源码的两处差异均
+    记录如下——(1) Triton kernel 的量化步用 x*(1/scale) 倒数乘法（static/
+    per-tensor 路径）而官方 torch 参考与题面 reference 用 x/scale 直接除法，
+    官方测试以 atol=rtol=1e-1/1e-2 容差吸收该 1 ulp 差异，本题面按官方参考
+    的除法公式定义并写进实现约束（per-token 两者同用倒数乘法，无冲突）；
+    (2) 官方测试容差是 fp16-native 参考与 kernel 间的偏差预算，本评测集
+    参考与候选同为 fp32 确定性算术，按验收规范收紧为码字段等效精确匹配、
+    scale 段 1e-6。其余变体留作后续：同文件 _mxfp4_quant_op/
+    _dynamic_mxfp4_quant_kernel（mxfp4 位操作量化，test_quant.py 未覆盖，
+    已由 4005_fused_mxfp4_quant 承担）；官方测试另测的 per_token_quant_
+    triton/pertoken（aiter/ops/quant.py 包装 API）与 dispatch 专属大 shape
+    （4480x1232 等 CU 相关路径）不在题面，留作同族后续题；组量化归 4017。
+    case 由题目文件内 make_inputs(**case) 确定性生成（torch.Generator
+    (seed)，单次 randn；zero_rows 用于构造 per-token 的 1e-10 保护边界，
+    static 模式 scale 取 [0.5,1.5) 正数保证商在目标 dtype 值域内）。

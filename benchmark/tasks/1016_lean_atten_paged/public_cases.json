@@ -1,0 +1,15 @@
+{
+  "task_id": "1016_lean_atten_paged",
+  "note": "model_class 形态：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。",
+  "shape_family": {
+    "num_heads": 32,
+    "batch": 4,
+    "n_ctx_q": 16,
+    "head_size": 64,
+    "page_size": 64,
+    "blocks_per_req": "1..16（ctx_len = 块数 * 64，即 64..1024）",
+    "extra_blocks": 4,
+    "dtype": "float16",
+    "init_inputs": [64, 64, 0.5]
+  }
+}

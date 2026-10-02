@@ -1,0 +1,65 @@
+id: "1027_sage_attention_qk_int8_per_block_causal"
+name: sage_attention_qk_int8_per_block_causal
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  SageAttention2 风格的因果注意力前向：Q/K 按块 INT8 量化（Q 块 128 行、
+  K 块 64 行，Q 折入 sm_scale*log2(e)）、exp2 域在线 softmax、P 以 float16
+  与 V 相乘（块内 dot 输出 float16、跨块累加 float32），HND 布局、MHA/GQA、
+  qo_len == kv_len。验收真值为精确因果 scaled dot-product attention（官方
+  测试语义），容差 atol=rtol=2e-2 覆盖量化方案误差。自包含 KernelBench
+  题目文件（reference.py 即题目文件，镜像到 benchmark/kernelbench_compat/
+  level3/），可直接走 PyramidKernel 原生 model_class 路径
+  （--kernelbench-root benchmark/kernelbench_compat --level 3
+  --problem-id 1027）。starter 由框架 loader 从 Model 自动生成 ModelNew
+  scaffold（锚点：helpers / init_body / forward_stmt_N），本任务包不单独
+  提供 starter。
+
+io:
+  inputs:
+    - {name: q, dtype: [float16, bfloat16], layout: contiguous, ndim: 4, shape: [batch, num_qo_heads, qo_len, head_dim]}
+    - {name: k, dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, num_kv_heads, qo_len, head_dim]}
+    - {name: v, dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, num_kv_heads, qo_len, head_dim]}
+  outputs:
+    - {name: out, dtype: same_as_q, layout: contiguous, ndim: 4, shape: [batch, num_qo_heads, qo_len, head_dim]}
+  init_inputs:
+    - {name: head_dim, dtype: int64, layout: scalar}   # sm_scale 缺省 1/sqrt(head_dim)
+
+shape:
+  # get_inputs() 固定的 shape 族（qo_len 在 [1, 512] 均匀采样；在线评测
+  # 单一实例，shape 全域约束见 invariants）
+  fixed_family: {batch: 2, num_kv_heads: 4, query_group_size: 4, num_qo_heads: 16, head_dim: 128, max_qo_len: 512}
+  dynamic: true
+  invariants:
+    - "qo_len == kv_len（因果掩码；q/k/v 共用同一序列长度）"
+    - "num_qo_heads == num_kv_heads * query_group_size（GQA，相等即 MHA）"
+    - "head_dim ∈ {64, 128}"
+    - "HND 布局：q/k/v 最后一维连续"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较；容差即官方测试验收值，覆盖 per-block INT8 量化 + FP16 PV 方案的近似误差"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+
+source:
+  # 本文件对候选可见，不携带任何溯源词；维护者溯源信息（repo / commit /
+  # 算子文件 sha256）统一记录在 benchmark/sources/1027_sage_attention_qk_int8_per_block_causal.yaml。
+  record: "benchmark/sources/1027_sage_attention_qk_int8_per_block_causal.yaml"

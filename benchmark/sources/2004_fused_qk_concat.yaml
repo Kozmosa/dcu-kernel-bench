@@ -1,0 +1,48 @@
+task_id: "2004_fused_qk_concat"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/fused_qk_concat.py
+      sha256: 54d1f8c7152e28ed82ada497d3810c345dde4b7e1f517de41d9910fc57562a9e
+      role: device_kernel   # _unit_cat/_qk_cat_kernel（fused_qk_cat 纯拼接）+ _unit_rope_cat/_qk_rope_cat_kernel（fused_qk_rope_cat 旋转+拼接），旋转辅助复用 rope.py 的 _get_neox/gptj_rotated_x_1D
+    - path: op_tests/triton_tests/test_fused_qk_concat.py
+      sha256: 73a86db3612516639cddddd2c7498ec8a05f766c18b7b9cfacb161000cc57810
+      role: official_test   # 语义唯一权威：ref_qk_cat（torch.cat）+ ref_qk_rope_cat（经 test_rope.ref_rope_sbhd_fwd，nope_first=False）
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面取官方测试的变体子集：BHD 布局（[B, H, D]）下 fused_qk_rope_cat
+    （pe 段按 pos 索引 cos/sin 做 NEOX/GPTJ 旋转后与 nope 段拼接，
+    cos/sin 表宽全宽与前半复用两档，GQA 下 K 侧按 QH_PER_KH 去重写回）
+    与 fused_qk_cat（纯拼接）两个入口合并为一道题：is_neox / apply_rope
+    作为 __init__ 超参切换，Q/K 结果按 head 维打包为单输出张量
+    [B, QH+KH, D_nope+D_pe]（KernelBench 评测器对输出做 .shape +
+    allclose，要求单张量）。语义唯一依据为官方测试的 ref_qk_cat /
+    ref_qk_rope_cat（后者经 ref_rope_sbhd_fwd，nope_first=False，
+    rotate_half_neox/gptj 与源码 kernel 的旋转辅助逐位一致）；
+    reference 以 float32 中间计算、输出 cast 回输入 dtype。与官方测试
+    的差异处理：官方 rope 变体因 assert_close 的 fp16 紧容差（rtol≈1e-3）
+    禁用 fp16（测试内 TODO 注明 ~0.6 错误率），本题终审容差 2e-2 且题面
+    强制 fp32 中间计算，dtype 契约仍声明 fp16/bf16；隐藏 case 的 rope
+    路径全取 bf16 以对齐官方测试口径，fp16 仅用于纯拼接路径（官方
+    cat 测试为 fp16/bf16 双 dtype，拼接是纯拷贝、dtype 无关）。
+    官方 kernel 的 BLOCK_D_nope/BLOCK_D_pe 直接取维度值（tl.arange 需
+    2 次幂），本题全域放宽为任意偶数 D_pe / 任意正 D_nope（隐藏 case 含
+    768/96 非 2 次幂边界），提交 kernel 需自行分块掩码。其余变体留作
+    后续题：THD 变长布局、nope_first、rope 反向、freqs 非缓存直算等属
+    rope 单算子题（同族 suggested_id 2006，本题即其 fused-concat 变体，
+    复用其 NEOX/GPTJ 与前半复用定义）；本题不含 attention 分数计算，
+    与 attention 家族无重叠。

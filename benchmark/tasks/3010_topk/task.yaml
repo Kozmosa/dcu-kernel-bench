@@ -1,0 +1,81 @@
+id: "3010_topk"
+name: topk
+family: moe
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  行内 Top-K 选择（model_class / KernelBench 兼容形态）：对 (B, M) 得分
+  矩阵的每一行独立选出最大的 k 个值（严格降序）及其原始列下标，按评测
+  协议打包为单个 (B, 2k) float32 张量输出（前 k 列 values、后 k 列
+  indices）。语义取源算子 dispatcher topk() 的 last-dim / largest=True /
+  sorted=True 全路径（值 + 下标），题面域即官方测试 test_topk 实际启用的
+  参数域（fp32、batch 1..1335、hiddensize 16/128256、k 2/8，输入为互异
+  值的行内随机置换——无平局歧义）；另按同一分布外延 fp16/bf16 dtype
+  变体与非 2 次幂 M / 非 2 次幂 k / M=1024 路径阈值 / k=M 全行等算子边界
+  作隐藏 case。官方测试中 FLOAT_DTYPES 被注释掉的 fp16/bf16 档仅作低精度
+  变体外延，非权威依据。largest=False / sorted=False / dim!=-1 被源
+  dispatcher 显式 ValueError 排除，不入题面。机械按关键词归入 moe 家族
+  （MoE 门控 top-k 路由是主要用途），语义上是通用行内 top-K 选择算子；
+  源仓库 ops/ 顶层的 kpool_topk（池化变体）不在本题范围。题目文件自包含
+  （reference.py 即题目文件，逐字节镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 3010），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x, dtype: [float32, float16, bfloat16], layout: contiguous, ndim: 2, shape: [B, M]}   # 行内元素互不相等
+  outputs:
+    - {name: out, dtype: float32, layout: contiguous, ndim: 2, shape: [B, 2*k]}   # 单张量打包：[values | indices]
+  init_inputs:
+    - {name: k, dtype: int64, layout: scalar}   # 1 <= k <= M
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；隐藏/perf case 见维护侧资产目录）
+  fixed_family: {batch_size: 8, row_len: 128256, k: 8, dtype: float32, out_shape: [8, 16]}
+  dynamic: true
+  invariants:
+    - "B >= 1；1 <= k <= M；M >= 1 且 < 2^24（列下标在 fp32 打包中精确），可为非 2 次幂"
+    - "评测输入每行元素互不相等（互异值集合的随机置换构造），Top-K 结果唯一、无平局歧义；相等值的平局顺序不属于题面语义"
+    - "输入经评测器 cast 成 fp32 传入；输出恒为 float32 打包张量（前 k 列严格降序值，后 k 列整数列下标）"
+
+tolerance:
+  float32:  {atol: 0, rtol: 0}
+  float16:  {atol: 0, rtol: 0}
+  bfloat16: {atol: 0, rtol: 0}
+  compare: >
+    输出是纯选择结果：values 是输入值的逐位拷贝（无算术），indices 是
+    < 2^24 的整数、在 fp32 打包中精确表示——任何一位偏差都是选错元素或
+    排错顺序的语义错误，三个 dtype 档一致要求逐位精确匹配（atol=0 /
+    rtol=0）。
+  note: >
+    官方测试对 fp32 值用 atol=1e-4*dim + rtol=1.3e-6、对下标用
+    assert_equal（精确）；本验收对打包输出整体取逐位精确档，与官方下标
+    判定一致且严于官方值容差。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，精确匹配必然通过——在线结论不能替代
+    终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）；标准列表中 attention/
+# GEMM/softmax 类捷径与本选择算子无关，按题裁剪，保留源库捷径项并加选择/
+# 排序 ATen 捷径的函数与 Tensor 方法两种形式——static_audit 为大小写不敏感
+# 裸子串匹配，带点形式（如 .topk(）同时覆盖 torch.topk( 与 x.topk( 两种写法；
+# torch.mode 取众数并非 topk 捷径，故不设 .mode( 方法形式
+forbidden:
+  - aiter
+  - torch.topk
+  - torch.sort
+  - torch.argsort
+  - torch.kthvalue
+  - torch.mode
+  - .topk(
+  - .sort(
+  - .argsort(
+  - .kthvalue(
+
+# 溯源（repo / commit / 文件 sha256）统一记录在 benchmark/sources/3010_topk.yaml，
+# 本文件不重复维护来源块

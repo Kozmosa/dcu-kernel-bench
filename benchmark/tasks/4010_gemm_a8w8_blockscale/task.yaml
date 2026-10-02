@@ -1,0 +1,96 @@
+id: "4010_gemm_a8w8_blockscale"
+name: gemm_a8w8_blockscale
+family: quant_gemm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  2D 分块 scale 反量化的 8bit GEMM：fp8(e4m3) 激活 (M,K) × fp8(e4m3) 权重
+  (N,K)（行主，转置 GEMM 语义），每个元素按其所属块 (m, k//gk) /
+  (n//gn, k//gk) 的 float32 scale 反量化后做 float32 GEMM 累加，输出 (M,N)
+  cast 到 bfloat16/float16。scale 沿 K/N 两维独立分块（gk、gn 为 2 的幂，
+  尾块照常使用所在块 scale），与 per-token/per-channel 向量 scale 及
+  per-tensor scale 均不同粒度。本题为自包含的 KernelBench 题目文件
+  （reference.py 即题目文件，同时镜像到 benchmark/kernelbench_compat/level3/），
+  可直接走 PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 3 --problem-id 4010），无需任何框架改动。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,       dtype: float8_e4m3fn, layout: contiguous, ndim: 2, shape: [M, K]}
+    - {name: w,       dtype: float8_e4m3fn, layout: contiguous, ndim: 2, shape: [N, K]}
+    - {name: x_scale, dtype: float32,       layout: contiguous, ndim: 2, shape: [M, "ceil(K/group_k)"]}
+    - {name: w_scale, dtype: float32,       layout: contiguous, ndim: 2, shape: ["ceil(N/group_n)", "ceil(K/group_k)"]}
+  outputs:
+    - {name: out, dtype: [bfloat16, float16], layout: contiguous, ndim: 2, shape: [M, N]}
+  init_inputs:
+    - {name: group_k,  dtype: int64, layout: scalar}   # K 方向 scale 块大小，2 的幂
+    - {name: group_n,  dtype: int64, layout: scalar}   # N 方向 scale 块大小，2 的幂
+    - {name: out_dtype, dtype: str,  layout: scalar}   # "bfloat16" | "float16"
+    # 离线终审 harness 兼容：Model 亦接受单参 [group_k, group_n, out_dtype] 序列构造
+    # （Model(case["head_size"]) 形态，hidden/perf case 的 head_size 字段即该序列）
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见下）
+  fixed_family: {M: 128, N: 512, K: 1024, group_k: 128, group_n: 128, out_dtype: "bfloat16"}
+  dynamic: true
+  invariants:
+    - "x.shape[1] == w.shape[1]（K 维一致）；M/N/K >= 1，允许非 2 次幂"
+    - "group_k、group_n 为 2 的幂（1 ~ 1024），可互不相等"
+    - "x_scale 形状 (M, ceil(K/group_k))、w_scale 形状 (ceil(N/group_n), ceil(K/group_k))，均为 float32"
+    - "scale 归属按元素判定：k -> k//group_k、n -> n//group_n，与 kernel 的 tile 划分无关"
+    - "K 不整除 group_k / N 不整除 group_n 时尾块部分元素照常使用所在块 scale"
+    - "在线评测器把全部输入 cast 成 fp32；fp8(e4m3) 有限值在 fp32 精确表示"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 反量化 + float32 GEMM 累加后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。fp8 码字反量化后逐块累加为
+    float32（与逐元素反量化后累加在数学上相等，仅舍入顺序不同），误差主要
+    来自输出 dtype 的舍入（bf16 相对精度约 4e-3）与 fp32 累加顺序差异，
+    2.0e-2 覆盖且无需更宽（官方测试用 atol 0.01 / rtol 1e-2 亦通过）。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与
+    模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论
+    不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）。static_audit 按字面
+# 子串匹配（docstring/注释先剥离），故除 ATen 顶层拼写外，另列方法调用形式
+# （.mm( 等同时覆盖 torch.ops.aten.mm( 全限定名与张量方法 a.mm(），以及 @
+# 运算的典型伪装写法 .t()（x @ w.t() 即 F.linear 的字面变体）。@ 本身不可
+# 列入（会误杀 @triton.jit 装饰器），裸 @ 直乘由 Model docstring 软约束兜底。
+forbidden:
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.addmm
+  - torch.einsum
+  - torch._int_mm
+  - torch._scaled_mm
+  - F.linear
+  - functional.linear
+  - aiter
+  - .mm(
+  - .bmm(
+  - .addmm(
+  - .matmul(
+  - .einsum(
+  - ._int_mm(
+  - ._scaled_mm(
+  - .linear(
+  - torch.ops.aten.mm
+  - torch.ops.aten.matmul
+  - torch.ops.aten.bmm
+  - torch.ops.aten.addmm
+  - torch.ops.aten.einsum
+  - torch.ops.aten._int_mm
+  - torch.ops.aten._scaled_mm
+  - torch.ops.aten.linear
+  - .t()
+
+# 溯源元数据（repo/commit/文件 sha256）只存 benchmark/sources/4010_gemm_a8w8_blockscale.yaml，
+# tasks 侧三文件不携带，避免隔离扫描误报。

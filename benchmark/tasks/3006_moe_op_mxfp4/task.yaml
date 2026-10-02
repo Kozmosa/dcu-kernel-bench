@@ -1,0 +1,73 @@
+id: "3006_moe_op_mxfp4"
+name: fused_moe_mxfp4
+family: moe
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  MoE 分组 GEMM：mxfp4 e2m1 打包激活（双 nibble 打包 + e8m0 块 scale）×
+  mxfp4 e2m1 打包专家权重，按 topk_ids 逐 (token, 专家) 槽位做 GEMM 并乘
+  路由权重（mul_routed_weight 恒为 True），输出 (M, top_k, N) bfloat16。
+  输入契约取量化后入口（码字 uint8 + e8m0 scale 字节 uint8），token-expert
+  对齐调度元数据（sorted_token_ids / expert_ids / num_tokens_post_padded）
+  不进题面。本题为自包含的 KernelBench 题目文件（reference.py 即题目文件，
+  同时镜像到 benchmark/kernelbench_compat/level3/），可直接走
+  PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 3 --problem-id 3006），无需任何框架
+  改动。starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: a_q,          dtype: uint8,  layout: contiguous, ndim: 2, shape: [M, "K//2"]}
+    - {name: a_scales,     dtype: uint8,  layout: contiguous, ndim: 2, shape: [M, "K//32"]}
+    - {name: b_q,          dtype: uint8,  layout: contiguous, ndim: 3, shape: [E, N, "K//2"]}
+    - {name: b_scales,     dtype: uint8,  layout: contiguous, ndim: 3, shape: [E, N, "K//32"]}
+    - {name: topk_weights, dtype: [float16, bfloat16, float32], layout: contiguous, ndim: 2, shape: [M, top_k]}
+    - {name: topk_ids,     dtype: int64,  layout: contiguous, ndim: 2, shape: [M, top_k]}
+  outputs:
+    - {name: out, dtype: bfloat16, layout: contiguous, ndim: 3, shape: [M, top_k, N]}
+  init_inputs: []   # 无超参：M/N/K/E/top_k 全部由输入张量形状给出
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见下）
+  fixed_family: {M: 64, N: 128, K: 128, E: 8, top_k: 2, dtype: "bfloat16"}
+  dynamic: true
+  invariants:
+    - "M >= 1, E >= 1, N >= 1, 1 <= top_k <= E"
+    - "K % 32 == 0（mxfp4 量化块与 e8m0 scale 粒度）"
+    - "topk_ids 取值 ∈ [0, E)，同一专家可被多 token / 同 token 多槽位重复选中"
+    - "码字与 scale 字节由 randn 值域（float16/bfloat16）经官方动态 mxfp4 量化产生"
+
+tolerance:
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到 bfloat16 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。官方测试对 kernel 输出与
+    torch_moe_ref 参考做 bf16 assert_close（官方参考 GEMM 本身在 bf16
+    精度：einsum 前 .to(bf16)），题面 reference 按本集规范以 float32 计算，
+    两者差异由 bf16 舍入主导（实测最大相对偏差 ~0.5%，含 K=16384 长规约
+    case），2e-2 容差覆盖。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# static_audit.py 强制执行：提交代码中出现以下符号即判违规
+# 核心计算（nibble 解包 + e2m1/e8m0 解码 + 按 topk_ids 分组 GEMM + 路由加权）
+# 必须在提交的 Triton kernel 内完成
+forbidden:
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.addmm
+  - torch.einsum
+  - F.linear
+  - functional.linear
+  - torch._scaled_mm
+  - torch.float4_e2m1fn_x2
+  - torch.quantize_per_tensor
+  - aiter
+
+source:
+  # 完整溯源（repo / commit / path / sha256 / 准入记录）统一维护在
+  # benchmark/sources/3006_moe_op_mxfp4.yaml；题面包文件不内联溯源串

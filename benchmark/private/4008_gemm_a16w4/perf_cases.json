@@ -1,0 +1,9 @@
+{
+  "task_id": "4008_gemm_a16w4",
+  "cases": [
+    {"name": "perf_prefill_m4096_k4096_n8192_g64", "m": 4096, "n": 8192, "k": 4096, "group_size": 64, "seed": 407},
+    {"name": "perf_decode_m128_k7168_n7168_g64",   "m": 128,  "n": 7168, "k": 7168, "group_size": 64, "seed": 408},
+    {"name": "perf_mid_m512_k2048_n1536_g64",      "m": 512,  "n": 1536, "k": 2048, "group_size": 64, "seed": 409}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

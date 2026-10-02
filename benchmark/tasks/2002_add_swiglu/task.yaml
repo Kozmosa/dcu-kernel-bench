@@ -1,0 +1,60 @@
+id: "2002_add_swiglu"
+name: add_swiglu_training
+family: norm_rope_act
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  训练用 Add + SwiGLU 融合：base+delta 按最后一维对半拆分（D = width/2），
+  out = silu(gate) * up；同一次 forward 内给定上游梯度 grad_out 计算一阶解析
+  梯度（SiLU 导数公式，base 与 delta 梯度逐元素相同），输出单张量拼接
+  [out | grad_gate | grad_up]（3D 列）。中间计算 float32，输出 cast 回输入
+  dtype（fp16/bf16）。题目文件自包含（reference.py 即题目文件，逐字节镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 2002），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: base,     dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [num_rows, width]}
+    - {name: delta,    dtype: same_as_base,        layout: contiguous, ndim: 2, shape: [num_rows, width]}
+    - {name: grad_out, dtype: same_as_base,        layout: contiguous, ndim: 2, shape: [num_rows, width/2]}
+  outputs:
+    - {name: fused, dtype: same_as_base, layout: contiguous, ndim: 2, shape: [num_rows, "3*width/2"]}
+  init_inputs: []   # 算子无超参；D 由输入宽度推断
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；隐藏/性能 case 不入题面，另行存放）
+  fixed_family: {num_rows: 2048, width: 8192, half_width: 4096}
+  dynamic: true
+  invariants:
+    - "width 为非零偶数，D = width // 2"
+    - "num_rows 可为 0（空批次，输出 (0, 3D)）"
+    - "base / delta / grad_out 同 dtype、同 device、连续，无广播"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集验收容差，用于离线终审。激活输出与两路梯度都是逐元素
+    半精度乘加链，2e-2/2e-2 覆盖纯 float32 参考与 eager 半精度舍入链之间
+    的偏差（源算子显式复现 eager dtype 舍入边界，本题不要求逐位一致）。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与
+    模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论
+    不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - aiter
+  - torch.nn.functional.silu
+  - torch.sigmoid
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+
+# 溯源（repo/commit/sha256/官方测试路径）完整记录见
+# benchmark/sources/2002_add_swiglu.yaml，题面元数据不重复携带库源标识

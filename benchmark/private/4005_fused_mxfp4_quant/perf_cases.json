@@ -1,0 +1,9 @@
+{
+  "task_id": "4005_fused_mxfp4_quant",
+  "cases": [
+    {"name": "perf_m4096_n1_8192_bf16",  "m": 4096,  "n1": 8192, "dtype": "bfloat16", "seed": 501},
+    {"name": "perf_m8192_n1_4096_f16",   "m": 8192,  "n1": 4096, "dtype": "float16",  "seed": 502},
+    {"name": "perf_m16384_n1_2048_bf16", "m": 16384, "n1": 2048, "dtype": "bfloat16", "seed": 503}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

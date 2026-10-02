@@ -1,0 +1,9 @@
+{
+  "task_id": "3007_moe_op_silu_fused",
+  "cases": [
+    {"name": "perf_dense_bf16_m1024_n1024_k1024_e16",  "m": 1024, "n": 1024, "k": 1024, "e": 16, "top_k": 8, "block_size_m": 64, "mul_routed_weight": true, "quant": "dense",     "dtype": "bfloat16", "seed": 3201},
+    {"name": "perf_dense_fp16_m512_n2048_k2048_e8",    "m": 512,  "n": 2048, "k": 2048, "e": 8,  "top_k": 4, "block_size_m": 64, "mul_routed_weight": true, "quant": "dense",     "dtype": "float16",  "seed": 3202},
+    {"name": "perf_fp8_block_bf16_m1024_n1024_k1024",  "m": 1024, "n": 1024, "k": 1024, "e": 16, "top_k": 8, "block_size_m": 64, "mul_routed_weight": true, "quant": "fp8_block", "block_n": 128, "block_k": 128, "dtype": "bfloat16", "seed": 3203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

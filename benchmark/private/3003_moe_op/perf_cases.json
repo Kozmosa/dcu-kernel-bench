@@ -1,0 +1,9 @@
+{
+  "task_id": "3003_moe_op",
+  "cases": [
+    {"name": "perf_m512_e8_n1024_k2048_topk2_f16",  "num_tokens": 512,  "num_experts": 8,  "top_k": 2, "in_features": 2048, "out_features": 1024, "block_m": 64, "dtype": "float16",  "seed": 201},
+    {"name": "perf_m2048_e16_n512_k2048_topk4_f16", "num_tokens": 2048, "num_experts": 16, "top_k": 4, "in_features": 2048, "out_features": 512,  "block_m": 64, "dtype": "float16",  "seed": 202},
+    {"name": "perf_m256_e64_n512_k4096_topk8_bf16", "num_tokens": 256,  "num_experts": 64, "top_k": 8, "in_features": 4096, "out_features": 512,  "block_m": 64, "dtype": "bfloat16", "seed": 203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

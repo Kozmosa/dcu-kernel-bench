@@ -1,0 +1,80 @@
+id: "1020_mla_decode_rope"
+name: mla_decode_attention_rope
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  DeepSeek MLA 解码阶段单 token query 的 attention 融合 RoPE 的自包含
+  KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1020）。语义：page size = 1 的 token 级 KV 行池，
+  q = [Q_NOPE; Q_PE]；对 Q_PE 与每个序列最后一个 token 的 k_pe 按
+  positions 取 cos/sin 做 RoPE 旋转（NEOX / GPT-J 两种风格，rd 之外的维
+  直通），随后与压缩 KV 隐向量（kv_lora_rank 维，K 的 nope 部分与 V 共享）
+  联合计算 scaled dot-product attention（在线 softmax 数值稳定语义、
+  float32 中间累加、输出 cast 回输入 dtype），并返回旋转后的 k_pe_tokens
+  供写回 cache。所有 query head 共用同一份逐 token 压缩 KV（MLA，无独立
+  KV head）；KV 切片并行（num_kv_splits）为实现细节，输出切片不变。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q,             dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [batch, num_heads, kv_lora_rank + qk_rope_head_dim]}
+    - {name: kv_cache,      dtype: same_as_q,           layout: contiguous, ndim: 2, shape: [total_tokens, kv_lora_rank + qk_rope_head_dim], note: "token 级 KV 行池（page size 1）：每行 = [压缩隐向量 c 维 | k_pe r 维]；未引用行是垃圾数据"}
+    - {name: cos_sin_cache, dtype: same_as_q,           layout: contiguous, ndim: 2, shape: [max_positions, rotary_dim], note: "前 rotary_dim//2 列 cos、后 rotary_dim//2 列 sin，第 t 行对应位置 t"}
+    - {name: positions,     dtype: int32,               layout: contiguous, ndim: 1, shape: [batch], note: "当前 query 的序列位置，与 seq_len 独立；上游评测器 cast fp32 后需无损恢复"}
+    - {name: kv_indptr,     dtype: int32,               layout: contiguous, ndim: 1, shape: [batch + 1], note: "序列长度累积和：首元素 0、单调不减；上游评测器 cast fp32 后需无损恢复"}
+    - {name: kv_indices,    dtype: int32,               layout: contiguous, ndim: 1, shape: [total_kv], note: "逻辑 token -> 物理行号（batch b 的第 j 个逻辑 token 位于 kv_indices[kv_indptr[b]+j]），取值 < total_tokens；上游评测器 cast fp32 后需无损恢复"}
+  outputs:
+    - {name: out, dtype: same_as_q, layout: contiguous, ndim: 1, shape: [batch * num_heads * kv_lora_rank + batch * qk_rope_head_dim], note: "平铺拼接：attn_out[batch,heads,c] 行主序 ‖ k_pe_tokens[batch,r] 行主序"}
+  init_inputs:
+    - {name: kv_lora_rank,    dtype: int64,  layout: scalar}   # 压缩隐向量维数 c
+    - {name: qk_rope_head_dim, dtype: int64, layout: scalar}   # rope 头维 r
+    - {name: rotary_dim,      dtype: int64,  layout: scalar}   # 旋转维 rd（2 的幂，<= r）
+    - {name: sm_scale,        dtype: float64, layout: scalar, optional: true}   # 缺省 1/sqrt(c+r)
+    - {name: is_neox_style,   dtype: bool,   layout: scalar, optional: true}   # 缺省 True；False 为 GPT-J 交错风格
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；hidden/perf case 覆盖全域）
+  fixed_family: {batch: 2, num_heads: 128, seq_len: 1024, kv_lora_rank: 512, qk_rope_head_dim: 64, rotary_dim: 64, rope_base: 10.0, max_positions: 16384, extra_tokens: 8, dtype: bfloat16}
+  dynamic: true
+  invariants:
+    - "page size = 1：kv_indices[kv_indptr[b] + j] 为 batch b 第 j 个逻辑 token 的物理行"
+    - "kv_indptr[0] == 0，kv_indptr[b+1] - kv_indptr[b] = seq_len_b >= 1，total_kv == kv_indptr[-1]"
+    - "total_tokens >= kv_indptr[-1]；未引用物理行内容不定"
+    - "rotary_dim 为 2 的幂且 rotary_dim <= qk_rope_head_dim"
+    - "positions[b] ∈ [0, max_positions)，与 seq_len 独立（官方约定取 positions[b] = seq_len_b）"
+    - "V ≡ kv_cache[:, :kv_lora_rank]（K 压缩部分与 V 共享隐向量）；所有 query head 共用同一份逐 token 压缩 KV"
+    - "仅每个序列最后一个逻辑 token 的 k_pe 现场旋转，其余 token 的 k_pe 按行池原值使用"
+    - "num_kv_splits（KV 切片并行数）不改变输出：切片在线 softmax + log-sum-exp 归并数学等价于全量 softmax"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差（与 1001/1002/1016/1018 等同族题一致），用于
+    离线终审。官方测试对 logits / k_pe_tokens / o 一律用 atol=1e-2 /
+    rtol=1e-2，本题取本评测集统一容差，量级相当。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+
+source:
+  # 本文件对候选可见，不携带任何溯源词；维护者溯源信息（repo / commit /
+  # 算子文件 sha256）统一记录在 benchmark/sources/1020_mla_decode_rope.yaml。
+  record: "benchmark/sources/1020_mla_decode_rope.yaml"

@@ -1,0 +1,11 @@
+{
+  "task_id": "2007_rmsnorm",
+  "cases": [
+    {"name": "hidden_min_m1_n4_fwd_f16",         "m": 1,   "n": 4,     "variant": "rmsnorm",   "dtype": "float16",  "seed": 2107},
+    {"name": "hidden_nonpow2_m873_n1245_fwd_f16", "m": 873, "n": 1245,  "variant": "rmsnorm",   "dtype": "float16",  "seed": 2108},
+    {"name": "hidden_add_m173_n409_bf16",        "m": 173, "n": 409,   "variant": "fused_add", "dtype": "bfloat16", "seed": 2109},
+    {"name": "hidden_add_m256_n4096_f16",        "m": 256, "n": 4096,  "variant": "fused_add", "dtype": "float16",  "seed": 2110},
+    {"name": "hidden_add_wide_m2_n31744_f16",    "m": 2,   "n": 31744, "variant": "fused_add", "dtype": "float16",  "seed": 2111},
+    {"name": "hidden_fwd_wide_m4_n65536_bf16",   "m": 4,   "n": 65536, "variant": "rmsnorm",   "dtype": "bfloat16", "seed": 2112}
+  ]
+}

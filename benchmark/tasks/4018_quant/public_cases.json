@@ -1,0 +1,13 @@
+{
+  "task_id": "4018_quant",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs/get_init_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 的输入由 reference.py::make_inputs(**case) 确定性生成。",
+  "shape_family": {
+    "mode": "dynamic_per_token",
+    "quant_dtype": "int8",
+    "rows": 1024,
+    "cols": 128,
+    "dtype": "float16",
+    "scale_count": 1024,
+    "out_len": 132096
+  }
+}

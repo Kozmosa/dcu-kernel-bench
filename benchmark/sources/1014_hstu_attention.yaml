@@ -1,0 +1,42 @@
+task_id: "1014_hstu_attention"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/hstu_attention.py
+      sha256: 0939420dfbaa03b9da69a039a2eadc8684fb12add82f37698c406a0c190e8ca2
+      role: device_kernel   # 前向/反向 Triton kernel 与 autograd Function 全部在源文件内
+    - path: op_tests/triton_tests/test_hstu_attn.py
+      sha256: 90fcee48290e6e71c7647da5196511e9e08486b915c1c7853149b0fb9abfe5c6
+      role: official_test   # 语义唯一权威（对照 op_tests/triton_tests/utils/hstu_attention_ref.py 的 torch_hstu_attention）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：HSTU attention 前向（jagged varlen：q/k/v [total,H,D*] 按
+    seq_offsets 分段），causal 与非 causal 两态；num_targets 恒为张量输入
+    （g=0 等价官方 num_targets=None 路径）；contextual_seq_len /
+    max_attn_len 作为 __init__ 开关（0=关闭）；N=max_seq_len 兼作缩放分母
+    与长度上界；alpha 缺省 qk_dim^-0.5；输出仅 out（与 v 同 dtype，
+    v_dim 可不等于 qk_dim）。语义依据：官方测试所对照的参考实现
+    torch_hstu_attention + _get_valid_attn_mask（位置重编号 clamp(min=0) /
+    clamp(max=max_ids)、eye|dist>0 为有效、max_attn_len 求交、contextual
+    行放宽、F.silu(qk*alpha)/max_seq_len 后乘 V），与被测 kernel
+    _hstu_attn_fwd/_hstu_attn_fwd_one_block（SiLU 以
+    fast_dividef(qk,1+fast_expf(-qk)) 自实现、silu 权重 cast 到输入 dtype
+    后 tl.dot）一致。与官方测试的冲突处理：无冲突；两点口径说明：
+    ① 官方测试取 alpha = 1/attn_dim*10000，alpha 是算子的自由输入参数，
+    题面缺省改为本评测集惯例的 qk_dim^-0.5，不构成语义分歧；② 官方
+    generate_sparse_seq_len 在 sparsity < 0.5 时可产生 0 长序列，题面显式
+    允许空序列并以 hidden case 覆盖。其余变体留作后续题：反向 kernel
+    （_hstu_attn_bwd* 与 _AttentionFunction.backward）、IS_DELTA_Q 前向
+    变体（包装层恒为 False，未被官方测试覆盖）、sort_by_length_indices
+    （纯调度优化，语义不变）。

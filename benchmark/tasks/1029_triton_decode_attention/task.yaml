@@ -1,0 +1,72 @@
+id: "1029_triton_decode_attention"
+name: triton_decode_attention
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  两阶段 GQA flash decoding（单 token query 的 split-KV decode attention）：
+  stage1 把每条序列的 KV 长度按 num_kv_splits 个连续切片并行做在线 softmax，
+  产出部分加权 V（acc/e_sum）与部分 logsumexp（e_max+log(e_sum)），stage2 跨
+  切片做 max 归约合并。支持分页 KV Cache（page_size >= 1 任意取值，含逐
+  token 的 page_size=1）、GQA/MQA/MHA、K/V 头维可不同（head_dim_qk /
+  head_dim_v 允许非 2 次幂）、float32 中间累加、输出 cast 回输入 dtype。
+  本题为自包含的 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1029），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q,           dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [num_seqs, num_q_heads, head_dim_qk]}
+    - {name: key_cache,   dtype: same_as_query,       layout: contiguous, ndim: 4, shape: [num_pages, page_size, num_kv_heads, head_dim_qk]}
+    - {name: value_cache, dtype: same_as_query,       layout: contiguous, ndim: 4, shape: [num_pages, page_size, num_kv_heads, head_dim_v]}
+    - {name: page_tables, dtype: int32,               layout: contiguous, ndim: 2, shape: [num_seqs, max_pages_per_seq]}   # 逻辑页 -> 物理页编号
+    - {name: seq_lens,    dtype: int32,               layout: contiguous, ndim: 1, shape: [num_seqs]}                     # 每序列有效 KV 长度 >= 1
+  outputs:
+    - {name: out, dtype: same_as_query, layout: contiguous, ndim: 3, shape: [num_seqs, num_q_heads, head_dim_v]}
+  init_inputs:
+    - {name: page_size,     dtype: int64, layout: scalar}
+    - {name: head_dim_qk,   dtype: int64, layout: scalar}   # scale 缺省 1/sqrt(head_dim_qk)
+    - {name: head_dim_v,    dtype: int64, layout: scalar}
+    - {name: num_kv_splits, dtype: int64, layout: scalar}   # 仅并行切分参数，不影响数值结果
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束如下）
+  fixed_family: {num_seqs: 4, num_kv_heads: 8, query_group_size: 4, num_q_heads: 32, head_dim_qk: 192, head_dim_v: 128, page_size: 16, max_seq_len: 1024, num_pages: 264, max_pages_per_seq: 64, num_kv_splits: 8, dtype: "bfloat16"}
+  dynamic: true
+  invariants:
+    - "num_q_heads == num_kv_heads * query_group_size（GQA 整除；group=1 即 MHA，H_KV=1 即 MQA）"
+    - "page_tables[b, 0:ceil(seq_lens[b]/page_size)] 为该序列全部有效物理页；页池 num_pages 可大于实际使用页数，未引用槽位内容不定"
+    - "seq_lens[b] ∈ [1, max_pages_per_seq * page_size]，且 page_tables 表项互不相同（不要求按序）"
+    - "head_dim_qk 与 head_dim_v 可不同，各自 >= 16 且允许非 2 次幂；page_size >= 1 任意取值"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    与官方测试（torch.testing.assert_close atol=1e-2, rtol=0）同量级的验收
+    容差，按本评测集标准放宽到 2e-2；误差主要来自低精度 QK/PV 与在线 softmax
+    的 fp32 累加路径。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
+    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表
+    不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+
+source:
+  # 本文件对候选可见，不携带任何溯源词；维护者溯源信息（repo / commit /
+  # 算子文件 sha256）统一记录在 benchmark/sources/1029_triton_decode_attention.yaml。
+  record: "benchmark/sources/1029_triton_decode_attention.yaml"

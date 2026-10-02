@@ -1,0 +1,67 @@
+id: "2007_rmsnorm"
+name: rmsnorm_fwd_fused_add
+family: norm_rope_act
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  RMSNorm 前向家族（标准 / 残差融合）：对 (M, N) 输入逐行求
+  y = x * rsqrt(mean(x^2) + eps) * w（float32 中间计算，输出 cast 回输入
+  dtype）；variant="fused_add" 时先在输入 dtype 下求 residual_out = x +
+  residual（残差流直通输出）再归一化，输出单张量 (M, 2N)：前 N 列为 y、
+  后 N 列为 residual_out（沿最后一维列拼接，评测器按单输出比较）；
+  variant="rmsnorm" 时直接归一化并忽略 residual，输出单张量 (M, N)。
+  fp16/bf16 输入，N 任意（含非 2 的幂与超出单 block 归约上限的大 N，需
+  掩码 / 分块归约）。本题为自包含 KernelBench 题目文件（reference.py 即
+  题目文件，同时镜像到 benchmark/kernelbench_compat/level2/），可直接走
+  PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 2 --problem-id 2007），无需任何框架
+  改动。starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,        dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [M, N]}
+    - {name: weight,   dtype: same_as_x,           layout: contiguous, ndim: 1, shape: [N]}
+    - {name: residual, dtype: same_as_x,           layout: contiguous, ndim: 2, shape: [M, N]}
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: 2, shape: "[M, N]；fused_add 时 [M, 2*N]（前 N 列 y、后 N 列 residual_out）"}
+  init_inputs:
+    - {name: variant, dtype: str,   layout: scalar}   # "fused_add" | "rmsnorm"
+    - {name: eps,     dtype: float, layout: scalar}   # 缺省 1e-5
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {M: 1024, N: 4096, variant: "fused_add", dtype: "float16"}
+  dynamic: true
+  invariants:
+    - "M >= 1 且 N >= 1（允许非 2 的幂、非 16 对齐；N 超出单 block 归约上限时需分块归约，行尾越界元素不得参与平方和）"
+    - "variant=rmsnorm 时 residual 为垃圾输入，不得影响输出"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；归一化全程 float32；weight 按官方测试作为 forward 输入而非模块参数"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较；单张量输出按列块检验——fused_add 前 N 列（y）用上表容差，后 N 列（residual_out = x + residual，输入 dtype 下精确相加）逐位一致"
+  note: >
+    以上为本评测集的验收容差，用于离线终审，与官方测试对 fp16/bf16 输出
+    采用的 atol=rtol=1e-2 相容。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - aiter
+  - torch.rms_norm
+  - torch.nn.functional.rms_norm
+  - torch.nn.RMSNorm
+  - torch.layer_norm
+  - torch.nn.functional.layer_norm
+  - torch.nn.LayerNorm
+  - torch.norm
+  - torch.linalg.norm
+  - torch.linalg.vector_norm
+
+# 溯源（repo/commit/sha256/官方测试路径）完整记录见
+# benchmark/sources/2007_rmsnorm.yaml，题面元数据不重复携带库源标识

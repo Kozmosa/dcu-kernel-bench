@@ -1,0 +1,9 @@
+{
+  "task_id": "1030_unified_attention",
+  "cases": [
+    {"name": "perf_prefill_b8_q2048_h32kv8_d128_l4096_bf16",  "num_seqs": 8,  "num_q_heads": 32, "num_kv_heads": 8, "head_size": 128, "block_size": 16, "max_seq_len": 4096, "sliding_window": 0,    "softcap": 0.0, "use_sinks": true, "dtype": "bfloat16", "seed": 201, "query_lens": [2048],                                                     "kv_lens": [4096]},
+    {"name": "perf_decode_b12_q1_h32kv8_d128_l4096_sw1024_bf16", "num_seqs": 12, "num_q_heads": 32, "num_kv_heads": 8, "head_size": 128, "block_size": 16, "max_seq_len": 4096, "sliding_window": 1024, "softcap": 0.0, "use_sinks": true, "dtype": "bfloat16", "seed": 202, "query_lens": [1],                                                          "kv_lens": [4096]},
+    {"name": "perf_mixed_b16_h16kv4_d128_l2048_sw512_f16",    "num_seqs": 16, "num_q_heads": 16, "num_kv_heads": 4, "head_size": 128, "block_size": 16, "max_seq_len": 2048, "sliding_window": 512,  "softcap": 0.0, "use_sinks": true, "dtype": "float16",  "seed": 203, "query_lens": [1, 512, 1, 1024, 1, 256, 1, 2048, 1, 128, 1, 768, 1, 64, 1, 32], "kv_lens": [2048]}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

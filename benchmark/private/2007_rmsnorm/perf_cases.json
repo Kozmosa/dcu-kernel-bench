@@ -1,0 +1,9 @@
+{
+  "task_id": "2007_rmsnorm",
+  "cases": [
+    {"name": "perf_m4096_n8192_add_f16",   "m": 4096,  "n": 8192, "variant": "fused_add", "dtype": "float16",  "seed": 2207},
+    {"name": "perf_m8192_n1280_add_f16",   "m": 8192,  "n": 1280, "variant": "fused_add", "dtype": "float16",  "seed": 2208},
+    {"name": "perf_m16384_n4096_add_bf16", "m": 16384, "n": 4096, "variant": "fused_add", "dtype": "bfloat16", "seed": 2209}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

@@ -1,0 +1,62 @@
+id: "4005_fused_mxfp4_quant"
+name: fused_mxfp4_quant
+family: quant_gemm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  残差相加 + RMSNorm + MXFP4 动态量化（量化块 32、even 圆整、e8m0 块 scale、
+  e2m1 码字双 nibble 打包）的融合算子，为下游 mxfp4 GEMM 准备量化激活。
+  输出契约为单张量：uint8 (M, N1//2 + ceil(N1/32))，前 N1//2 列为 packed
+  fp4 码字，后 ceil(N1/32) 列为 e8m0 块 scale。本题为自包含的 KernelBench
+  题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 4005），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: inp1,    dtype: [bfloat16, float16], layout: contiguous, ndim: 2, shape: [M, N1]}
+    - {name: weight1, dtype: same_as_inp1,        layout: contiguous, ndim: 1, shape: [N1]}
+    - {name: res1,    dtype: same_as_inp1,        layout: contiguous, ndim: 2, shape: [M, N1]}
+  outputs:
+    - {name: out, dtype: uint8, layout: contiguous, ndim: 2, shape: [M, "N1//2 + ceil(N1/32)"]}
+  init_inputs:
+    - {name: dtype, dtype: str,   layout: scalar}   # "bfloat16" | "float16"（输入 dtype 契约）
+    - {name: eps,   dtype: float, layout: scalar}   # 缺省 1e-6，与官方测试一致
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见下）
+  fixed_family: {M: 64, N1: 512, dtype: "bfloat16"}
+  dynamic: true
+  invariants:
+    - "M >= 1"
+    - "N1 为偶数且 >= 2（fp4 双 nibble 打包要求）；行尾不足 32 的量化块补零"
+    - "inp1/weight1/res1 同 dtype（bfloat16/float16），值域 randn"
+
+tolerance:
+  uint8:  {atol: 0.0, rtol: 0.0}
+  compare: "量化码字与 e8m0 scale 字节均为 uint8 整数输出，精确匹配（atol=rtol=0）"
+  note: >
+    与官方测试语义一致：官方对量化输出先解码回 fp32 再 assert_close（默认
+    fp32 容差 1e-6 级），单个码字/scale 字节差异必然越界，等效逐位一致。
+    在线（搜索循环内）KernelBenchPaperEvaluator 用 fp32 allclose(1e-4)
+    比较 uint8——整数差 >=1 同样必然越界，在线亦等效精确匹配。实现须按
+    题面位级算法复现（amax 圆整、floor-log2 scale、round-half-up 饱和、
+    低 4 位偶下标打包），float32 中间量的最后一比特差异只会在极接近舍入
+    边界的元素上翻码，标准实现（rsqrt/按位操作）与参考实现逐位一致。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - torch.nn.functional.rms_norm
+  - functional.rms_norm
+  - torch.nn.RMSNorm
+  - torch.float4_e2m1fn_x2
+  - torch.quantize_per_tensor
+  - aiter
+
+# 来源与 commit 的溯源记录在 benchmark/sources/4005_fused_mxfp4_quant.yaml
+#（准入审核记录，仅评测端/维护者可见；Agent 可见文件不得含溯源词）。

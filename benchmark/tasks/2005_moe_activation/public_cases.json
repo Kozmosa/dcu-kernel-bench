@@ -1,0 +1,12 @@
+{
+  "task_id": "2005_moe_activation",
+  "note": "model_class 形态：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs/get_init_inputs 固定的 shape 族与变体参数，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。",
+  "shape_family": {
+    "m": 128,
+    "n": 4096,
+    "activation": "silu",
+    "alpha": 1.702,
+    "limit": 7.0,
+    "dtype": "bfloat16"
+  }
+}

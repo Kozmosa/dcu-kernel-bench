@@ -1,0 +1,9 @@
+{
+  "task_id": "4018_quant",
+  "cases": [
+    {"name": "perf_8960x2048_dyn_token_i8",     "mode": "dynamic_per_token",  "quant_dtype": "int8",        "rows": 8960,  "cols": 2048, "dtype": "float16",  "seed": 518},
+    {"name": "perf_16384x7168_dyn_token_i8",   "mode": "dynamic_per_token",  "quant_dtype": "int8",        "rows": 16384, "cols": 7168, "dtype": "float16",  "seed": 519},
+    {"name": "perf_8192x8192_dyn_tensor_fp8",  "mode": "dynamic_per_tensor", "quant_dtype": "float8_e4m3", "rows": 8192,  "cols": 8192, "dtype": "bfloat16", "seed": 520}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

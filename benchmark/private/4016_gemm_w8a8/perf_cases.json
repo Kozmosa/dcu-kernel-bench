@@ -1,0 +1,10 @@
+{
+  "task_id": "4016_gemm_w8a8",
+  "note": "head_size 为离线终审管线（audit_model_class.py :104 以 case[head_size] 位置构造 ModelNew）的兼容键，携带与 dtype 相同的输出 dtype 字符串；dtype 为输出 dtype（Model 构造参数 out_dtype 的 case 侧键名）。均不参与输入生成。",
+  "cases": [
+    {"name": "perf_m4096_n7168_k2048_bf16", "m": 4096, "n": 7168, "k": 2048, "dtype": "bfloat16", "head_size": "bfloat16", "seed": 701},
+    {"name": "perf_m128_n7168_k2048_bf16",  "m": 128,  "n": 7168, "k": 2048, "dtype": "bfloat16", "head_size": "bfloat16", "seed": 702},
+    {"name": "perf_m2048_n4096_k4096_bf16", "m": 2048, "n": 4096, "k": 4096, "dtype": "bfloat16", "head_size": "bfloat16", "seed": 703}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

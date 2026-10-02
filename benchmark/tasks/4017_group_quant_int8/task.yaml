@@ -1,0 +1,66 @@
+id: "4017_group_quant_int8"
+name: per_token_group_quant_int8
+family: quant_gemm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  per-token-group int8 动态量化（W8A8 整数 GEMM 的激活前处理）：把连续 2D
+  float 张量按行主序切成 group_size 大小的连续分组，每组以 float32 求
+  absmax（与 eps 取 max 防除零），scale = absmax/127，码字 = 向零截断的
+  clamp(x/scale, -128, 127) 转 int8。输出按 KernelBench 单张量协议两段打包
+  为一维 float32：前 rows*cols 个元素为 int8 码字（整数），后
+  rows*cols/group_size 个为各组 scale。本题为自包含的 KernelBench 题目文件
+  （reference.py 即题目文件，同时镜像到 benchmark/kernelbench_compat/level3/），
+  可直接走 PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 3 --problem-id 4017），无需任何框架改动。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x, dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [rows, cols]}
+  outputs:
+    - {name: out, dtype: float32, layout: contiguous, ndim: 1, shape: [rows*cols + rows*cols/group_size]}   # [码字段 | scale 段] 两段打包
+  init_inputs:
+    - {name: group_size, dtype: int64, layout: scalar}   # 默认 128
+    - {name: eps, dtype: float64, layout: scalar}        # 默认 1e-10，除零保护
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见下）
+  fixed_family: {rows: 128, cols: 7168, group_size: 128, eps: 1.0e-10, dtype: float16}
+  dynamic: true
+  invariants:
+    - "cols % group_size == 0（官方 wrapper 同名断言；不满足即非法输入）"
+    - "x 为 2D 连续 float 张量；rows/cols >= 1，允许非 2 次幂；group_size 可为整除 cols 的任意正整数（含 1）"
+    - "输出打包契约：out[:rows*cols] 为码字（float32 表示的整数），out[rows*cols:] 为 scale"
+    - "M = rows*cols 不必整除 128（如 rows=3, cols=192, group_size=64），尾部由 kernel 掩码处理"
+
+tolerance:
+  float32:  {atol: 1.0e-6, rtol: 1.0e-6}
+  compare: >
+    输出为单个一维 float32 张量（码字段 + scale 段两段打包）：码字段是
+    [-127,127] 内整数，任何偏差 >= 1，远超容差，等效精确匹配；scale 段与
+    reference 同为确定性 fp32 算术。
+  note: >
+    本题输出 dtype 为 float32（无 fp16/bf16 浮点输出，不适用 2.0e-2 档）。
+    容差收紧为 1e-6 的依据：reference 与合规候选的中间算术同为 fp32（absmax
+    精确、scale 为单次 fp32 除法），码字段整数偏差 >= 1 必为语义错误；
+    scale 段 1e-6 覆盖倒数乘法等 1-2 ulp 算术变体。官方测试对码字用
+    atol=1、scale 用 1e-3，那是 fp16-native 参考与 kernel 之间的偏差预算，
+    本评测集参考即 fp32 确定性算术，按验收规范收紧。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）；标准列表中 attention /
+# GEMM / softmax 类捷径与本纯量化算子无关，按题裁剪，保留 aiter 并加量化 ATen 捷径
+forbidden:
+  - aiter
+  - torch.quantize_per_tensor
+  - torch.quantize_per_channel
+
+source:
+  repo: OpenDAS/aiter
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  path: aiter/ops/triton/group_quant_int8.py   # 仅维护者溯源用

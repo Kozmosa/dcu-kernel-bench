@@ -1,0 +1,60 @@
+task_id: "4010_gemm_a8w8_blockscale"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/gemm_a8w8_blockscale.py
+      sha256: 4de9781184866cb738753fbadc9b3fe994bce61972f3319e1023b35647f446e9
+      role: device_kernel   # _gemm_a8w8_blockscale_kernel：tl.dot 主计算完整在 Triton kernel 内
+    - path: op_tests/triton_tests/test_gemm_a8w8_blockscale.py
+      sha256: 995646361d29983fb49f01a2cc3d116d503b8553a30a21a9dbe687e81bd8f8d3
+      role: official_test   # run_torch 为 float32 反量化 + F.linear 参考，语义唯一权威
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # tl.dot(fp8 x fp8)、K 循环内逐块 scale 即乘反量化全部在 _gemm_a8w8_blockscale_kernel
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 run_torch 移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：fp8(e4m3) 激活 (M,K) × fp8(e4m3) 权重 (N,K) 的 TN 布局 2D block
+    scale GEMM，scale 沿 K/N 两维独立分块（group_k、group_n 为 2 的幂，可互不
+    相等），元素 (m,k)/(n,k) 按 k//group_k、n//group_n 归属块反量化后 float32
+    累加，输出 bfloat16/float16；码字值域沿用官方测试生成器（rand(fp16)/10 转
+    fp8、scale 为 rand float32，device="cuda" CPU 化为 "cpu"）。语义依据与
+    冲突处理：官方 run_torch 的 w_scale repeat_interleave 先 dim=0 乘
+    block_shape_k 再 dim=1 乘 block_shape_n，两因子在 group_k != group_n 时
+    互换（该情况下形状不匹配，测试从不触及）；kernel 为逐元素 per-dim 索引
+    （offs_bn // GROUP_N、K 循环按 GROUP_K 推进），gk == gn（含官方固定的
+    128,128）时两者逐位一致——题面取 kernel 的 per-dim 语义，gk==gn 的全部
+    case 由官方 run_torch oracle 直接验证。其余变体留作后续题：int8 码字路径
+    （kernel acc_dtype 分支）、e5m2 fp8、y 预分配输出参数、autotune JSON
+    配置分发、XCD pid 重排为实现细节不入题面；同族 w8a8（vLLM int8 [128,128]
+    特化，A 按 token-group）与 a8w8（不同 scale 粒度）按独立题保留。case 由
+    题目文件内 make_inputs(**case) 确定性生成（torch.Generator(seed)，
+    消费顺序 x -> w -> x_scale -> w_scale）。隔离与静态审计复核（2026-10-02
+    独立复核 agent）整改：task.yaml 不再携带 source 溯源块（溯源元数据仅存
+    本文件，tasks 侧三文件过溯源词逐行扫描）；Model docstring 禁用列表不再
+    出现字面 aiter（由 task.yaml forbidden 行承载）；forbidden 增列方法调用
+    形式（.mm( / .bmm( / .addmm( / .matmul( / .einsum( / ._int_mm( /
+    ._scaled_mm( / .linear(，同时覆盖 torch.ops.aten.mm( 全限定名与张量方法
+    a.matmul( 等）、torch.ops.aten.mm 等 7 个全限定名与 .t()（x @ w.t() 为
+    F.linear 的典型字面伪装，复核演示 a @ b.t() 已可被拦截）；@ 运算符本身
+    不可列入 forbidden（会误杀 @triton.jit 装饰器），裸 @ 直乘由 Model
+    docstring 软约束兜底，为已声明的残余缺口。终审 harness 适配（2026-10-02
+    复核第 2 轮）：audit_model_class.py 阶段 2/3 以 make_inputs(seq_lens=None,
+    **fields)、单参 Model(case["head_size"]) 与容差键 case["dtype"] 调用
+    （1002 形态，评测器文件不随题改动）；本题适配为 make_inputs 增设
+    seq_lens/head_size/dtype 容错形参（seq_lens 须为 None，head_size/dtype
+    与显式参数一致性断言），hidden/perf case 增补 head_size=[group_k,
+    group_n, out_dtype] 与 dtype 字段，Model.__init__ 首参兼容 [group_k,
+    group_n, out_dtype] 序列解包（三参签名不变，loader 生成的 ModelNew
+    scaffold 原样继承该分支，题面 docstring 已声明 ModelNew 须保持双形态
+    兼容）。

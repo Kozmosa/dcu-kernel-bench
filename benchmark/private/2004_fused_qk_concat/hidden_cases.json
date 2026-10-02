@@ -1,0 +1,11 @@
+{
+  "task_id": "2004_fused_qk_concat",
+  "cases": [
+    {"name": "hidden_min_mha_concat_f16", "B": 1, "KH": 1, "QH_PER_KH": 1, "D_nope": 64, "D_pe": 16, "max_pos": 32, "d_freq": 16, "dtype": "float16", "seed": 101, "is_neox": true, "apply_rope": false},
+    {"name": "hidden_concat_gqa_f16", "B": 8, "KH": 4, "QH_PER_KH": 2, "D_nope": 512, "D_pe": 128, "max_pos": 1024, "d_freq": 128, "dtype": "float16", "seed": 106, "is_neox": true, "apply_rope": false},
+    {"name": "hidden_reuse_gptj_bf16", "B": 8, "KH": 4, "QH_PER_KH": 4, "D_nope": 512, "D_pe": 64, "max_pos": 4096, "d_freq": 32, "dtype": "bfloat16", "seed": 102, "is_neox": false, "apply_rope": true},
+    {"name": "hidden_full_neox_bf16", "B": 4, "KH": 2, "QH_PER_KH": 8, "D_nope": 256, "D_pe": 128, "max_pos": 1024, "d_freq": 128, "dtype": "bfloat16", "seed": 103, "is_neox": true, "apply_rope": true},
+    {"name": "hidden_nonpow2_dims_bf16", "B": 3, "KH": 3, "QH_PER_KH": 5, "D_nope": 768, "D_pe": 96, "max_pos": 512, "d_freq": 48, "dtype": "bfloat16", "seed": 104, "is_neox": true, "apply_rope": true},
+    {"name": "hidden_max_gqa_gptj_bf16", "B": 16, "KH": 1, "QH_PER_KH": 16, "D_nope": 512, "D_pe": 64, "max_pos": 8192, "d_freq": 32, "dtype": "bfloat16", "seed": 105, "is_neox": false, "apply_rope": true}
+  ]
+}

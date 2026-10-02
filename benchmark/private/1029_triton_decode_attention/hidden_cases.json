@@ -1,0 +1,11 @@
+{
+  "task_id": "1029_triton_decode_attention",
+  "cases": [
+    {"name": "hidden_min_len1_page1_f16",   "num_seqs": 2, "num_q_heads": 8,  "num_kv_heads": 8, "head_dim_qk": 128, "head_dim_v": 128, "page_size": 1,  "max_seq_len": 1,    "dtype": "float16",  "seed": 301, "seq_lens": [1, 1]},
+    {"name": "hidden_mha_page_bounds_bf16", "num_seqs": 4, "num_q_heads": 8,  "num_kv_heads": 8, "head_dim_qk": 128, "head_dim_v": 128, "page_size": 16, "max_seq_len": 200,  "dtype": "bfloat16", "seed": 302, "seq_lens": [1, 15, 16, 200]},
+    {"name": "hidden_dv_gt_dqk_page1_f16",  "num_seqs": 4, "num_q_heads": 32, "num_kv_heads": 8, "head_dim_qk": 128, "head_dim_v": 512, "page_size": 1,  "max_seq_len": 300,  "dtype": "float16",  "seed": 303, "seq_lens": [300, 257, 129, 1]},
+    {"name": "hidden_mqa_mla_d576_512_bf16","num_seqs": 2, "num_q_heads": 16, "num_kv_heads": 1, "head_dim_qk": 576, "head_dim_v": 512, "page_size": 64, "max_seq_len": 1024, "dtype": "bfloat16", "seed": 304, "seq_lens": [1024, 513]},
+    {"name": "hidden_gqa_nonpow2_d192_f16", "num_seqs": 3, "num_q_heads": 32, "num_kv_heads": 8, "head_dim_qk": 192, "head_dim_v": 128, "page_size": 16, "max_seq_len": 1027, "dtype": "float16",  "seed": 305, "seq_lens": [1027, 999, 1]},
+    {"name": "hidden_tail_page8_mixed_f16", "num_seqs": 8, "num_q_heads": 16, "num_kv_heads": 4, "head_dim_qk": 128, "head_dim_v": 128, "page_size": 8,  "max_seq_len": 63,   "dtype": "float16",  "seed": 306, "seq_lens": [8, 9, 7, 15, 16, 17, 1, 63]}
+  ]
+}

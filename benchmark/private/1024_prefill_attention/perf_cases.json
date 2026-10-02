@@ -1,0 +1,9 @@
+{
+  "task_id": "1024_prefill_attention",
+  "cases": [
+    {"name": "perf_b8_h16kv4_d64_l256_f16",   "num_seqs": 8, "num_q_heads": 16, "num_kv_heads": 4,  "head_dim": 64,  "max_seq_len": 256,  "dtype": "float16",  "seed": 201, "seq_lens": [256],  "causal": true},
+    {"name": "perf_b8_h16kv4_d128_l2048_f16", "num_seqs": 8, "num_q_heads": 16, "num_kv_heads": 4,  "head_dim": 128, "max_seq_len": 2048, "dtype": "float16",  "seed": 202, "seq_lens": [2048], "causal": true},
+    {"name": "perf_b2_h16kv16_d64_l4096_bf16","num_seqs": 2, "num_q_heads": 16, "num_kv_heads": 16, "head_dim": 64,  "max_seq_len": 4096, "dtype": "bfloat16", "seed": 203, "seq_lens": [4096], "causal": true}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

@@ -1,0 +1,8 @@
+{
+  "task_id": "1027_sage_attention_qk_int8_per_block_causal",
+  "cases": [
+    {"name": "perf_b8_h32kv8_l4096_d128_f16_gqa", "batch": 8, "num_qo_heads": 32, "num_kv_heads": 8,  "qo_len": 4096, "head_dim": 128, "dtype": "float16", "seed": 201},
+    {"name": "perf_b2_h24_l4352_d128_f16_mha",    "batch": 2, "num_qo_heads": 24, "num_kv_heads": 24, "qo_len": 4352, "head_dim": 128, "dtype": "float16", "seed": 202}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

@@ -1,0 +1,79 @@
+id: "1014_hstu_attention"
+name: hstu_attention
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  HSTU attention（生成式推荐 HSTU 单元注意力，无 softmax）jagged 变长前向的
+  自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1014）。稠密 Q/K/V 按 seq_offsets 分段，每条序列
+  独立计算 out = (valid ∘ SiLU(alpha·QK^T) / max_seq_len) · V：掩码按位置
+  重编号 m[i] = min(max(i-c+1,0), L-c+1-g) 后的相对距离构造（causal 下三角，
+  非 causal 取绝对值；max_attn_len > 0 施加距离带；contextual_seq_len > 0 时
+  重编号为 0 的行额外可见全部非 target key）。支持每序列 target 数
+  num_targets（张量输入，0 等价无 target）、v_dim != qk_dim、空序列、
+  长度小于 N 时的按 N 缩放。float32 中间累加，输出 cast 回 v 的 dtype。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q,           dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [total, num_heads, qk_dim]}
+    - {name: k,           dtype: same_as_q,           layout: contiguous, ndim: 3, shape: [total, num_heads, qk_dim]}
+    - {name: v,           dtype: same_as_q,           layout: contiguous, ndim: 3, shape: [total, num_heads, v_dim]}
+    - {name: seq_offsets, dtype: int64,               layout: contiguous, ndim: 1, shape: [batch + 1], note: "jagged 偏移表；上游评测器 cast fp32 后需无损恢复为整型"}
+    - {name: num_targets, dtype: int32,               layout: contiguous, ndim: 1, shape: [batch],    note: "每序列 target 数；上游评测器 cast fp32 后需无损恢复为整型"}
+  outputs:
+    - {name: out, dtype: same_as_q, layout: contiguous, ndim: 3, shape: [total, num_heads, v_dim]}
+  init_inputs:
+    - {name: max_seq_len,        dtype: int64,  layout: scalar}                          # N：缩放分母与长度上界
+    - {name: alpha,              dtype: float64, layout: scalar, default: "1/sqrt(qk_dim)"} # logits 缩放
+    - {name: causal,             dtype: bool,   layout: scalar, default: true}
+    - {name: max_attn_len,       dtype: int64,  layout: scalar, default: 0}              # 0 = 不限距离
+    - {name: contextual_seq_len, dtype: int64,  layout: scalar, default: 0}              # 0 = 关闭
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；hidden/perf case 覆盖全域）
+  fixed_family: {batch: 8, num_heads: 4, qk_dim: 128, v_dim: 128, max_seq_len: 256}
+  dynamic: true
+  invariants:
+    - "seq_offsets 单调非降、首元素 0、尾元素 total"
+    - "0 <= seq_len_b <= max_seq_len（空序列合法，不产生输出行）"
+    - "0 <= num_targets[b] 且 contextual_seq_len + num_targets[b] <= seq_len_b"
+    - "qk_dim / v_dim 为 2 的幂（v_dim 可不等于 qk_dim）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）。
+# 别名条目（F.silu / F.softmax / torch.mm 等）堵常见的缩写逃逸；@ 矩阵乘
+# 算子（q@k）无法用子串匹配封堵（会误杀 @triton.jit 装饰器），由 docstring
+# 禁令与数值容差兜底。
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+  - torch.nn.functional.silu
+  - torch.nn.functional.softmax
+  - F.silu
+  - F.softmax
+  - torch.mm
+
+# 溯源信息（repo / commit / sha256 / 准入记录）统一见
+# benchmark/sources/1014_hstu_attention.yaml（仅维护者用）；本文件面向评测
+# 流水线，不携带溯源词。

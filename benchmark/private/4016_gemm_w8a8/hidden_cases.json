@@ -1,0 +1,12 @@
+{
+  "task_id": "4016_gemm_w8a8",
+  "note": "head_size 为离线终审管线（audit_model_class.py :78/:79/:104 以 case[head_size] 位置构造 Model）的兼容键，本任务 Model 首个构造参数是 out_dtype，故 head_size 携带与 dtype 相同的输出 dtype 字符串；dtype 为管线容差键（task.yaml tolerance）。二者由 make_inputs 做一致性校验，均不参与输入生成。",
+  "cases": [
+    {"name": "hidden_min_1x1x1_bf16",         "m": 1,  "n": 1,    "k": 1,    "dtype": "bfloat16", "head_size": "bfloat16", "seed": 601},
+    {"name": "hidden_ktail_k300_bf16",        "m": 40, "n": 256,  "k": 300,  "dtype": "bfloat16", "head_size": "bfloat16", "seed": 602},
+    {"name": "hidden_ntail_n300_f16",         "m": 64, "n": 300,  "k": 256,  "dtype": "float16",  "head_size": "float16",  "seed": 603},
+    {"name": "hidden_both_tail_odd_f16",      "m": 37, "n": 300,  "k": 300,  "dtype": "float16",  "head_size": "float16",  "seed": 604},
+    {"name": "hidden_deepk_single_nblk_bf16", "m": 8,  "n": 128,  "k": 1024, "dtype": "bfloat16", "head_size": "bfloat16", "seed": 605},
+    {"name": "hidden_official_flavor_bf16",   "m": 64, "n": 7168, "k": 2048, "dtype": "bfloat16", "head_size": "bfloat16", "seed": 606}
+  ]
+}

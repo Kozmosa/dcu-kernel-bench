@@ -1,0 +1,15 @@
+{
+  "task_id": "1014_hstu_attention",
+  "note": "model_class 形态：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。",
+  "shape_family": {
+    "batch": 8,
+    "num_heads": 4,
+    "qk_dim": 128,
+    "v_dim": 128,
+    "max_seq_len": 256,
+    "lengths": "随机（全局 RNG）：L ~ U[1, 256]，total 变长",
+    "num_targets": "随机（全局 RNG）：g ~ U[1, 20] 截断到 g <= L",
+    "dtype": "bfloat16",
+    "init": {"alpha": "1/sqrt(qk_dim)", "causal": true, "max_attn_len": 0, "contextual_seq_len": 0}
+  }
+}

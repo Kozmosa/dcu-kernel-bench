@@ -1,0 +1,40 @@
+task_id: "2008_rope"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/rope.py
+      sha256: 34bcb120bcbb49bb49294a673fddea4ac03e05ca98021ad843d0a13a655c618a
+      role: device_kernel
+    - path: op_tests/triton_tests/test_rope.py
+      sha256: e786b89492127a686d79db9a5f9c7a6f1782dd918c215f127a0526417d236c19
+      role: official_test
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面取 aiter/ops/triton/rope.py 的 sbhd 稠密布局非缓存前向子集
+    （rope_fwd / _rope_kernel_sbhd_fwd 语义）：NEOX/GPTJ 两种 rotate 风格 ×
+    部分旋转（直通段按 nope_first 前/后接回）× reuse_freqs_front_part 角度
+    扩展，float32 求值后 cast 回输入 dtype。语义唯一依据为官方测试
+    op_tests/triton_tests/test_rope.py 所引用的同源参考实现
+    ref_rope_sbhd_fwd（位于 op_tests/test_rope.py），官方容差
+    atol=rtol=1e-1，本评测集收紧为 2e-2（判分对象：候选 kernel vs 本题
+    reference.py Model，非官方 bf16 oracle）。构建自检
+    tmp/build_check/2008.py 机器验证：与官方 bf16 逐元素 oracle 相比，
+    7 组 hidden 规模固定种子 case 全过 2e-2、最大绝对偏差 3.125e-2；
+    1.34 亿元素大 case 探针全量在官方 1e-1 内、2e-2 阈值越限
+    2/134217728 元素——该偏差全部来自官方 oracle 自身 bf16 中间舍入
+    （Model 与「官方参考按 fp32 计算后 cast bf16」逐位相等，构建自检
+    断言），故 2e-2 对实际判分路径（fp32 计算）成立。源码与测试无语义
+    冲突。其余变体（thd 变长布局、cached cos/sin + positions/offsets
+    寻址、GQA 双输入 2c / onehead、反向、2D mrope neox）与相邻题不重叠，
+    留作后续题。

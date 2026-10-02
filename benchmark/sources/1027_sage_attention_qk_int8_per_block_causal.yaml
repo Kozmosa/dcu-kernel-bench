@@ -1,0 +1,36 @@
+task_id: "1027_sage_attention_qk_int8_per_block_causal"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/sage_attention_qk_int8_per_block_causal.py
+      sha256: c0ef2f2ca09132996e8ad7fbd64a9794b7935d61883f102a52b50b9493ecb11b
+      role: device_kernel   # 核心 kernel：_attn_fwd_inner / _attn_causal_fwd
+    - path: op_tests/triton_tests/test_sage_attention_qk_int8_pv_fp16.py
+      sha256: 3dd4b84eae019ebb109863070dbb4242107d53fd48f1e9057726c92986b28648
+      role: official_test   # 语义唯一权威：sageattn_qk_int8_pv_fp16 vs SDPA，atol=rtol=2e-2
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：sageattn_qk_int8_pv_fp16 入口的 is_causal=True 分支——
+    aiter/ops/triton/sage_attention_qk_int8_per_block_causal.py 的因果前向
+    （per_block_int8 量化 + _attn_causal_fwd），取 HND 布局、
+    fp16/bf16、head_dim ∈ {64,128}、GQA/MHA、qo_len == kv_len。
+    语义依据：官方测试以 F.scaled_dot_product_attention(is_causal=...) 为
+    唯一真值、atol=rtol=2e-2 验收；本 commit 官方测试的全部 14 组参数化
+    组合均取 is_causal=False（非因果分支），causal 分支经同一测试函数的
+    is_causal 形参与同一入口间接覆盖，题面即取该分支，语义按同一参考定义
+    裁定（SDPA is_causal=True；qo_len==kv_len 时因果掩码为标准上三角，
+    与 kernel STAGE1/STAGE2 掩码一致）。无源码/测试冲突。
+    其余变体留作后续题：非 causal 分支（sage_attention_qk_int8_per_block）、
+    NHD 布局、return_lse、head_dim<64 的 pad 路径、非整除头数组合
+    （14040/512 类，仅非因果分支出现）。

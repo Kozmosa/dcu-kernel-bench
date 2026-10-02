@@ -1,0 +1,83 @@
+id: "1030_unified_attention"
+name: unified_attention
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  统一（unified）变长 attention 的 model_class（KernelBench 兼容）题目：
+  同一入口混合处理 prefill（q_s > 1，2D kernel 路径）与 decode（q_s == 1，
+  分段并行 softmax + 归约路径）序列。KV 以固定 block_size 分页存放于物理块池
+  key_cache / value_cache（layout [num_blocks, block_size, num_kv_heads,
+  head_size]），block_tables 间接寻址；支持 GQA、causal 右对齐掩码、
+  滑动窗口（sliding_window > 0）、logit softcap（softcap > 0）与 attention
+  sinks（use_sinks=True，sink 列 logit=sinks[h]、value=0）。prefill 与 decode
+  只是 dispatch 差异，数值语义统一：在线 softmax（float32 中间累加），
+  输出 cast 回输入 dtype。题目文件为 benchmark/tasks/1030_unified_attention/
+  reference.py，镜像到 benchmark/kernelbench_compat/level3/，走 PyramidKernel
+  原生 model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1030），无需框架改动；starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold。
+
+io:
+  inputs:
+    - {name: query,        dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [total_q, num_q_heads, head_size]}
+    - {name: key_cache,    dtype: same_as_query,        layout: contiguous, ndim: 4, shape: [num_blocks, block_size, num_kv_heads, head_size]}
+    - {name: value_cache,  dtype: same_as_query,        layout: contiguous, ndim: 4, shape: [num_blocks, block_size, num_kv_heads, head_size]}
+    - {name: block_tables, dtype: int32,                layout: contiguous, ndim: 2, shape: [num_seqs, max_blocks_per_seq]}
+    - {name: seq_lens,     dtype: int32,                layout: contiguous, ndim: 1, shape: [num_seqs]}
+    - {name: cu_seqlens_q, dtype: int32,                layout: contiguous, ndim: 1, shape: [num_seqs + 1]}
+    - {name: sinks,        dtype: same_as_query,        layout: contiguous, ndim: 1, shape: [num_q_heads]}
+  outputs:
+    - {name: out, dtype: same_as_query, layout: contiguous, ndim: 3, shape: [total_q, num_q_heads, head_size]}
+  init_inputs:
+    - {name: head_size,      dtype: int64,  layout: scalar}   # scale 缺省 1/sqrt(head_size)
+    - {name: sliding_window, dtype: int64,  layout: scalar}   # 0 = 关闭滑窗
+    - {name: softcap,        dtype: float64, layout: scalar}  # 0.0 = 关闭 logit cap
+    - {name: use_sinks,      dtype: bool,   layout: scalar}   # False 时忽略 sinks 张量
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见 invariants）
+  fixed_family:
+    num_seqs: 4
+    num_kv_heads: 2
+    query_group_size: 4        # num_q_heads = 8
+    head_size: 128
+    block_size: 16
+    max_seq_len: 512
+    query_lens: [1, 24, 1, 9]  # 固定混合模式：2 decode + 2 prefill
+    sliding_window: 64
+    softcap: 50.0
+    use_sinks: true
+    dtype: bfloat16
+  dynamic: true
+  invariants:
+    - "num_q_heads == num_kv_heads * query_group_size"
+    - "total_q == cu_seqlens_q[-1]，cu_seqlens_q 为 query 长度前缀和（每段 >= 1）"
+    - "seq_lens[s] >= cu_seqlens_q[s+1] - cu_seqlens_q[s]（上下文长度非负）"
+    - "block_tables[s, ceil(seq_lens[s]/block_size)] 为该序列全部有效物理块"
+    - "物理块池 num_blocks 可大于实际使用块数；未引用槽位内容不定"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审（官方测试对 bf16 用
+    atol 1.5e-2 / rtol 1e-2，本表取评测集统一标准 2e-2，覆盖 fp16/bf16
+    输入舍入与 kernel bf16 点积的差异）。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - flex_attention
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax

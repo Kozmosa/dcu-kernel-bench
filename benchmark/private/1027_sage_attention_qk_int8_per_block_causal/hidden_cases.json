@@ -1,0 +1,11 @@
+{
+  "task_id": "1027_sage_attention_qk_int8_per_block_causal",
+  "cases": [
+    {"name": "hidden_min_len1_mha_f16",   "batch": 1, "num_qo_heads": 2,  "num_kv_heads": 2,  "qo_len": 1,   "head_dim": 128, "dtype": "float16",  "seed": 101},
+    {"name": "hidden_nonpow2_len_gqa_f16","batch": 2, "num_qo_heads": 8,  "num_kv_heads": 2,  "qo_len": 333, "head_dim": 128, "dtype": "float16",  "seed": 102},
+    {"name": "hidden_tailblock_len_f16",  "batch": 2, "num_qo_heads": 16, "num_kv_heads": 4,  "qo_len": 65,  "head_dim": 128, "dtype": "float16",  "seed": 103},
+    {"name": "hidden_head64_mqa_bf16",    "batch": 1, "num_qo_heads": 8,  "num_kv_heads": 1,  "qo_len": 100, "head_dim": 64,  "dtype": "bfloat16", "seed": 104},
+    {"name": "hidden_mha_head64_len512_f16","batch": 2, "num_qo_heads": 8, "num_kv_heads": 8,  "qo_len": 512, "head_dim": 64,  "dtype": "float16",  "seed": 105},
+    {"name": "hidden_gqa_b4_len640_f16",  "batch": 4, "num_qo_heads": 32, "num_kv_heads": 4,  "qo_len": 640, "head_dim": 128, "dtype": "float16",  "seed": 106}
+  ]
+}

@@ -1,0 +1,46 @@
+task_id: "4004_batched_gemm_bf16"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/batched_gemm_bf16.py
+      sha256: 8ab7b67f5ea7e2504b83e58d7984e3f25160b0417e41d67a7432f5431a07d55d
+      role: device_kernel   # _batched_gemm_bf16_kernel：tl.dot 主计算与 bias 融合完整在 Triton kernel 内
+    - path: op_tests/triton_tests/test_batched_gemm_bf16.py
+      sha256: 498ebded028bbebfe323334226bae18b1c8f078167ec4125e8adb61112145b53
+      role: official_test   # run_torch 为逐 batch 的 float32 F.linear 参考，语义唯一权威
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # tl.dot（input_precision="ieee"）主计算、bias 融合全部在 _batched_gemm_bf16_kernel
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 run_torch 移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：TN 布局（x 行主 (B,M,K)、weight 行主 (B,N,K)）的 batch 维
+    bf16×bf16 GEMM，float32 累加，可选 bias（融合顺序：fp32 结果先 cast 到
+    输入 dtype 再加 bias，与官方 run_torch 及 kernel 的 accumulator.to(bias)
+    + bias 一致），输出 dtype bfloat16/float16（源码 dtype 参数允许两种，官方
+    测试仅参数化 bf16，float16 输出按源码能力保留为变体）；输入值域沿用官方
+    测试生成器（randint(-20,20)、rand*10）。源码与测试无语义冲突。其余变体
+    留作后续：生成器的非 TN 布局（layout 参数存在但官方测试从未覆盖）、YQ
+    预分配输出（output=True/False 仅影响分配方式，不影响数值）、splitK 分支
+    （源码断言禁用）。batched_gemm_* 组内本题是无量化成员：与
+    4001_batched_gemm_a8w8 差输入格式（int8 码字 + scale 反量化 vs 纯 bf16），
+    与 4007_gemm_a16w16_atomic 的区别是带 batch 维（后者为单矩阵 fused
+    epilogue）。case 由题目文件内 make_inputs(**case) 确定性生成
+    （torch.Generator(seed)，消费顺序 x→weight→bias；out_dtype 仅指定输出
+    dtype，不参与输入生成）。题面 task.yaml 不携带 repo/commit/path 溯源段
+    （隔离检查要求），溯源仅记录于本文件；forbidden 另列 torch.baddbmm
+    （bias 融合 ATen 捷径，子串匹配下 torch.bmm 拦不住）。已知容差内差异：
+    无 bias + float16 输出时本题 Model（fp32 单次 cast，与设备 kernel
+    epilogue 一致）与官方 run_torch（先存 bf16 缓冲再转 dtype 的双舍入）
+    至多差 1 个 bf16 ulp（|x|~2^14 处实测最大绝对偏差 128），官方测试仅
+    参数化 bf16 输出、该路径无官方 oracle，按 kernel 融合顺序裁定。

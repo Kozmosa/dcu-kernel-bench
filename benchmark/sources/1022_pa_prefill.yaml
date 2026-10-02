@@ -1,0 +1,47 @@
+task_id: "1022_pa_prefill"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/pa_prefill.py
+      sha256: 6433a1c80d0c484540518e130eead5cc10c839a4adcecff721d335b19aa1b69c
+      role: device_kernel   # _fwd_kernel / _fwd_kernel_alibi（context_attention_fwd 入口）
+    - path: op_tests/triton_tests/test_pa_prefill.py
+      sha256: 9916c7fec8fd3a126da35cb23a181d6931b68d030976c5c9396469510a5d67e0
+      role: official_test   # 语义唯一权威：input_helper 输入构造 + context_attention_fwd_torch 参考
+
+admission:
+  derived_from: 无（独立准入；与 1010 同属分页 KV attention 家族但语义不重叠）
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：context_attention_fwd 的 prefill 语义——多 token query 对
+    「分页缓存前缀 + 本轮新 token 的 key/value」做统一在线 softmax（因果
+    掩码），前缀独占缓存（新 token K/V 不入缓存，区别于 1010 的整序列双路
+    写缓存）；MHA/GQA（num_queries_per_kv ∈ {1,2,4,8}）；K 通道打包分页布局
+    （x=8，head_size ∈ {24,64,96,128} 含非 2 次幂）；非量化 KV（fp16/bf16）；
+    含 ALiBi 偏置变体（_fwd_kernel_alibi：logits 加 alibi_slopes[h]*(l-pos)，
+    l==pos 处为 0；在线 get_inputs 口径为偏置态，无偏置基线由隐藏 case 以
+    alibi_slopes=None 覆盖）。语义依据：官方测试 input_helper 的输入构造
+    （仅前缀写入块表指定物理块、块表随机置换、新 token K/V 以 k/v 给出、
+    块池含垃圾）+ kernel 的块表寻址与单 m/l 在线 softmax。
+    与官方测试的冲突处理：官方 torch 参考 context_attention_fwd_torch 有两处
+    与 Triton kernel 不一致的口径——(1) 读前缀缓存未过块表（直接取块池
+    flatten 后前 ctx_len 个物理槽位）；(2) context/self 两段各自独立 softmax
+    后相加，而 kernel 是统一在线 softmax。官方测试因数据尺度（uniform
+    ±1e-3）与容差（atol=rtol=1e-2）无法区分两种口径（实测：官方尺度下
+    两种口径最大偏差 1.27e-3 < 1e-2，官方测试对两者都判过；±0.1 尺度下
+    偏差 0.127 ≫ 容差，证明二者为不同函数）。裁定以 kernel 语义为准
+    （块表寻址 + 统一 softmax，与 1010 题已裁定的同族口径、上游 LightLLM
+    谱系一致），构建自检保留双口径：官方尺度下对官方参考逐行移植版断言
+    官方容差内一致（1e-2/1e-2），任务尺度下对独立逐 token golden 断言严格
+    一致。其余变体留作后续题：滑窗（SLIDING_WINDOW>0，官方主测试全档
+    参数化）、fp8e4m3/fp8e5m2 量化 KV（k_scale/v_scale 反量化路径）、
+    skip_decode、USE_MATRIX_LOAD 矩阵加载路径、qpk=64 极端 GQA。

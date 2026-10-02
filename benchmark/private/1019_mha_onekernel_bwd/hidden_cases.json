@@ -1,0 +1,11 @@
+{
+  "task_id": "1019_mha_onekernel_bwd",
+  "cases": [
+    {"name": "hidden_min_1x1_mha_f16",       "batch": 1, "num_q_heads": 1,  "num_kv_heads": 1,  "head_dim": 64,  "seqlen_q": 1,   "seqlen_k": 1,   "dtype": "float16",  "causal": 1, "seed": 101},
+    {"name": "hidden_qgt_k_causal_gqa_f16",  "batch": 2, "num_q_heads": 48, "num_kv_heads": 8,  "head_dim": 128, "seqlen_q": 64,  "seqlen_k": 32,  "dtype": "float16",  "causal": 1, "seed": 102},
+    {"name": "hidden_qlt_k_mqa_head8_f16",   "batch": 2, "num_q_heads": 2,  "num_kv_heads": 1,  "head_dim": 8,   "seqlen_q": 32,  "seqlen_k": 64,  "dtype": "float16",  "causal": 1, "seed": 103},
+    {"name": "hidden_noncausal_333_bf16",    "batch": 2, "num_q_heads": 16, "num_kv_heads": 16, "head_dim": 64,  "seqlen_q": 333, "seqlen_k": 333, "dtype": "bfloat16", "causal": 0, "seed": 104},
+    {"name": "hidden_batch57_gqa_nonpow2_bf16", "batch": 57, "num_q_heads": 8, "num_kv_heads": 2, "head_dim": 96, "seqlen_q": 100, "seqlen_k": 200, "dtype": "bfloat16", "causal": 0, "seed": 105},
+    {"name": "hidden_long_2048_causal_f16",  "batch": 2, "num_q_heads": 16, "num_kv_heads": 4,  "head_dim": 64,  "seqlen_q": 2048, "seqlen_k": 2048, "dtype": "float16",  "causal": 1, "seed": 106}
+  ]
+}

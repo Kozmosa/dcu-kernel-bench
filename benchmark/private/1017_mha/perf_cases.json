@@ -1,0 +1,9 @@
+{
+  "task_id": "1017_mha",
+  "cases": [
+    {"name": "perf_b2_h16kv16_d128_sq8192_sk8192_f16_causal",      "batch": 2, "seqlen_q": 8192,  "seqlen_k": 8192,  "num_q_heads": 16, "num_kv_heads": 16, "head_dim": 128, "dtype": "float16",  "causal": 1, "alibi": 0, "seed": 201},
+    {"name": "perf_b4_h16kv16_d128_sq4096_sk4096_f16_noncausal",   "batch": 4, "seqlen_q": 4096,  "seqlen_k": 4096,  "num_q_heads": 16, "num_kv_heads": 16, "head_dim": 128, "dtype": "float16",  "causal": 0, "alibi": 0, "seed": 202},
+    {"name": "perf_b2_h16kv4_d128_sq8192_sk8192_bf16_causal_alibi", "batch": 2, "seqlen_q": 8192,  "seqlen_k": 8192,  "num_q_heads": 16, "num_kv_heads": 4,  "head_dim": 128, "dtype": "bfloat16", "causal": 1, "alibi": 1, "seed": 203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

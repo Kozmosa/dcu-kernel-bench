@@ -1,0 +1,37 @@
+task_id: "2002_add_swiglu"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/add_swiglu.py
+      sha256: adcdff8045250f2ade55202fd4499345b27547e39deea4f0585c78af9556132a
+      role: device_kernel   # _forward/_backward Triton kernel 与 autograd 封装
+    - path: op_tests/test_add_swiglu_training.py
+      sha256: 719df4e5cfe33b6a10f67ec5df214ad89864400373bce8461cdd92e0f0ce080a
+      role: official_test   # 语义唯一权威
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面取训练用 Add+SwiGLU 的前向 + 一阶反向子集：
+    silu((base+delta)[...,:D]) * (base+delta)[...,D:] 与其解析梯度
+    （SiLU 导数公式；base/delta 以相同系数进入和式，两路梯度逐元素相同），
+    以单次 forward 输出拼接张量 [out|grad_gate|grad_up] 落入 KernelBench
+    model_class 形态——在线评测器要求单张量输出且运行于 no_grad，故梯度以
+    解析式进入被评契约，autograd 集成 / once_differentiable 不进在线契约。
+    语义依据官方测试 test_values_and_gradients（前向值 + x.grad/y.grad 对比，
+    覆盖 (0,64)/(17,66)/(257,28672) × fp16/bf16 × train_base/recompute 组合）
+    与 test_shared_input_accumulation（共享输入时 autograd 负责累加，本题
+    输出单路梯度，构建自检中按 2×单路梯度复核）。源码与测试无冲突。源
+    kernel 显式复现 eager dtype 舍入边界（逐级 round 到输入 dtype），本题
+    容差 2e-2/2e-2 覆盖舍入路径差异，不要求逐位一致。其余变体留作后续题：
+    moe_activation.py 的 swiglu_variant_1d（无 Add 输入、无训练反向，独立
+    成题）；checkpoint 重算、二阶梯度、torch.compile 兼容均非本题范围。

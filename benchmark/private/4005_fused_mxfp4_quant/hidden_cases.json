@@ -1,0 +1,11 @@
+{
+  "task_id": "4005_fused_mxfp4_quant",
+  "cases": [
+    {"name": "hidden_min_m1_n1_2_bf16",     "m": 1,    "n1": 2,     "dtype": "bfloat16", "seed": 401},
+    {"name": "hidden_sub32_n1_16_bf16",     "m": 5,    "n1": 16,    "dtype": "bfloat16", "seed": 402},
+    {"name": "hidden_partial_block_n1_34_f16", "m": 3, "n1": 34,    "dtype": "float16",  "seed": 403},
+    {"name": "hidden_n1_2112_m131_bf16",    "m": 131,  "n1": 2112,  "dtype": "bfloat16", "seed": 404},
+    {"name": "hidden_m1000_n1_96_f16",      "m": 1000, "n1": 96,    "dtype": "float16",  "seed": 405},
+    {"name": "hidden_pow2_n1_4096_m7_bf16", "m": 7,    "n1": 4096,  "dtype": "bfloat16", "seed": 406}
+  ]
+}

@@ -1,0 +1,44 @@
+task_id: "4005_fused_mxfp4_quant"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/fused_mxfp4_quant.py
+      sha256: 8f6919e1b872e5b9934a481387d4bc00e27432970c2130823d3cc24a797b33be
+      role: device_kernel   # _fused_rms_mxfp4_quant_kernel：残差+RMSNorm+mxfp4 量化主计算在 Triton kernel 内
+    - path: op_tests/triton_tests/test_fused_mxfp4_quant.py
+      sha256: 81f1172815d59bc38b1495a1bc70320a28a1794bf798be1ac1404baf12c92ad0
+      role: official_test   # calculate_target_w_torch + torch_dynamic_mxfp4_quant 为语义唯一权威
+    - path: LICENSE
+      sha256: 844e3a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # 残差相加、RMSNorm、_mxfp4_quant_op 量化全部在 _fused_rms_mxfp4_quant_kernel
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试参考（rmsnorm + torch_dynamic_mxfp4_quant）移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：fused_rms_mxfp4_quant 的残差 + RMSNorm + MXFP4 动态量化核心
+    （量化块 32、even 圆整、e8m0 块 scale、e2m1 双 nibble 打包），eps 固定
+    1e-6、输入值域 randn 均沿用官方测试生成器。输出契约改为单张量
+    uint8 (M, N1//2 + ceil(N1/32))（码字在前、scale 字节在后）：在线
+    KernelBench 评测器（eval.py run_and_check_correctness）对 model 输出
+    直接取 .shape / torch.allclose，元组输出会 AttributeError，故多输出
+    序列化为单张量。受该契约限制，官方 op 的第二路 RMSNorm 直通输出
+    （out2）与残差直通输出（out_res1）无法表达，连同 skip_second / 无残差
+    特化分支（数学上同核心减一路）一并留作后续题；fused_flatten_mxfp4_quant
+    （(M,N1,N2) 展平量化入口）留作后续题；官方测试的 strided 行输入
+    （mat1_stride=2112 切片）简化为 contiguous 契约。语义依据：官方测试
+    calculate_target_w_torch（rmsnorm fp32 + 残差 fp32 相加后 cast、量化
+    输入为 fp32 归一化结果）与 test_quant_mxfp4.py 的
+    torch_dynamic_mxfp4_quant（逐位移植，CPU 化，无 device 依赖）；官方
+    对量化输出以解码 fp32 assert_close 判等，单个码字差异必然越界，故本集
+    atol=rtol=0 的精确匹配与官方语义一致，无冲突。case 由题目文件内
+    make_inputs(**case) 确定性生成（torch.Generator(seed)，消费顺序
+    inp1 → weight1 → res1）。

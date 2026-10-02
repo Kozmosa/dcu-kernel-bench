@@ -1,0 +1,11 @@
+{
+  "task_id": "2008_rope",
+  "cases": [
+    {"name": "hidden_min_d4_neox_full_f16",        "s": 1,   "b": 1, "h": 1,  "d": 4,   "rotary_percent": 1.0, "rotate_style": 0, "nope_first": false, "reuse_freqs_front_part": false, "dtype": "float16",  "seed": 101},
+    {"name": "hidden_min_d8_gptj_full_f16",        "s": 2,   "b": 1, "h": 2,  "d": 8,   "rotary_percent": 1.0, "rotate_style": 1, "nope_first": false, "reuse_freqs_front_part": false, "dtype": "float16",  "seed": 102},
+    {"name": "hidden_nonpow2_partial_neox_bf16",   "s": 10,  "b": 3, "h": 3,  "d": 64,  "rotary_percent": 0.5, "rotate_style": 0, "nope_first": false, "reuse_freqs_front_part": false, "dtype": "bfloat16", "seed": 103},
+    {"name": "hidden_partial_front_gptj_f16",      "s": 17,  "b": 5, "h": 8,  "d": 64,  "rotary_percent": 0.5, "rotate_style": 1, "nope_first": true,  "reuse_freqs_front_part": false, "dtype": "float16",  "seed": 104},
+    {"name": "hidden_reuse_full_neox_bf16",        "s": 64,  "b": 2, "h": 8,  "d": 128, "rotary_percent": 1.0, "rotate_style": 0, "nope_first": false, "reuse_freqs_front_part": true,  "dtype": "bfloat16", "seed": 105},
+    {"name": "hidden_reuse_partial_front_neox_f16","s": 64,  "b": 4, "h": 16, "d": 256, "rotary_percent": 0.5, "rotate_style": 0, "nope_first": true,  "reuse_freqs_front_part": true,  "dtype": "float16",  "seed": 106}
+  ]
+}

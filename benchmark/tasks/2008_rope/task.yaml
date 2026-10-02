@@ -1,0 +1,70 @@
+id: "2008_rope"
+name: rope_fwd_sbhd
+family: norm_rope_act
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  RoPE（旋转位置编码）前向的 model_class 题目：稠密 sbhd 布局 (S, B, H, D)，
+  旋转角度以 freqs (S,1,1,F) 直接输入（非缓存 cos/sin 表）。支持 NEOX/GPTJ
+  两种 rotate 风格、部分旋转（直通段按 nope_first 接回前/后）与
+  reuse_freqs_front_part 角度扩展（F=R/2 列扩展成 R 列），逐元素平面旋转以
+  float32 求值后 cast 回输入 dtype。rotate_style / nope_first /
+  reuse_freqs_front_part 为 __init__ 超参（get_init_inputs 固定为
+  [0, False, False]），隐藏 case 按各自字段构造 Model 与输入。
+  来源家族的其余变体（thd 变长布局、cos/sin 缓存 + positions/offsets 寻址、
+  GQA 双输入 2c、反向、二维图像 mrope）不在本题范围，留作后续题。
+
+io:
+  inputs:
+    - {name: x,     dtype: [float16, bfloat16], layout: contiguous, ndim: 4, shape: [S, B, H, D]}
+    - {name: freqs, dtype: same_as_x,           layout: contiguous, ndim: 4, shape: [S, 1, 1, F]}
+  outputs:
+    - {name: out,   dtype: same_as_x,           layout: contiguous, ndim: 4, shape: [S, B, H, D]}
+  init_inputs:
+    - {name: rotate_style,               dtype: int64, layout: scalar}   # 0=NEOX, 1=GPTJ
+    - {name: nope_first,                 dtype: bool,  layout: scalar}
+    - {name: reuse_freqs_front_part,     dtype: bool,  layout: scalar}
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；对应 init [0, False, False]
+  # 的全维旋转，故 F = D）
+  fixed_family: {S: 64, B: 2, H: 8, D: 128, F: 128, dtype: float16}
+  dynamic: true
+  invariants:
+    - "D 为 2 的幂（4..256）；R = F*(reuse?2:1) ∈ {D, D/2} 且 R 为偶数"
+    - "F ∈ {D, D/2, D/4}：全维 reuse=F→F=D；全维 reuse=T→F=D/2；部分 reuse=F→F=D/2；部分 reuse=T→F=D/4"
+    - "freqs 沿 (S,1,1,F) 广播到 x 的 B、H 维；S、B、H 为任意正整数"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    官方测试对 fp16/bf16 输入采用 atol=rtol=1e-1；本评测集收紧为 2e-2，
+    判分对象是候选 kernel 与本题 reference（Model，fp32 中间计算）的输出
+    差异。构建自检（tmp/build_check/2008.py）已机器验证：Model 与「官方
+    参考按 fp32 计算后 cast 回输入 dtype」逐位相等（含 1.34 亿元素大 case
+    探针）；官方测试自带的 bf16 逐元素 oracle 因自身 bf16 中间舍入，与
+    fp32 路径的偏差实测上限 3.125e-2（大 case 全量在官方 1e-1 内，2e-2
+    阈值越限 2/134217728 元素）——故 2e-2 不可用于「候选 vs 官方 bf16
+    oracle」，对本评测集实际判分路径无影响。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+  - torch.polar
+  - torch.view_as_complex
+
+# 算子源码 / 官方测试路径 / commit / sha256 等溯源与准入记录：
+# benchmark/sources/2008_rope.yaml（不放本题面文件，避免 Agent 可见面携带溯源词）

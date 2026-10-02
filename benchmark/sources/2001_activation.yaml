@@ -1,0 +1,61 @@
+task_id: "2001_activation"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/activation.py
+      sha256: f17cda5d62cd06e1ae2b8ca0bb818b6449821797291f7bf26b4361c3a00430bc
+      role: device_kernel   # _act_mul_and_dynamic_mxfp4_quant_kernel：激活+分半乘+MXFP4 量化完整在 Triton kernel 内
+    - path: op_tests/triton_tests/test_activation.py
+      sha256: b8c61cbb927316f4ab62e3474b1c6562c6564e2d114359b0f2064540768e17d7
+      role: official_test   # torch_act_mul_and_mxfp4_quant（含 test_quant_mxfp4 的 torch_dynamic_mxfp4_quant）为语义唯一权威
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # 激活原语、分半乘、_mxfp4_quant_op 全部在 kernel 内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 torch 参考移植进题目文件 Model（fp32 eager + 位运算）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：shuffle=False（未预排布 scale）、scaling_mode="even" 的
+    激活（silu/gelu/gelu_tanh）× SwiGLU 分半乘 × 动态 MXFP4 量化三合一融合，
+    2D 输入 (M, N)、N%4==0、fp16/bf16；输出为适配在线 model_class 单张量
+    契约的 uint8 拼接张量（前 N/4 列 e2m1 打包码字、后 ceil(N/64) 列 e8m0
+    scale 字节），语义与官方 (x_fp4, blockscale_e8m0) 二元组逐位一致。
+    语义依据与冲突处理：以官方测试 torch_act_mul_and_mxfp4_quant（含
+    test_quant_mxfp4.torch_dynamic_mxfp4_quant）为唯一权威逐行移植；源码
+    kernel 的 bs_e8m0 写作 scale.to(tl.uint8)+127、官方 torch 参考写作
+    scale.to(torch.uint8)+127（负 float 转 uint8 依赖平台 wrap 语义），
+    题目参考改写为 (scale+127).to(torch.uint8)——无偏 scale 为 [-127,127]
+    内整数，二者逐位等价（CPU 实测 -2.0->254->125==125 等），且被
+    test_gemm_afp4wfp4_pre_quant_atomic 的未量化对照 GEMM 在真机上功能性
+    验证（e8m0 字节必须满足 2^(byte-127)）；非正规折算的负移位计数在
+    参考中 clamp 到 0（该分支被 where 丢弃，结果不变）。其余变体留作后续
+    题：shuffle=True 预排布 scale 布局（M%256==0/N%512==0 限定）、
+    scaling_mode 非 even 变体；与 moe_activation.py（纯激活+mul 无量化）、
+    quant.py 的 dynamic_mxfp4_quant（纯量化）互不重叠，按融合形态独立
+    成题。case 由题目文件内 make_inputs(**case) 确定性生成
+    （torch.Generator(seed)，消费顺序 x）。
+    复核修复（2026-10-02）：题面受检四文件（reference.py / task.yaml /
+    public_cases.json / compat 镜像）零溯源——task.yaml 的 source 段改为
+    指向本文件的 provenance 指针，Model docstring 禁用列表不再列源库名
+    （aiter 仅保留在 task.yaml forbidden 列表行）；make_inputs 增加
+    name / seq_lens 兼容形参，case JSON 字段可字面直传 make_inputs(**case)。
+    已知残留（low，复核两轮确认）：离线终审 audit_model_class.py 以
+    case["head_size"] 构造 Model/ModelNew（stage_correctness/stage_perf），
+    本题 hidden/perf case 的模型构造字段是 activation，工具侧会 KeyError；
+    题目侧已做的兼容为 make_inputs 接受 name/seq_lens 占位形参（RNG 零
+    扰动，字面 make_inputs(**case) 与 make_inputs(seq_lens=None, **fields)
+    均可用，由 tmp/build_check/2001.py 检查 e 覆盖）。构造参数半边无法在
+    不污染 case 字段语义的前提下于题目侧修复（以 head_size 别名携带
+    activation 会重新引入"case 字段与生成器签名不对齐"），需维护者把该
+    共享工具的构造参数通用化（如按 task.yaml 的 init_inputs 字段名从
+    case 取值，缺省回退 head_size 以兼容 1002 系）；该文件为既有已提交
+    文件，不在本题产物路径内，未改动。

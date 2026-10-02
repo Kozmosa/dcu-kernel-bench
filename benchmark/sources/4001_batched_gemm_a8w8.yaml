@@ -1,0 +1,42 @@
+task_id: "4001_batched_gemm_a8w8"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/batched_gemm_a8w8.py
+      sha256: 81bac315146a0858445159b535adb2e68241b351051c304c664428146cc9ae16
+      role: device_kernel   # _batched_gemm_a8w8_kernel：tl.dot 主计算完整在 Triton kernel 内
+    - path: op_tests/triton_tests/test_batched_gemm_a8w8.py
+      sha256: 27a10483575469ad37ab7f8e6c121f704dcc26ade5f6eab166e616e1a4c724bf
+      role: official_test   # run_torch 为逐 batch 的 float32 F.linear 参考，语义唯一权威
+    - path: LICENSE
+      sha256: 844e3a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # tl.dot 主计算、scale 外乘、bias 融合全部在 _batched_gemm_a8w8_kernel
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 run_torch 移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：TN 布局（x 行主 (B,M,K)、w 行主 (B,N,K)）的 batch 维 int8×int8
+    GEMM，per-token (B,M,1) × per-channel (B,1,N) scale 外乘反量化，可选 bias
+    （融合顺序：fp32 结果先 cast 到输出 dtype 再加 bias），输出 bfloat16/float16；
+    码字值域与 scale/bias 量级沿用官方测试生成器（[-20,20)、rand+1e-6、rand*10）。
+    语义冲突以官方测试 run_torch 为准（kernel 中 WQ.transpose(1,2) 与 run_torch
+    的 F.linear 等价）；源码的 splitK 分支无 Triton 实现（断言禁用）、fp8/afp4
+    变体（batched_gemm_afp4wfp4*）与非量化 batched_gemm_bf16、CK 闭源路径
+    （csrc/ck_batched_gemm_a8w8）均留作后续独立题。batched_gemm_* 四项同骨架
+    不同输入格式的算子各自独立出题；与单 batch 的 gemm_a8w8 仅差 batch 维，
+    按不同算子保留。case 由题目文件内 make_inputs(**case) 确定性生成
+    （torch.Generator(seed)，消费顺序 xq→wq→x_scale→w_scale→bias）。
+    复核修复（2026-10-02，独立复核 agent 报告）：reference.py forward 改为
+    全单行顶层语句——框架 loader 逐条提取顶层语句生成 ModelNew scaffold
+    时统一加 8 空格缩进，多行 if/else 块会使 else 错位产生非法缩进
+    （python_region_syntax_error）；task.yaml 移除 source 块与 docstring
+    禁用列表中的库名，溯源信息只保留在本文件。

@@ -1,0 +1,62 @@
+id: "2001_activation"
+name: act_mul_and_mxfp4_quant
+family: norm_rope_act
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  门控激活 × SwiGLU 分半乘 × 动态 MXFP4 量化三合一融合算子：输入 (M, N)
+  fp16/bf16，前半 a 过激活（silu / gelu / gelu_tanh，float32）后乘后半 b 得
+  门控积，再沿最后一维逐 32 元素块动态量化为 MXFP4（even_round amax ->
+  e8m0 block scale -> e2m1 round-to-nearest 饱和 -> nibble 打包）。输出为
+  单张 uint8 张量 (M, N/4 + ceil(N/64))：前 N/4 列为打包 e2m1 码字（偶数
+  下标低 4 位），后 ceil(N/64) 列为 e8m0 scale 字节。本题为自包含 KernelBench
+  题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 2001），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x, dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [M, N]}
+  outputs:
+    - {name: out, dtype: uint8, layout: contiguous, ndim: 2, shape: [M, N/4 + ceil(N/64)]}
+  init_inputs:
+    - {name: activation, dtype: str, layout: scalar}   # "silu" | "gelu" | "gelu_tanh"
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {M: 128, N: 1024, activation: "silu", dtype: "float16"}
+  dynamic: true
+  invariants:
+    - "N % 4 == 0 且 M >= 1（允许非 2 次幂；N/2 非 32 倍数时块尾补零参与 amax）"
+    - "out 前 N/4 列 = FP4 打包码字（每字节两个 e2m1，偶低奇高），后 ceil(N/64) 列 = e8m0 scale 字节"
+    - "输入值域为常规 randn 量级（无 inf/NaN），激活与量化全程 float32"
+
+tolerance:
+  float16:  {atol: 0, rtol: 0}
+  bfloat16: {atol: 0, rtol: 0}
+  uint8:    {atol: 0, rtol: 0}
+  compare: "整数输出精确匹配：FP4 码字与 e8m0 scale 字节逐位相等（atol=rtol=0），无浮点输出"
+  note: >
+    输出为整数码字，必须精确匹配（官方测试对 uint8 张量同为 assert_close
+    零容差）。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton
+    后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)；uint8 值
+    0..255 在 fp32 精确表示，该判定等价于逐位相等——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - aiter
+  - torch.nn.functional.silu
+  - torch.nn.functional.gelu
+  - torch.nn.SiLU
+  - torch.nn.GELU
+  - torch.sigmoid
+  - torch.erf
+  - torch.tanh
+
+source:
+  provenance: benchmark/sources/2001_activation.yaml   # 溯源元数据（repo/commit/sha256）独立存放于维护者侧，题面文件零溯源

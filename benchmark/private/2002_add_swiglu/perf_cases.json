@@ -1,0 +1,9 @@
+{
+  "task_id": "2002_add_swiglu",
+  "cases": [
+    {"name": "perf_4096x28672_f16",  "num_rows": 4096,  "width": 28672, "dtype": "float16",  "seed": 201},
+    {"name": "perf_8192x14336_bf16", "num_rows": 8192,  "width": 14336, "dtype": "bfloat16", "seed": 202},
+    {"name": "perf_16384x8192_f16",  "num_rows": 16384, "width": 8192,  "dtype": "float16",  "seed": 203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

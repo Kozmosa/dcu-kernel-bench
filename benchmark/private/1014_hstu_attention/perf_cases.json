@@ -1,0 +1,8 @@
+{
+  "task_id": "1014_hstu_attention",
+  "cases": [
+    {"name": "perf_b128_n1024_h4_d128_f16", "batch_size": 128, "max_seq_len": 1024, "num_heads": 4, "qk_dim": 128, "v_dim": 128, "sparsity": 0.9,  "dtype": "float16",  "seed": 201},
+    {"name": "perf_b256_n512_h4_d128_bf16", "batch_size": 256, "max_seq_len": 512,  "num_heads": 4, "qk_dim": 128, "v_dim": 128, "sparsity": 0.97, "dtype": "bfloat16", "seed": 202}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

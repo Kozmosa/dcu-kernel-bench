@@ -1,0 +1,45 @@
+task_id: "1024_prefill_attention"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/prefill_attention.py
+      sha256: c037a49e6159d947ffff61c87c8935dc50b3e546e13dd6d78f8975e4221d2cf5
+      role: device_kernel   # _fwd_kernel：ragged 变长 batch 的连续 KV 在线 softmax（tl.dot 主计算完整在 Triton kernel 内）
+    - path: op_tests/triton_tests/test_prefill_attention.py
+      sha256: e966e02a11dddbeadd1b9ca4fc7940ac82bb950a830db32085e47a1a5b6f6ec5
+      role: official_test   # test_op_fwd 的逐序列 einsum+softmax 参考为语义唯一权威
+
+admission:
+  core_compute_in_source: true    # QK^T/在线 softmax/PV 全部在 _fwd_kernel 的 tl.dot 路径内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试参考（fp32 计算）移植进题目文件 Model
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：context_attention_fwd 的语义主干——非分页（连续 KV）ragged 变长
+    batch 的 prefill 自注意力，序列边界由 b_start_loc（排他前缀和）/b_seq_len
+    描述、无 padding；GQA（query head h 取 KV head h//group）、causal/非
+    causal、sm_scale 缺省 1/sqrt(head_dim)、在线 softmax 与 float32 累加、
+    输出 cast 回输入 dtype；输入值域沿用官方测试生成器（randn）。语义依据：
+    test_op_fwd 的逐序列参考（einsum scores + triu causal 掩码 + softmax）
+    移植为 Model。冲突/推广处理：①官方测试只覆盖 MHA（k/v 头数与 q 相同）
+    与 2 次幂头维（64/128），GQA 与非 2 次幂头维按 kernel 语义
+    （kv_group_num = q_heads//k_heads 整除、mask_d = offs_d < Lk 通道掩码）
+    推广，参考实现在该推广下与官方参考一致（repeat_interleave 后计算相同、
+    零填充通道不改变点积）；②官方测试把总长 SEQLEN 直接当 max_input_len
+    传给 kernel 作保守 grid 上界，题面改为在 forward 内由
+    int(b_seq_len.max()) 推得（grid 只需覆盖最长序列）；③官方测试参考把
+    softmax 概率 cast 回输入 dtype 后做半精度 PV，题目 Model 统一 fp32
+    计算，数值更精、仍在官方容差（atol=rtol=2e-2）语义内。留作后续独立题：
+    absorb 路径（q 512 维/kv 单头的 MLA 吸收形态，官方测试 parametrize
+    absorb=[False] 未启用）、fp32/fp8 dtype、与 extend_attention /
+    chunked prefill 的混合段复用路径（已有独立题 1011/1010）、lean_atten
+    的 persistent streamK 调度变体（1015）。上游源自 SGLang/lightllm
+    （Hygon 改造），仅记录于此、不进题面。case 由题目文件内
+    make_inputs(**case) 确定性生成（torch.Generator(seed)，消费顺序
+    seq_lens→q→k→v）；causal 字段为 Model 初始化超参，不影响输入张量取值。

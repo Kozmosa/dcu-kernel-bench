@@ -1,0 +1,56 @@
+task_id: "1021_pa_decode"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/pa_decode.py
+      sha256: 02bc511ba88a6faef06aa4cd6f348adf0ae8c23a81e18122dada5b399be34bf7
+      role: device_kernel   # 核心计算全部在源文件内的 Triton kernel；本题取 v2 两 pass 非量化子集
+    - path: op_tests/triton_tests/test_pa_decode.py
+      sha256: 57d236538f9668b59afeb6f8d5d8aa3d38c5b89ad75a14ea21e6e2d8cfbf8361
+      role: official_test   # 语义唯一权威（paged_attention_decode_ref 为官方 PyTorch 参考实现）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：长上下文（max(seq_lens) > 8192）分页 KV decode attention
+    的 v2 分区两 pass 非量化路径，对应 4 个 Triton kernel——
+    _paged_attn_decode_v2_wo_dot_kernel（MHA 主）、
+    _paged_attn_decode_v2_wo_dot_reduce_kernel（MHA 归并）、
+    _paged_attn_decode_v2_w_dot_kernel（GQA 主）、
+    _paged_attn_decode_v2_w_dot_reduce_kernel（GQA 归并）：KV 序列按
+    _SEQ_PARTITION_SIZE=1024 分区并行，主 kernel 逐 (head/组, seq, 分区)
+    在线 softmax 写出 (m_p, l_p, o_p)，reduce kernel 跨分区 log-sum-exp
+    归并。与 1002_paged_attention 的分界（同源 pa_decode.py，子集互不
+    重叠）：1002 取 v1 单 pass 非量化路径，触发条件 max_seq_len <= 8192
+    且（分区数为 1 或 num_seqs*num_q_heads > 512），固定族 max_seq_len=1024；
+    本题取 v2 两 pass 路径，工况约束 max(seq_lens) > 8192（官方调度
+    paged_attention_decode 在 max_seq_len > 8192 时必走 v2），固定族
+    max_seq_len=16384，难度 hard。语义依据：官方测试的
+    paged_attention_decode_ref（按 token 经块表取 K/V、GQA
+    repeat_interleave、q 预乘 1/sqrt(head_sz)、einsum+softmax+einsum）；
+    v2 两 pass 数学上与整体 softmax 等价（分区 LSE 归并），与被测 kernel
+    逐式对照一致。官方测试实际跑到 v2 的参数化行：test_paged_attn 的
+    SEQ_LEN=10000 且 B<16（fp16/fp16 与 bf16/bf16 两组 dtype），覆盖
+    MHA (1,1)/(16,16) 与 GQA (24,4)、D ∈ {1,64,128}、KV_BLK_SZ ∈ {1,4,16}；
+    题面固定族与 hidden/perf case 均在该参数域的自然推广内（D=96、
+    bs=32 等非官方枚举值为同一 kernel 路径的合法参数化）。与官方测试的
+    冲突处理：无（源码 kernel 与官方参考实现数学一致）；官方测试的
+    split-x 生成布局（key_cache [blk, H_KV, D//x, blk_sz, x] 经 permute+
+    flatten 得 kernel 消费布局）是 fp8 生成端细节，题面输入直接采用 kernel
+    消费的 [num_blocks, H_KV, block_size, head_size] 布局（同 1001/1002）。
+    官方 block_tables 允许物理块号重复出现，题面生成端用 randperm 去重
+    （寻址语义不变，kernel 只做 gather）。容差：官方非量化路径
+    atol=rtol=1e-2，题面沿用评测集统一 2e-2/2e-2（见 task.yaml note）。
+    其余变体留作后续题：per-token-quant 的 v1/v2 共 8 个 kernel（fp8
+    e4m3fnuz KV + 逐 token k_scale/v_scale）、ALiBi 偏置（源码已实现但
+    官方测试恒传 None，未经官方验证，不进入题面）、int8 KV、fp8 query
+    组合、v1 w_dot 的 gfx946 tile padding（非 gfx936 语义）。

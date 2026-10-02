@@ -1,0 +1,73 @@
+id: "1011_extend_attention"
+name: extend_attention
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  extend（增量 prefill）阶段与 prefix 段混合的变长 attention：prefix 段 KV 已写
+  入池（k_buffer/v_buffer），经 kv_indices 池行号逐 token 间接寻址；extend 段
+  KV/Q 连续存放（k_extend/v_extend/q_extend），ragged 变长 batch 由
+  qo_indptr/kv_indptr 前缀和描述。支持 GQA（query head h 取 KV head
+  h//query_group_size）、causal 掩码（prefix 全可见，extend 段下三角）、
+  sm_scale 缺省 1/sqrt(head_dim_q)、在线 softmax float32 累加；K 头维等于
+  Q 头维，V 头维可不同；输出 cast 回输入 dtype。本题为自包含的 KernelBench
+  题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1011），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q_extend,   dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [total_extend, num_q_heads, head_dim_q]}
+    - {name: k_extend,   dtype: same_as_query,      layout: contiguous, ndim: 3, shape: [total_extend, num_kv_heads, head_dim_q]}
+    - {name: v_extend,   dtype: same_as_query,      layout: contiguous, ndim: 3, shape: [total_extend, num_kv_heads, head_dim_v]}
+    - {name: k_buffer,   dtype: same_as_query,      layout: contiguous, ndim: 3, shape: [num_pool, num_kv_heads, head_dim_q]}   # prefix K 池，含垃圾行
+    - {name: v_buffer,   dtype: same_as_query,      layout: contiguous, ndim: 3, shape: [num_pool, num_kv_heads, head_dim_v]}   # prefix V 池，含垃圾行
+    - {name: qo_indptr,  dtype: int32,              layout: contiguous, ndim: 1, shape: [num_seqs + 1]}   # extend 段长度前缀和
+    - {name: kv_indptr,  dtype: int32,              layout: contiguous, ndim: 1, shape: [num_seqs + 1]}   # prefix 段长度前缀和
+    - {name: kv_indices, dtype: int32,              layout: contiguous, ndim: 1, shape: [total_prefix]}   # prefix token 的池行号，任意排列
+  outputs:
+    - {name: out, dtype: same_as_query, layout: contiguous, ndim: 3, shape: [total_extend, num_q_heads, head_dim_v]}
+  init_inputs:
+    - {name: causal, dtype: bool, layout: scalar}   # True=extend 段因果掩码；sm_scale 缺省 1/sqrt(head_dim_q)
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束如下）
+  fixed_family: {num_seqs: 4, num_kv_heads: 4, query_group_size: 4, num_q_heads: 16, head_dim_q: 128, head_dim_v: 64, max_prefix_len: 256, max_extend_len: 192, dtype: "float16", causal: true}
+  dynamic: true
+  invariants:
+    - "num_q_heads == num_kv_heads * query_group_size（GQA 整除）"
+    - "qo_indptr / kv_indptr 为各段长度的前缀和；extend 每段 >= 1，prefix 每段 >= 0（可为全 0）"
+    - "kv_indices 为 prefix token 的池行号，可为任意排列；num_pool >= total_prefix，未引用池行为垃圾数据"
+    - "K 头维 == Q 头维（head_dim_q），V 头维 head_dim_v 独立（可相等可不等，允许非 2 次幂）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    与官方测试（torch.testing.assert_close rtol=atol=2e-2）一致的验收容差，
+    用于离线终审；误差主要来自低精度 QK/PV 与在线 softmax 的 fp32 累加路径。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与
+    模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论
+    不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+
+source:
+  repo: OpenDAS/aiter
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  path: aiter/ops/triton/extend_attention.py   # 仅维护者溯源用

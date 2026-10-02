@@ -1,0 +1,17 @@
+{
+  "task_id": "2003_fused_mul_add",
+  "note": "model_class 题目：在线输入由题目文件内的 get_inputs() 生成（评测器 set_seed 后调用；x/a/b 的值消费全局 RNG，a/b 的形态也从四种形态池中独立等概率抽取，多轮 correctness trial 因此覆盖标量/单元素/同形张量的组合）。本文件记录 get_inputs 固定的 shape 族与形态池，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。",
+  "shape_family": {
+    "shape": [2048, 4096],
+    "numel": 8388608,
+    "dtype": "float16",
+    "a_kind_pool": ["scalar_float", "scalar_int", "tensor1", "tensor_full"],
+    "b_kind_pool": ["scalar_float", "scalar_int", "tensor1", "tensor_full"],
+    "kind_semantics": {
+      "scalar_float": "Python float 标量（值取 randn*100）",
+      "scalar_int": "Python int 标量（值取 randn*100 截断）",
+      "tensor1": "单元素张量 shape (1,)，dtype 同 x",
+      "tensor_full": "与 x 同形张量，dtype 同 x"
+    }
+  }
+}

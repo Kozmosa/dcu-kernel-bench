@@ -1,0 +1,83 @@
+id: "4008_gemm_a16w4"
+name: gemm_a16w4
+family: quant_gemm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3（level 3）
+
+description: >
+  aiter gemm_a16w4（AWQ W4A16 量化 GEMM）的 model_class（KernelBench 兼容）
+  题目。算子语义：激活 input [M,K] fp16 与 AWQ int4 打包权重 qweight
+  [N,K//2]（int8，沿 K 每字节 2 个 4 位码字，低半字节=偶数 k）、分组零点
+  qzeros [K//G,N//2]（int8，沿 N 每字节 2 个 4 位码字，低半字节=偶数 n）、
+  分组缩放 scales [K//G,N] fp16 做 W4A16 矩阵乘：W[k,n] = (w[n,k] -
+  z[k//G,n]) * scales[k//G,n]，out = input @ W；int4 解包与分组反量化在
+  kernel 内完成，逐 tile float32 乘累加（tl.dot out_dtype=float32），输出
+  cast 回 fp16。dp / split-K / stream-K 三种调度对输出等价，实现自由选择。
+  本题为自包含的 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 4008），无需任何框架改动。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: input,   dtype: float16, layout: contiguous, ndim: 2, shape: [m, k]}
+    - {name: qweight, dtype: int8,    layout: contiguous, ndim: 2, shape: [n, k//2]}
+    - {name: scales,  dtype: float16, layout: contiguous, ndim: 2, shape: [k//group_size, n]}
+    - {name: qzeros,  dtype: int8,    layout: contiguous, ndim: 2, shape: [k//group_size, n//2]}
+  outputs:
+    - {name: out, dtype: float16, layout: contiguous, ndim: 2, shape: [m, n]}
+  init_inputs:
+    - {name: in_features, dtype: int64, layout: scalar}   # 对应 K
+    - {name: out_features, dtype: int64, layout: scalar}  # 对应 N
+    - {name: group_size, dtype: int64, layout: scalar}    # 对应 G
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见 invariants）
+  fixed_family: {m: 64, n: 1536, k: 2048, group_size: 64, dtype: float16}
+  dynamic: true
+  invariants:
+    - "k、n 为偶数；题面 case 族 n 为 8 的倍数、k 为 group_size 的倍数"
+    - "group_size ∈ {32, 64, 128} 或 group_size == k（逐通道）；group_size 整除 k"
+    - "qzeros.shape[0] == k // group_size；scales.shape == [k // group_size, n]"
+    - "m 为任意正整数（含 1，即 GEMV 情形）"
+
+tolerance:
+  float16:  {atol: 2.0e-1, rtol: 2.0e-1}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    比本评测集默认（2.0e-2）与官方测试（1e-1）都宽，原因（均有实测）：
+    官方测试两侧共享 fp16 反量化权重（fp16 matmul 参考 vs fp16 kernel 输出），
+    偏差只来自累加精度，1e-1 对它充分；本评测集离线终审（audit_model_class.py
+    阶段 2）的绑定比较是候选 kernel ↔ 本 Model（fp32 全程），而 aiter kernel
+    语义在 tl.dot 前把反量化权重 cast 到 fp16（b.to(a_ptr.type.element_ty)），
+    该 fp16-W 舍入全部落入两者之差并随 K 累积，在本题官方数据分布（激活与
+    scales ~ U[0,1)，|W| <= 15）的灾难性抵消点由 atol 主导。构建自检以忠实
+    kernel 仿真（fp16-W + fp32 累加 + fp16 输出）为候选代理，固定 hidden
+    种子 + 扰动 seed 扫描共 44 组实测：hidden 正确性 case 族（K <= 2304）
+    worst(diff/tol)@1.0e-1 = 1.14（group128 形状 20 seed 中 4 组越界，越界点
+    |exp|≈0.005、diff≈0.114），即 1.0e-1 对种子扰动脆弱；取 2.0e-1 后
+    worst(diff/tol) = 0.57，扫描全集 0 违例，余量 ~1.75x。1.5e-1 不取：
+    hidden 族余量仅 1.3x，且 K=7168 的 perf 形状 worst(diff/tol)@1.5e-1 = 1.30
+    （perf 族仅用于 stage 3 计时、不对拍，但余量过窄）。在线（搜索循环内）
+    由 KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.addmm
+  - torch.einsum
+  - torch.nn.functional.linear
+  - F.linear
+  - aiter
+
+source:
+  repo: OpenDAS/aiter
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  path: aiter/ops/triton/gemm_a16w4.py   # 仅维护者溯源用
+  test: op_tests/triton_tests/test_gemm_a16w4.py

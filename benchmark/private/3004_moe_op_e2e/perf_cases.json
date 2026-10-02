@@ -1,0 +1,9 @@
+{
+  "task_id": "3004_moe_op_e2e",
+  "cases": [
+    {"name": "perf_prefill_m1024_n4096_k2560_topk2", "m": 1024, "n": 4096, "k": 2560, "top_k": 2, "num_experts": 8, "dtype": "bfloat16", "seed": 351},
+    {"name": "perf_decode_m8_n8192_k2048_topk2",     "m": 8,    "n": 8192, "k": 2048, "top_k": 2, "num_experts": 8, "dtype": "bfloat16", "seed": 352},
+    {"name": "perf_mid_m256_n2048_k1024_topk2",      "m": 256,  "n": 2048, "k": 1024, "top_k": 2, "num_experts": 8, "dtype": "bfloat16", "seed": 353}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

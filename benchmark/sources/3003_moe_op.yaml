@@ -1,0 +1,41 @@
+task_id: "3003_moe_op"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/moe_op.py
+      sha256: 47431706f05b3df699e4b6b0d9500aaaaf111dd169a81f97fc316398ec737a63
+      role: device_kernel   # MoE grouped GEMM 本体库（6 个 Triton kernel + fused_moe 包装）
+    - path: op_tests/triton_tests/test_moe.py
+      sha256: 3be33f91ad3ddb402cc291e74725213d91f0e5db772c1bc20955e8748a85f4b2
+      role: official_test   # 语义唯一权威
+
+admission:
+  core_compute_in_source: true    # grouped GEMM 全部在 Triton 源码内（fused_moe_kernel 及变体），无预编译扩展
+  calls_closed_libs: false        # fused_moe() 默认路径不依赖 ck_sorting（默认 False）等闭源库
+  builds_standalone: true
+  has_reference: true             # 官方测试自带 torch_moe_ref / torch_moe_align_block_size_ref 参考实现
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：官方测试 test_fused_moe 的非量化变体（dtype ∈ {fp16,bf16}、
+    (fp8_w8a8,int8_w8a16,int8_w8a8)=(False,False,False)、block_shape=None），
+    并取 routed_weight=True 的路由加权形态（C[m,j,:] = topk_weights[m,j] *
+    A[m] @ B[topk_ids[m,j]].T），与 A/B 的形状记法解耦为 (M,K_in)/(E,N,K_in)。
+    语义依据：torch_moe_ref（test_moe.py:167-240，einsum 参考实现，非量化
+    +routed_weight 路径）与 torch_moe_align_block_size_ref/_moe_align_block_size
+    （test_moe.py:325-436，块对齐布局协议，题面 block_m 固定 64）。参考实现
+    按专家分组做 fp32 GEMM，与官方 einsum 参考逐点等价（仅求和顺序不同），
+    构建自检 oracle 最大偏差 ~1e-5 量级（fp16 输出舍入前）。
+    与官方测试的冲突处理：无冲突。routed_weight=False（无加权 w1 形态）为
+    本题语义的退化情形（权重恒 1），不再单列；splitk/persistent 两个 kernel
+    与本体 kernel 语义等价（仅 K 维切分/持久化调度策略不同），题面不指定
+    实现调度。其余变体留作后续题：fp8_w8a8 / int8_w8a8 块量化、int8_w8a16、
+    int4 gptq-awq（w4a16 / w4a8 per-group / w4a8 channelwise，test_fused_moe_
+    int4_w4a16 / test_fused_moe_int4_w4a8）、moe_op_silu_fused / moe_op_gelu
+    激活融合、moe_op_mxfp4 权重精度、moe_op_e2e 单 kernel 并行实现。
+    官方测试对非量化主变体用 atol=rtol=1e-1（K=7168 大 K 场景），本题按
+    评测集统一容差 2e-2（K ≤ 7168、fp32 累加下实测余量充足）。

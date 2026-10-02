@@ -1,0 +1,11 @@
+{
+  "task_id": "4018_quant",
+  "cases": [
+    {"name": "hidden_static_nonpow2_193x75_i8",       "mode": "static_per_tensor",   "quant_dtype": "int8",        "rows": 193,   "cols": 75,   "dtype": "float16",  "seed": 408},
+    {"name": "hidden_dyn_tensor_wide_32x8192_fp8",   "mode": "dynamic_per_tensor",  "quant_dtype": "float8_e4m3", "rows": 32,    "cols": 8192, "dtype": "float16",  "seed": 409},
+    {"name": "hidden_dyn_token_min_1x32_i8",         "mode": "dynamic_per_token",   "quant_dtype": "int8",        "rows": 1,     "cols": 32,   "dtype": "float16",  "seed": 410},
+    {"name": "hidden_dyn_token_zero_rows_257x128_fp8", "mode": "dynamic_per_token", "quant_dtype": "float8_e4m3", "rows": 257,   "cols": 128,  "dtype": "bfloat16", "seed": 411, "zero_rows": 3},
+    {"name": "hidden_dyn_token_nonpow2_1281x1232_i8", "mode": "dynamic_per_token",  "quant_dtype": "int8",        "rows": 1281,  "cols": 1232, "dtype": "bfloat16", "seed": 412},
+    {"name": "hidden_dyn_token_bf16_2048x1024_fp8",  "mode": "dynamic_per_token",   "quant_dtype": "float8_e4m3", "rows": 2048,  "cols": 1024, "dtype": "float16",  "seed": 413}
+  ]
+}

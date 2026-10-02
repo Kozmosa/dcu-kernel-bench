@@ -1,0 +1,48 @@
+task_id: "4008_gemm_a16w4"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/gemm_a16w4.py
+      sha256: 8c47decb110ac484f9bf84f3827f446cf4b688d172ccf076a7c8a5dd4768285b
+      role: device_kernel   # 核心 Triton kernel：awq_dequantize_kernel / awq_gemm_kernel(_inner/_splitk/_streamk/_fused)
+    - path: op_tests/triton_tests/test_gemm_a16w4.py
+      sha256: 452e0c70b5e29ecec8edd6361477d4f72b6566c46181a590d56093e0de26a944
+      role: official_test   # test_gemm：gemm_a16w4 vs awq_dequantize_torch+matmul，atol=rtol=1e-1
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    语义依据为官方测试 test_gemm：随机 int32 原始码经 awq_reorder_and_repack
+    打包后调 gemm_a16w4，与 awq_dequantize_torch（fp16 反量化 [K,N]）+
+    torch.matmul 的结果在 fp16 下 atol=rtol=1e-1 比较。题面取的变体子集：
+    gemm_a16w4 主入口的单卡 W4A16 GEMM——输入即 kernel 消费的 AWQ 打包布局
+    （qweight [N,K//2] / qzeros [K//G,N//2] int8，低半字节=偶数下标），int4
+    解包、分组 zeros/scales 广播反量化、tl.dot float32 累加全部在提交 kernel
+    内完成；dp/split-K/stream-K 三种调度（config SCHEDULER 选择）对输出数学
+    等价，题面不限定调度，以输出容差判定。与官方测试的差异处理：官方
+    kernel 在 tl.dot 前把反量化权重 cast 到 fp16（b.to(a_ptr dtype)），该舍入
+    属算子语义，官方测试容差即 1e-1；本题 reference 按评测集规范升为
+    float32 全程累加，与官方 fp16 oracle 实测最大绝对偏差 1.0（输出量级
+    ~2e3，相对 5e-4）。离线终审的绑定比较是候选 kernel ↔ fp32 Model，
+    fp16-W 舍入随 K 累积、在 U[0,1) 分布的灾难性抵消点越出 1e-1：固定
+    hidden 种子 + 44 组扰动 seed 扫描实测 hidden case 族（K <= 2304）
+    worst(diff/tol)@1e-1 = 1.14（group128 形状 20 seed 中 4 组越界）、
+    K=7168 perf 形状达 1.95，故 task.yaml 容差放宽至 2.0e-1（hidden 族
+    worst(diff/tol) = 0.57，扫描全集 0 违例；1e-1 的"0 违例"仅在固定种子下
+    成立）。
+    官方测试仅覆盖 float16 激活与 float16 scales（G=64），题面据此限定
+    float16；bf16 激活变体（kernel 支持但官方测试未覆盖、容差无法据实裁定）
+    留作后续题。其余不并入本题的变体：awq_dequantize_triton 独立反量化入口、
+    awq_gemm_kernel_fused（split-K+barrier 归约融合）与 use_fused_kernel 路径、
+    gemm_allreduce_a16w4 TP 通信融合变体（已单独 reject）、autotune 配置加载
+    （get_w4a16_awq_gemm_configs）与 awq_reduce_and_convert_kernel 显式归约
+    入口。源码带 vLLM 上游版权头，语义以本仓库官方测试为准。

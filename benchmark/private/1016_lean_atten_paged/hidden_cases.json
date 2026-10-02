@@ -1,0 +1,11 @@
+{
+  "task_id": "1016_lean_atten_paged",
+  "cases": [
+    {"name": "hidden_min_one_block_f16",  "num_heads": 2,  "batch": 1, "n_ctx_q": 16, "head_size": 64,  "ctx_lens": [64],                                      "dtype": "float16",  "extra_blocks": 0, "seed": 101},
+    {"name": "hidden_d16_small_f16",      "num_heads": 8,  "batch": 2, "n_ctx_q": 16, "head_size": 16,  "ctx_lens": [64, 128],                                 "dtype": "float16",  "extra_blocks": 2, "seed": 102},
+    {"name": "hidden_ragged_b3_bf16",     "num_heads": 16, "batch": 3, "n_ctx_q": 16, "head_size": 64,  "ctx_lens": [1024, 256, 512],                          "dtype": "bfloat16", "extra_blocks": 4, "seed": 103},
+    {"name": "hidden_d256_ctx512_f16",    "num_heads": 8,  "batch": 2, "n_ctx_q": 16, "head_size": 256, "ctx_lens": [512, 512],                                "dtype": "float16",  "extra_blocks": 2, "seed": 104},
+    {"name": "hidden_batch8_mixed_f16",   "num_heads": 8,  "batch": 8, "n_ctx_q": 16, "head_size": 64,  "ctx_lens": [128, 128, 256, 256, 512, 512, 1024, 2048], "dtype": "float16", "extra_blocks": 8, "seed": 105},
+    {"name": "hidden_d128_long_bf16",     "num_heads": 16, "batch": 1, "n_ctx_q": 16, "head_size": 128, "ctx_lens": [2048],                                    "dtype": "bfloat16", "extra_blocks": 0, "seed": 106}
+  ]
+}

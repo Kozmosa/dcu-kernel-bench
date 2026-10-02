@@ -1,0 +1,11 @@
+{
+  "task_id": "3010_topk",
+  "cases": [
+    {"name": "hidden_min_b1_m16_k2_f32",     "batch_size": 1,  "row_len": 16,    "k": 2,  "dtype": "float32",  "seed": 4101},
+    {"name": "hidden_nonpow2_m100_k7_f32",   "batch_size": 3,  "row_len": 100,   "k": 7,  "dtype": "float32",  "seed": 4102},
+    {"name": "hidden_boundary_m1024_k8_f32", "batch_size": 4,  "row_len": 1024,  "k": 8,  "dtype": "float32",  "seed": 4103},
+    {"name": "hidden_2stage_m1536_k3_f32",   "batch_size": 16, "row_len": 1536,  "k": 3,  "dtype": "float32",  "seed": 4104},
+    {"name": "hidden_kmax_m64_k64_f16",      "batch_size": 2,  "row_len": 64,    "k": 64, "dtype": "float16",  "seed": 4105},
+    {"name": "hidden_bf16_m256_k4",          "batch_size": 8,  "row_len": 256,   "k": 4,  "dtype": "bfloat16", "seed": 4106}
+  ]
+}

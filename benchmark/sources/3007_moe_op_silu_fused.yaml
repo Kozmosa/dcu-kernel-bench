@@ -1,0 +1,44 @@
+task_id: "3007_moe_op_silu_fused"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/moe_op_silu_fused.py
+      sha256: d271cd67f6a7e4e4f2654a86b86b15c03e432bf1818df263e03688e645ccc3cd
+      role: device_kernel
+    - path: op_tests/triton_tests/test_moe.py
+      sha256: 3be33f91ad3ddb402cc291e74725213d91f0e5db772c1bc20955e8748a85f4b2
+      role: official_test   # 语义唯一权威
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：moe_op_silu_fused.py 的 _fused_moe_silu_kernel（及其 persistent
+    调度变体，同一语义）所覆盖的 bf16/fp16 稠密与 fp8 w8a8 分块量化
+    （block_shape=[block_n, block_k]，官方测试用 [128,128]）两型、
+    mul_routed_weight 开/关两态；输入按官方 input_helper 的分布族生成（dense
+    A~randn、B~rand；fp8 B 为 [-448,448] 均匀码字 + (0,0.01) 均匀 scale、A 为
+    randn/10 按token 分组 e4m3 动态量化；路由 softmax-topk；dense 量级取单位
+    randn/rand 而非官方 /10，使输出 O(10) 落在验收容差 2e-2 可判定的量级，
+    官方 /10 下输出 ~1e-2 会退化为 atol 全遮蔽）。语义依据：
+    test_moe.py::test_fused_moe 的
+    silu_fused 分支——参考链 torch_moe_ref / torch_moe_ref_block_w8a8_fp8 +
+    torch_silu_and_mul_ref（输出 (M*top_k, 2N/2)），路由权重乘在激活之前、
+    SiLU 以 fp32 求值，与 kernel 的 MUL_ROUTED_WEIGHT 先乘再 cast 再激活一致。
+    与官方测试的冲突处理：本 commit 的 test_fused_moe / test_fused_moe_int4_w4a16
+    把 silu_fused 参数化为 [False]（该分支处于关闭状态），但同一测试文件完整
+    定义了 silu 融合分支的语义与容差（atol=rtol=1e-1，moe_op_silu_fused 为
+    其被测 import 对象）；本题按该分支语义构建并按评测集统一验收容差
+    2e-2/2e-2 收紧，源码与测试无数学冲突。其余变体留作后续题：gptq/awq 的
+    int4_w4a16 与 int8_w8a16 组量化（_fused_moe_silu_kernel_gptq_awq 族）、
+    per-tensor fp8（需核内动态量化 A 的 _MOE_A_QUANT_FUNC 路径）；int8_w8a8
+    被 test_moe.py 显式 NotImplementedError 排除；对齐三件套为上游
+    moe_align_block_size（3002 题）产物，作为输入给出，不含对齐计算。

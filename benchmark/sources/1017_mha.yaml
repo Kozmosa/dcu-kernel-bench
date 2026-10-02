@@ -1,0 +1,53 @@
+task_id: "1017_mha"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/mha.py
+      sha256: a756124404c326fb12042d82b66404fc2ebd3e4f260f9c33d8dfee73de7ee54e
+      role: device_kernel   # 核心计算全部在源文件内的 Triton kernel（_attn_fwd / _attn_fwd_inner）
+    - path: op_tests/triton_tests/test_mha.py
+      sha256: 92e59f0977cab90c27707f5426000cd482dc0dabdd1f71fa4b8a5b0042737beb
+      role: official_test   # 语义唯一权威（参考实现 attention_ref 在 aiter/test_mha_common.py）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：稠密（padded 4D batch，bshd 布局）FlashAttention 前向，
+    fp16/bf16 非量化输入，MHA/GQA，causal 两态（右下对齐因果掩码，允许
+    seqlen_q > seqlen_k，整行掩码行 out=0/lse=0），ALiBi 位置偏置
+    （-slope*|i + seqlen_k - seqlen_q - j| 加到缩放后 score 上，causal 与
+    非 causal 均施加），输出 (out, lse)（lse 为自然对数 log-sum-exp、
+    float32），sm_scale = head_dim^-0.5。与同族题边界：1002 为单 token
+    decode 的分页 attention，1012 为 varlen（cu_seqlens 分段、无 ALiBi、
+    无 LSE、约束 L_q <= L_k），本题取 1012 sources note 明示留作后续题的
+    三项——稠密 4D batch 形态、ALiBi、LSE 输出——三者均不与其重叠。
+    语义依据：官方测试 test_mha（非 varlen 用例）覆盖稠密前向 O 的全部
+    题面形态（SEQLEN_Q/SEQLEN_K 含 (2,1)/(1,2)/(32,16)/(64,128) 即
+    Sq>Sk 整行掩码边界，HEAD_SZ 8/32/128，GQA (2,1)/(48,8)，容差
+    atol=rtol=1e-2），其参考实现 attention_ref（float32 上抛、q/sqrt(d)
+    缩放、GQA repeat_interleave 按 h//g 共享 KV、causal 经
+    construct_local_mask 右下对齐、整行掩码行置 0）。
+    与官方测试的差异处理：① ALiBi 未被 triton_tests/test_mha.py 覆盖
+    （该测试从不传 alibi_slopes），题面 ALiBi 公式取 kernel 源码
+    _compute_alibi_block（-slope*|i + Sk - Sq - j|，causal/非 causal
+    同式）与 flash_attn_func docstring；注意根目录 op_tests/test_mha.py
+    测的是 CK 版 flash_attn，其 alibi helper 在 causal 分支用行无关偏置，
+    与 Triton kernel 不同，不作为本题依据。② LSE 数值未被官方测试比对
+    （test_mha 仅在 RETURN_LSE=True 时断言返回个数），题面 LSE 语义取
+    kernel epilogue（自然对数 log-sum-exp；causal 整行掩码行写 0 而非
+    -inf，早退路径与 epilogue 两条路径一致），以题面显式规定为准。
+    ③ 官方测试 DROPOUT>0 用例依赖 philox RNG 掩码回灌，无法在参考实现
+    侧独立复现，dropout 不纳入题面。其余变体（fp8 双路径量化、bias、
+    滑窗、return_softmax 编码掩码输出、反向 mha_fused_bwd /
+    mha_onekernel_bwd 及 mha_set_use_fused_bwd_kernel 切换）留作同族
+    后续题。性能 case 规模取官方 bench_mha.py nonvarlen_benchmark_configs
+    的 (2,16,16,8192,8192)/(4,16,16,4096,4096) 档并加 GQA+ALiBi 变体。

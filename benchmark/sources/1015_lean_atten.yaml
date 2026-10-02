@@ -1,0 +1,49 @@
+task_id: "1015_lean_atten"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/lean_atten.py
+      sha256: aebd683a215c3cd271770c981127ce3bec8d992bbe9089de830d35e395d76b8b
+      role: device_kernel   # 核心计算全部在源文件内的 Triton kernel（la_persistent，persistent_lean_attention 包装）
+    - path: op_tests/triton_tests/test_la.py
+      sha256: a123c4292831ae9cce92b05244dc462375a32c22b3869389e832cd2c4530d120
+      role: official_test   # 语义唯一权威（test_persistent_lean_attention 内含 PyTorch 参考实现）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：Lean Attention（arXiv 2405.10480，streamK 式 persistent
+    调度）的连续、非分页 KV 变体——ragged batch（各批 KV 长度独立）decode
+    （causal=0）与方阵因果自注意力 prefill（causal=1）两态，MHA（无 GQA），
+    head_dim ∈ {16,32,64,128,256}，fp16/bf16 非量化输入，sm_scale 缺省
+    head_dim^-0.5，输出仅 O。语义依据：官方测试 test_persistent_lean_attention
+    的 PyTorch 参考实现（逐批切片 → QK^T×sm_scale → 因果掩码 tril（j>i 记
+    -inf）→ softmax → PV，序列主序拼回）与被测 kernel la_persistent（在线
+    softmax exp2、float32 累加、Mp/Lp/Op 部分和跨 CTA 归约）。
+    与官方测试/源码的差异处理：① 官方包装层输入为 batch_num_block_n
+    （BLOCK_N 粒度的累积块数）与 total_programs/BLOCK_M/BLOCK_N/num_warps/
+    waves_per_eu 等调度调优参数——BLOCK_N 属 kernel 调优而非算子语义，题面
+    改用语义等价的每批 KV 长度 kv_lens（长度=块数×BLOCK_N 可互换换算），
+    调度参数不纳入题面；② 官方 kernel causal 路径不支持 ragged batch（源码
+    注释明确"Does not support ragged batching"），官方测试 causal 用例全部
+    各批等长且 n_ctx_q == n_ctx（8192/8192、2048/2048）——题面据此约束
+    causal=1 时 kv_lens[b] == q_len，与官方语义一致无冲突；③ 官方 kernel 在
+    max_seqlen_q==1 时内部强制 causal=False（get_num_splits_and_buffer_sizes
+    L174-175），此时方阵约束下 kv_len==q_len==1，因果与全可见等价，无数学
+    冲突；④ 官方测试参考实现把 softmax 概率 cast 回 fp16 再做 PV，本评测集
+    规范要求中间 float32——两路径数值差在验收容差内（构建自检 oracle 实测
+    最大偏差远小于 atol），语义无冲突；⑤ 官方测试 device='cuda' 且 import
+    aiter——构建自检将参考实现 CPU 化移植对比。官方 kernel 另限制
+    kv_len 为 BLOCK_N 整数倍（尾块掩码为 TODO），题面不沿用该实现级限制，
+    hidden case 特意覆盖非 2 次幂/非整块 kv_len。其余变体留作后续题：
+    lean_atten 的分页 KV 变体、pod_attention（复用 la_persistent 计算体的
+    PoD dipole 调度）、fp8 输入（官方测试 atol 分支提及但未参数化）。

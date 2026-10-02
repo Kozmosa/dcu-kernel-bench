@@ -1,0 +1,54 @@
+task_id: "2007_rmsnorm"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/rmsnorm.py
+      sha256: f15078cb15058f927a010194b9d2d339e2c0c7d04139399ed4636399495c1d35
+      role: device_kernel   # _rms_norm_kernel / _fused_add_rmsnorm_kernel：残差加法+平方和归约+rsqrt+逐元素缩放完整在 Triton kernel 内
+    - path: op_tests/triton_tests/test_rmsnorm.py
+      sha256: 4bb6bdcf71821197729e264c39128113942fc26dfe045691b4c20e2fe7b01737
+      role: official_test   # torch_rmsnorm / run_torch 为语义唯一权威
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # 残差加法、平方和归约、rsqrt、逐元素缩放全部在 kernel 内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 torch 参考移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：RMSNorm 前向家族的非量化路径——标准前向（_rms_norm_kernel，
+    variant="rmsnorm"）与残差融合前向（_fused_add_rmsnorm_kernel，
+    variant="fused_add"：residual_out = x + residual 在输入 dtype 下相加并
+    直通输出，再对 residual_out 归一化），2D 输入 (M, N)、fp16/bf16、eps
+    可调（缺省 1e-5，与官方测试 run_torch/run_triton 调用一致）；weight
+    按官方测试 generate_rmsnorm_inputs 作为 forward 输入而非模块参数。
+    输出契约：forward 返回单张量——fused_add 为 (M, 2N)（前 N 列 y、后 N 列
+    residual_out，沿最后一维列拼接），rmsnorm 为 (M, N)；这是对 2002 先例的
+    沿用，适配在线 KernelBench 官方 eval_kernel_against_ref 的单输出
+    .shape/allclose 假设与离线终审 audit_model_class.py 的单输出比较，两段
+    逻辑输出在离线终审中按列块分别检验（y 用容差、residual_out 逐位）。
+    语义依据与冲突处理：以官方测试 test_rmsnorm / test_fused_add_rmsnorm
+    的 torch 参考（torch_rmsnorm + run_torch 的 residual 分支）为唯一权威
+    逐行移植；源码与测试的一处差异——官方 torch 参考的 rsigma 写作
+    1/sqrt(mean(x^2)) 未加 eps，而 kernel 与生产实现为 rsqrt(mean + eps)，
+    题目参考按 kernel 语义加 eps（eps=1e-5 时相对偏差 ~5e-6，远低于官方
+    测试容差 atol=rtol=1e-2，构建自检 tmp/build_check/2007.py 逐 case 实测
+    最大绝对偏差）。其余变体留作后续题：smoothquant / dynamicquant 的
+    int8 与 fp8 量化路径（官方另有 test_rmsnorm_quant.py 可作补充出题源，
+    与本题不重叠）、训练反向（_rmsnorm_bwd_triton /
+    _rmsnorm_bwd_dg_reduce_triton 的 dx / dgamma）、_gfx946_quant_rmsnorm
+    架构特化 fallback（gfx946 专属，非 gfx936 目标）。与 norm.py 的
+    layernorm 变体独立成题，与 ops/ 顶层 fused_rmsnorm_rope 不重叠。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成
+    （torch.Generator(seed)，消费顺序 x -> weight -> residual）；
+    Model 构造超参由 audit_model_class.resolve_init_args 按 task.yaml
+    io.init_inputs 字段名从 case 取（variant 在 case 内，eps 走缺省 1e-5）。

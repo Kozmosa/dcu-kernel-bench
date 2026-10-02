@@ -1,0 +1,11 @@
+{
+  "task_id": "2003_fused_mul_add",
+  "cases": [
+    {"name": "hidden_min1_sf_si_f16",   "shape": [1],            "dtype": "float16",  "a_kind": "scalar_float", "b_kind": "scalar_int",  "seed": 101},
+    {"name": "hidden_500_si_t1_f16",    "shape": [500],          "dtype": "float16",  "a_kind": "scalar_int",   "b_kind": "tensor1",     "seed": 102},
+    {"name": "hidden_prime_t1_sf_bf16", "shape": [1000003],      "dtype": "bfloat16", "a_kind": "tensor1",      "b_kind": "scalar_float", "seed": 103},
+    {"name": "hidden_1e4_t1_tf_fp32",   "shape": [10000],        "dtype": "float32",  "a_kind": "tensor1",      "b_kind": "tensor_full", "seed": 104},
+    {"name": "hidden_3d_tf_si_bf16",    "shape": [16, 50, 4186], "dtype": "bfloat16", "a_kind": "tensor_full",  "b_kind": "scalar_int",  "seed": 105},
+    {"name": "hidden_llm_tf_tf_f16",    "shape": [32, 7168],     "dtype": "float16",  "a_kind": "tensor_full",  "b_kind": "tensor_full", "seed": 106}
+  ]
+}

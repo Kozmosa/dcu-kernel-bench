@@ -1,0 +1,9 @@
+{
+  "task_id": "2003_fused_mul_add",
+  "cases": [
+    {"name": "perf_32M_full_f16",    "shape": [4096, 8192], "dtype": "float16",  "a_kind": "tensor_full",  "b_kind": "tensor_full",  "seed": 201},
+    {"name": "perf_16M_scalar_bf16", "shape": [2048, 8192], "dtype": "bfloat16", "a_kind": "scalar_float", "b_kind": "scalar_float", "seed": 202},
+    {"name": "perf_8M_mixed_f32",    "shape": [2048, 4096], "dtype": "float32",  "a_kind": "tensor_full",  "b_kind": "tensor1",      "seed": 203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

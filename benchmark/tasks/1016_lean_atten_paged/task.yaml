@@ -1,0 +1,81 @@
+id: "1016_lean_atten_paged"
+name: lean_attention_paged
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  分页 KV Cache 的 ragged batch decode attention 的自包含 KernelBench 题目文件
+  （reference.py 即题目文件，同时镜像到 benchmark/kernelbench_compat/level3/），
+  可直接走 PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 3 --problem-id 1016）。语义：每个 head
+  一张独立物理块表，请求 b 的 KV 由 kv_block_tables[h, 前缀累积偏移 :
+  batch_num_block_n[b]] 的物理块按序拼接而成；对每个 (head, 请求) 做
+  scaled dot-product attention（在线 softmax 数值稳定语义、float32 中间累加、
+  输出 cast 回输入 dtype）。固定 n_ctx_q=16（decode 形态）、page_size=64、
+  sm_scale 缺省 0.5、MHA（无 GQA）、每请求 KV 长度为 page_size 正整数倍；
+  不含因果掩码/ALiBi/滑窗/量化。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q,               dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [num_heads, n_ctx_q * batch, head_size]}
+    - {name: k,               dtype: same_as_q,           layout: contiguous, ndim: 3, shape: [num_heads, total_kv_len, head_size]}
+    - {name: v,               dtype: same_as_q,           layout: contiguous, ndim: 3, shape: [num_heads, total_kv_len, head_size]}
+    - {name: kv_block_tables, dtype: int32,               layout: contiguous, ndim: 2, shape: [num_heads, total_used_blocks], note: "每 head 一张独立块表；值域 [0, total_kv_len/page_size)"}
+    - {name: batch_num_block_n, dtype: int32,             layout: contiguous, ndim: 1, shape: [batch], note: "每请求块数的累积和，单调递增，末元素 == total_used_blocks；上游评测器 cast fp32 后需无损恢复"}
+  outputs:
+    - {name: out, dtype: same_as_q, layout: contiguous, ndim: 3, shape: [num_heads, n_ctx_q * batch, head_size]}
+  init_inputs:
+    - {name: head_size, dtype: int64, layout: scalar}   # attention head 维度
+    - {name: page_size, dtype: int64, layout: scalar}   # 题面固定 64（块表寻址粒度）
+    - {name: sm_scale,  dtype: float64, layout: scalar} # 缺省 0.5
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；hidden/perf case 覆盖全域）
+  fixed_family: {num_heads: 32, batch: 4, n_ctx_q: 16, head_size: 64, page_size: 64, blocks_per_req: "1..16", extra_blocks: 4}
+  dynamic: true
+  invariants:
+    - "每请求 KV 长度是 page_size 的正整数倍且 >= page_size（尾部不满半块不在题面内）"
+    - "batch_num_block_n 为每请求块数的累积和：batch_num_block_n[b] = sum_{i<=b} ceil(ctx_len_i / page_size)"
+    - "kv_block_tables[h, s_b : batch_num_block_n[b]] 为请求 b 在 head h 下引用的物理块（按序）；未引用物理块内容不定"
+    - "page_size 固定为 64（题面常量，块表寻址粒度）"
+    - "head_size ∈ {16, 32, 64, 128, 256}"
+    - "n_ctx_q == 16（decode 形态固定）"
+    - "num_kv_heads == num_q_heads（MHA，无 GQA）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差（与 1001/1002/1012 等同族题一致），用于离线终审。
+    官方测试对 fp16 用 atol=1e-2 / rtol=3e-3，本题取本评测集统一容差，属放宽
+    atol、收紧 rtol，量级相当。在线（搜索循环内）由 KernelBenchPaperEvaluator
+    判定：triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
+    与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）。
+# 除模块级符号外，另列 Tensor 方法与 F.xxx 形式：static_audit 为大小写不敏感
+# 子串匹配，仅列 torch.matmul/torch.softmax 时 x.matmul( / F.softmax 等捷径
+# 会被绕过。
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - .matmul(
+  - torch.bmm
+  - .bmm(
+  - torch.mm
+  - .mm(
+  - torch.baddbmm
+  - torch.einsum
+  - .einsum(
+  - torch.softmax
+  - .softmax(
+  - torch.nn.functional.softmax
+  - F.softmax

@@ -1,0 +1,52 @@
+task_id: "2009_softmax"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/softmax.py
+      sha256: 8579f5f4da0a01369603b26170537af16b8b5b63fd79f7cd67c8a668a2d6a229
+      role: device_kernel   # _softmax_kernel_online：行内分块两遍 online（先扫 max/sum 再扫输出）+ softmax 入口
+    - path: op_tests/triton_tests/test_softmax.py
+      sha256: f39678ad822d0e2ce0c3d58128a82a693102e09633bdf04ccf7f3071a29d9549
+      role: official_test   # test_softmax 以 torch.softmax(x, axis=1) 为语义唯一权威
+
+admission:
+  core_compute_in_source: true    # 行 max 归约、online 重标定求和、exp 归一化全部在 kernel 内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 torch 参考移植进题目文件 Model（fp32 eager 稳定 softmax）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：aiter/ops/triton/softmax.py 的 softmax(x) 前向全路径
+    （_softmax_kernel_online，单 kernel 两遍行内分块 online：第一遍维护
+    运行 max 与重标定部分和 s <- s*exp(m_old-m_new) + sum_block
+    exp(x-m_new)，第二遍写 exp(x-m)/s），2D 输入 (M, N) 任意、fp16/bf16、
+    沿最后一维逐行归一化；该文件仅含此唯一 kernel，无其它变体可裁。
+    语义依据与冲突处理：以官方测试 test_softmax 的参考
+    torch.softmax(x, axis=1)（fp16/bf16 atol=rtol=1e-2）为唯一权威，
+    题目 Model 以 float32 稳定 softmax（减行 max）逐行移植，源码与测试
+    无冲突；官方测试的 shape 边界（(1,1)/(128,1)/(1,128)/(359,1)/(1,359)/
+    (1823,781)/(8192,8192)/(4096,8192)/(1,131072)/(1,89999)）折算进
+    hidden case（含 N=1 恒 1、非 2 次幂、N 超出 fp16/bf16 单 block 上限
+    32768 的超长行）。fp32 官方变体（atol=rtol=1e-5 更严）未纳入题面
+    dtype 族：在线 triton 后端本就把输入统一 cast 为 fp32，离线终审容差
+    2e-2 与官方 fp16/bf16 的 1e-2 相容（构建自检 tmp/build_check/2009.py
+    逐 case 实测最大绝对偏差）。其余变体留作后续题：无（本文件唯一
+    kernel 已全覆盖）；与 attention 内联的 online softmax（pa_decode
+    等）无代码共享、独立成题，不重叠。case 由题目文件内
+    make_inputs(**case) 确定性生成（torch.Generator(seed)，
+    x = randn(m, n).to(dtype)，返回 (x,) 单元组以匹配离线终审
+    audit_model_class.py:108-113 的逐元素消费契约）。
+    复核裁定两项记录：①task.yaml 尾部 source 溯源块（repo/commit/path）
+    含溯源词属仓库强制约定（对照 1002 同构，tests/test_case_files.py:89-91
+    断言 task.source.commit 存在），溯源词守卫的执法面是 agent 可见产物
+    （compat 镜像与 public_cases.json，构建自检 b 实测零命中），该块保留；
+    ②本任务 Model 无超参（task.yaml io.init_inputs 与 get_init_inputs 均
+    为空、两侧自洽），离线终审 resolve_init_args 曾对空 init_inputs
+    raise KeyError（共享 harness 缺口，2002/2003 同样命中），已由属主
+    commit e739668 修复（init_names 为空时返回 {} 无参构造），题目侧
+    无需任何改动，构建自检按终审同式实测通过。

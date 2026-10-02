@@ -1,0 +1,11 @@
+{
+  "task_id": "1014_hstu_attention",
+  "cases": [
+    {"name": "hidden_min_selfonly_f16",   "batch_size": 3, "max_seq_len": 8,   "num_heads": 2, "qk_dim": 64,  "v_dim": 64,  "dtype": "float16",  "seed": 101, "lengths": [1, 8, 3],          "num_targets": [0, 8, 3]},
+    {"name": "hidden_empty_seq_f16",      "batch_size": 3, "max_seq_len": 64,  "num_heads": 2, "qk_dim": 64,  "v_dim": 64,  "dtype": "float16",  "seed": 102, "lengths": [0, 32, 64],       "num_targets": [0, 4, 20]},
+    {"name": "hidden_norm_band_bf16",     "batch_size": 4, "max_seq_len": 512, "num_heads": 4, "qk_dim": 128, "v_dim": 128, "dtype": "bfloat16", "seed": 103, "lengths": [100, 200, 300, 511], "max_attn_len": 64},
+    {"name": "hidden_dv_ne_dq_f16",       "batch_size": 4, "max_seq_len": 128, "num_heads": 8, "qk_dim": 128, "v_dim": 64,  "dtype": "float16",  "seed": 104},
+    {"name": "hidden_contextual_bf16",    "batch_size": 2, "max_seq_len": 96,  "num_heads": 4, "qk_dim": 128, "v_dim": 128, "dtype": "bfloat16", "seed": 105, "contextual_seq_len": 16, "lengths": [96, 48], "num_targets": [8, 4]},
+    {"name": "hidden_noncausal_band_f16", "batch_size": 3, "max_seq_len": 200, "num_heads": 4, "qk_dim": 64,  "v_dim": 64,  "dtype": "float16",  "seed": 106, "causal": false, "max_attn_len": 24, "lengths": [200, 97, 1], "num_targets": [4, 0, 1]}
+  ]
+}

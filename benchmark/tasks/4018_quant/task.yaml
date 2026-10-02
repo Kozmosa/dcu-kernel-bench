@@ -1,0 +1,66 @@
+id: "4018_quant"
+name: fp8_int8_quant_per_tensor_per_token
+family: quant_gemm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  fp8(e4m3)/int8 量化 kernel 族（量化 GEMM 的激活前处理，无 GEMM 主计算）：
+  static_per_tensor（给定 scale 的整张量量化）、dynamic_per_tensor（整张量
+  absmax 归约求单一 scale，无除零保护）与 dynamic_per_token（逐行 absmax 求
+  scale，1e-10 除零保护，全零行码字全 0）三模式，目标 dtype 为 int8
+  （round_half_even 取整）或 fp8 e4m3（向最近可表示值舍入），中间算术全程
+  float32。输出按 KernelBench 单张量协议两段打包为一维 float32：前
+  rows*cols 个元素为量化码字，后段为 scale（per-token 段长 rows、
+  per-tensor/static 段长 1）。本题为自包含的 KernelBench 题目文件
+  （reference.py 即题目文件，同时镜像到 benchmark/kernelbench_compat/level3/），
+  可直接走 PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 3 --problem-id 4018），无需任何框架改动。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,     dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [rows, cols]}
+    - {name: scale, dtype: float32, layout: contiguous, ndim: 1, shape: [1]}   # 仅 static_per_tensor 模式使用，其余模式不出现
+  outputs:
+    - {name: out, dtype: float32, layout: contiguous, ndim: 1, shape: [rows*cols + S]}   # [码字段 | scale 段] 两段打包；S = rows（per-token）或 1（per-tensor/static）
+  init_inputs:
+    - {name: mode,        dtype: str, layout: scalar, choices: [static_per_tensor, dynamic_per_tensor, dynamic_per_token]}   # 默认 dynamic_per_token
+    - {name: quant_dtype, dtype: str, layout: scalar, choices: [int8, float8_e4m3]}       # 默认 int8
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见下）
+  fixed_family: {mode: dynamic_per_token, quant_dtype: int8, rows: 1024, cols: 128, dtype: float16, scale_count: 1024, out_len: 132096}
+  dynamic: true
+  invariants:
+    - "x 为 2D 连续 float 张量；rows/cols >= 1，允许非 2 次幂（官方测试含 193x75、93x75、1281x1232）"
+    - "dynamic_per_tensor 模式要求 amax > 0（该模式无除零保护，全零输入会产出 NaN）"
+    - "输入契约：各模式量化前的商/积落在目标 dtype 值域内（cast 无溢出语义分歧）"
+    - "输出打包契约：out[:rows*cols] 为码字（float32 表示），out[rows*cols:] 为 scale（行主序）"
+
+tolerance:
+  float32:  {atol: 1.0e-6, rtol: 1.0e-6}
+  compare: >
+    输出为单个一维 float32 张量（码字段 + scale 段两段打包）：码字段是
+    int8 整数（任何偏差 >= 1）或 e4m3 离散精确值（最小相邻间距 2^-9），
+    偏差必超容差，等效精确匹配；scale 段与 reference 同为确定性 fp32 算术。
+  note: >
+    本题输出 dtype 为 float32（无 fp16/bf16 浮点输出，不适用 2.0e-2 档）。
+    容差收紧为 1e-6 的依据：reference 与合规候选的中间算术同为 fp32
+    （amax 归约精确、scale 为单次 fp32 除法），码字段真实偏差必为语义错误；
+    scale 段 1e-6 覆盖 1-2 ulp 算术变体。官方测试容差（per-tensor/
+    per-token 输出 atol=rtol=1e-1、static 1e-2）是官方 fp16-native torch
+    参考与 Triton kernel 之间的偏差预算；本评测集参考即 fp32 确定性算术，
+    按验收规范收紧。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
+    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
+    与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）；标准列表中 attention /
+# GEMM / softmax 类捷径与本纯量化算子无关，按题裁剪，首项为来源库名（溯源
+# 信息只落在 benchmark/sources/4018_quant.yaml，不进入题面与任务元数据）
+forbidden:
+  - aiter
+  - torch.quantize_per_tensor
+  - torch.quantize_per_channel

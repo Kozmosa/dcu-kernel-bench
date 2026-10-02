@@ -1,0 +1,9 @@
+{
+  "task_id": "2001_activation",
+  "cases": [
+    {"name": "perf_m4096_n8192_silu_f16",       "m": 4096,  "n": 8192,  "activation": "silu",      "dtype": "float16",  "seed": 2201},
+    {"name": "perf_m8192_n8192_gelu_bf16",      "m": 8192,  "n": 8192,  "activation": "gelu",      "dtype": "bfloat16", "seed": 2202},
+    {"name": "perf_m16384_n4096_gelu_tanh_f16", "m": 16384, "n": 4096,  "activation": "gelu_tanh", "dtype": "float16",  "seed": 2203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

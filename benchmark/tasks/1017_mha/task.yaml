@@ -1,0 +1,74 @@
+id: "1017_mha"
+name: mha_dense_fwd
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  稠密（padded 4D batch，bshd 布局）FlashAttention 前向的自包含 KernelBench
+  题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1017）。语义：scaled dot-product attention +
+  在线 softmax（数值稳定）+ 右下对齐因果掩码（causal=1，query i 只 attend
+  key j <= i + seqlen_k - seqlen_q；允许 seqlen_q > seqlen_k，整行掩码行
+  out=0、lse=0）+ ALiBi 位置偏置（-slope*|i + seqlen_k - seqlen_q - j|，
+  causal/非 causal 均施加，全 0 斜率等价无 ALiBi）+ MHA/GQA
+  （num_q_heads 为 num_kv_heads 整数倍，query head h 用 KV head h//group），
+  同时输出每行 log-sum-exp（lse，float32，自然对数）；float32 中间累加，
+  out cast 回输入 dtype。不含 bias、dropout、滑窗、fp8 量化。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q,            dtype: [float16, bfloat16], layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
+    - {name: k,            dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
+    - {name: v,            dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
+    - {name: causal,       dtype: int32,               layout: scalar,     ndim: 0, note: "1=因果掩码，0=无掩码；上游评测器 cast fp32 后需无损恢复"}
+    - {name: alibi_slopes, dtype: float32,             layout: contiguous, ndim: 2, shape: [batch, num_q_heads], note: "元素 >= 0，全 0 即无 ALiBi"}
+  outputs:
+    - {name: out, dtype: same_as_q, layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
+    - {name: lse, dtype: float32,   layout: contiguous, ndim: 3, shape: [batch, num_q_heads, seqlen_q], note: "每行 log-sum-exp（自然对数）；整行掩码行恒为 0"}
+  init_inputs:
+    - {name: head_dim, dtype: int64, layout: scalar}   # sm_scale 缺省 1/sqrt(head_dim)
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；hidden/perf case 覆盖全域）
+  fixed_family: {batch: 2, seqlen_q: 256, seqlen_k: 192, num_kv_heads: 4, query_group_size: 4, num_q_heads: 16, head_dim: 64, causal: 1, alibi: random_slopes}
+  dynamic: true
+  invariants:
+    - "num_q_heads 是 num_kv_heads 的整数倍（相等即 MHA，否则 GQA）"
+    - "seqlen_q >= 1、seqlen_k >= 1（任意组合；causal 且 seqlen_q > seqlen_k 时行 i < seqlen_q - seqlen_k 整行掩码）"
+    - "1 <= head_dim <= 256"
+    - "alibi_slopes 非负；causal 为 0/1"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  float32:  {atol: 2.0e-2, rtol: 2.0e-2}   # lse 输出（输入仍为 fp16/bf16）
+  compare: >
+    reference 以 float32 计算后 cast 到输出 dtype 再比较；两个输出（out、lse）
+    分别按各自 dtype 容差比较，整行掩码行的 lse 需精确为 0。
+  note: >
+    以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+  - torch.logsumexp
+
+source:
+  # 本文件对候选可见，不携带任何溯源词；维护者溯源信息（repo / commit /
+  # 算子文件 sha256）统一记录在 benchmark/sources/1017_mha.yaml。
+  record: "benchmark/sources/1017_mha.yaml"

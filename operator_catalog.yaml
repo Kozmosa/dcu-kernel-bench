@@ -71,3 +71,634 @@ operators:
     status: candidate
     difficulty: medium
     note: "融合 Norm+RoPE，aiter 强项"
+
+  # ---- 2026-10-02 批量准入：aiter Triton model_class 批次（42 题，工作流构建+独立校验） ----
+  - id: "1011_extend_attention"
+    name: extend_attention
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/extend_attention.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "extend_attention.py: _fwd_kernel / _fwd_kernel_v2 / _fwd_kernel_v2_decode（ragged 变长 prefix+extend 混合 attention，在线 softmax float32 累加，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：v1 语义主干——kv_indices 逐 token 收集 KV 池（任意排列+垃圾行）+ extend 连续段、GQA、causal/非 causal、K 头维==Q 头维而 V 头维独立；自定义 mask/滑窗/sink/k_scale 反量化/logit_cap/fp8 留作后续题。审核记录见 benchmark/sources/1011_extend_attention.yaml"
+
+  - id: "1012_flash_attention_forward"
+    name: flash_attention_forward
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/flash_attention_forward.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "flash_attention_forward.py: attn_fwd / _attn_fwd_inner（varlen FlashAttention v2 前向，在线 softmax float32 累加，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：cu_seqlens_q/k 分段稠密 QKV、MHA/GQA、右下对齐因果掩码两态（0<L_q<=L_k）、仅输出 O；bias/ALiBi/dropout/fp8/LSE 不入题面。审核记录见 benchmark/sources/1012_flash_attention_forward.yaml"
+
+  - id: "1014_hstu_attention"
+    name: hstu_attention
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/hstu_attention.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "hstu_attention.py: _hstu_attn_fwd_one_block / _hstu_attn_fwd_compute / _hstu_attn_fwd（HSTU 单元注意力前向 QK^T·alpha→SiLU→/max_seq_len→相对位置掩码→·V，无 softmax，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：jagged varlen 前向、causal 两态、num_targets 恒为张量输入、contextual_seq_len/max_attn_len 作 init 开关、v_dim 可异于 qk_dim、允许空序列；反向 kernel/IS_DELTA_Q/sort_by_length_indices 留作后续题。审核记录见 benchmark/sources/1014_hstu_attention.yaml"
+
+  - id: "1015_lean_atten"
+    name: lean_atten
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/lean_atten.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "lean_atten.py: la_persistent（Lean Attention 连续非分页 KV 前向：ragged 变长 decode + 方阵因果 prefill，在线 softmax，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：causal 两态（decode causal=0 / prefill causal=1）、MHA 无 GQA、head_dim∈{16,32,64,128,256}、sm_scale 缺省 head_dim^-0.5；batch_num_block_n 改用语义等价 kv_lens，persistent 调度参数与分页/PoD/fp8 变体不入题面。审核记录见 benchmark/sources/1015_lean_atten.yaml"
+
+  - id: "1016_lean_atten_paged"
+    name: lean_atten_paged
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/lean_atten_paged.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "lean_atten_paged.py: la_persistent_paged / _attn_lean_tile（Lean Attention 分页 KV decode，page_size=64 逐 head 物理块表寻址，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：ragged batch decode、n_ctx_q=16、MHA、KV 长度为 64 正整数倍、sm_scale 缺省 0.5、Model(head_size) 单参构造；无 GQA/因果掩码/量化，persistent 调度参数与 Mp/Lp/Op/locks 工作区不进题面接口。审核记录见 benchmark/sources/1016_lean_atten_paged.yaml"
+
+  - id: "1017_mha"
+    name: mha
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/mha.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "mha.py: _attn_fwd / _attn_fwd_inner（稠密 bshd FlashAttention 前向，右下对齐因果掩码 + ALiBi 偏置，输出 (out, lse)，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：fp16/bf16、MHA/GQA、允许 seqlen_q>seqlen_k（整行掩码行 out=0/lse=0）、ALiBi 偏置、lse 为 float32 自然对数；dropout/fp8/bias/滑窗/反向不入题面。审核记录见 benchmark/sources/1017_mha.yaml"
+
+  - id: "1018_mha_fused_bwd"
+    name: mha_fused_bwd
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/mha_fused_bwd.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "mha_fused_bwd.py: _bwd_preprocess / _bwd_dkdvdq_inner / _bwd_kernel_dkdvdq_noncausal（flash-attention 反向一次调用同时算 dQ/dK/dV，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：官方 test_mha_backward 的 FUSED=True 非因果反向路径，稠密定长 bshd、MHA/GQA、dS=P∘(dP−delta) 解析式，三梯度平铺拼接单输出；causal 因官方 FUSED+CAUSAL pytest.skip(NaN) 排除。审核记录见 benchmark/sources/1018_mha_fused_bwd.yaml"
+
+  - id: "1019_mha_onekernel_bwd"
+    name: mha_onekernel_bwd
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/mha_onekernel_bwd.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "mha_onekernel_bwd.py: _bwd_preprocess / _bwd_dkdv_inner / _bwd_dq_inner / bwd_kernel_causal / bwd_kernel_noncausal（one-kernel flash-attention 反向，o/lse 作为输入给定，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：官方 test_mha_backward 的 FUSED=False 子集，右下对齐 causal（含 seqlen_q>seqlen_k 全掩码行 o=0/lse=0）与 non-causal、dropout=0；varlen/fp8/fused 反向（姊妹题 1018）留作后续题。审核记录见 benchmark/sources/1019_mha_onekernel_bwd.yaml"
+
+  - id: "1020_mla_decode_rope"
+    name: mla_decode_rope
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/mla_decode_rope.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "mla_decode_rope.py: _fwd_grouped_kernel_stage1_rope / _fwd_kernel_stage2（DeepSeek MLA 解码 attention 融合 RoPE 两 pass，page size=1，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：use_rope 恒真、NEOX/GPT-J 双旋转风格、rd≤r 的部分旋转、仅每序列末 token 的 k_pe 现场旋转写回、V≡压缩 KV 前 c 列、输出 (attn_out‖k_pe_tokens) 平铺单张量；logit_cap/YaRN/因果掩码不入题面。审核记录见 benchmark/sources/1020_mla_decode_rope.yaml"
+
+  - id: "1021_pa_decode"
+    name: pa_decode
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/pa_decode.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "pa_decode.py: _paged_attn_decode_v2_{wo,w}_dot_kernel 及对应 reduce / per_token_quant 变体共 12 个 Triton kernel（长上下文分页 decode v2 分区两 pass split-KV + log-sum-exp 归并，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：max(seq_lens)>8192 长上下文族（固定 max_seq_len=16384、1024-token 分区），与已入库 1002/1001 的 v1 子集（≤8192、kernel 子集互斥）经复测不重叠；MHA/GQA、无 ALiBi/滑窗。审核记录见 benchmark/sources/1021_pa_decode.yaml"
+
+  - id: "1022_pa_prefill"
+    name: pa_prefill
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/pa_prefill.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "pa_prefill.py: _fwd_kernel / _fwd_kernel_alibi（context_attention_fwd：分页前缀 + 本轮新 token 的 prefill 统一在线 softmax，fp32 中间累加，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：K 通道打包 x=8 块表寻址前缀 + 新 token KV（不入缓存）、因果掩码、MHA/GQA、ALiBi 变体与无偏置基线（隐藏 case 含零前缀/单 token/块尾不齐）；滑窗/fp8 KV/skip_decode/USE_MATRIX_LOAD 留作后续题。审核记录见 benchmark/sources/1022_pa_prefill.yaml"
+
+  - id: "1024_prefill_attention"
+    name: prefill_attention
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/prefill_attention.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "prefill_attention.py: _fwd_kernel（非分页连续 KV 的 ragged 变长 batch prefill 自注意力，在线 softmax fp32 累加，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：b_start_loc 排他前缀和/b_seq_len 序列边界、GQA（h 取 h//group）、causal/非 causal、sm_scale 缺省 1/sqrt(head_dim)、允许非 2 次幂共享头维；absorb/分页留作后续题。审核记录见 benchmark/sources/1024_prefill_attention.yaml"
+
+  - id: "1026_sage_attention_qk_int8_per_block"
+    name: sage_attention_qk_int8_per_block
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/sage_attention_qk_int8_per_block.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "sage_attention_qk_int8_per_block.py: _attn_fwd / _attn_fwd_inner（sage 家族 per-block int8 量化后 kernel 阶段的非 causal 前向，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：per-block int8 Q/K 码字 + fp32 scale（Q 块 128 行/K 块 64 行，sm_scale·log2(e) 已折入 q_scale）、fp16 V + 共享 bool 掩码、单张量 fp16 输出、容差 atol=rtol=2e-2；causal/加性掩码/LSE/量化 kernel 不在题面。审核记录见 benchmark/sources/1026_sage_attention_qk_int8_per_block.yaml"
+
+  - id: "1027_sage_attention_qk_int8_per_block_causal"
+    name: sage_attention_qk_int8_per_block_causal
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/sage_attention_qk_int8_per_block_causal.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "sage_attention_qk_int8_per_block_causal.py: _attn_causal_fwd / _attn_fwd_inner（sageattn_qk_int8_pv_fp16 入口的 is_causal=True 因果前向分支，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：HND 布局、fp16/bf16、head_dim∈{64,128}、GQA/MHA、qo_len==kv_len，语义按官方参考 SDPA(is_causal=True) 裁定 atol=rtol=2e-2；非 causal 分支/NHD/LSE 留作后续题。审核记录见 benchmark/sources/1027_sage_attention_qk_int8_per_block_causal.yaml"
+
+  - id: "1029_triton_decode_attention"
+    name: triton_decode_attention
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/triton_decode_attention.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "triton_decode_attention.py: _fwd_kernel_stage1 / _fwd_grouped_kernel_stage1 / _fwd_kernel_stage2（单 token query 两阶段 split-KV 分页 flash decoding，stage2 跨片 max 归约，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：decode_attention_fwd 完整数学语义——page_size>=1 任意（含逐 token 的 1）、GQA/MQA/MHA、head_dim_qk 与 head_dim_v 可不同且允许非 2 次幂（192/128、576/512）；logit_cap>0 官方测试未启用，留作后续题。审核记录见 benchmark/sources/1029_triton_decode_attention.yaml"
+
+  - id: "1030_unified_attention"
+    name: unified_attention
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/unified_attention.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "unified_attention.py: kernel_unified_attention_2d / kernel_unified_attention_3d / reduce_segments（分页 KV + prefill/decode 混合 ragged batch 统一 attention，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：物理块池 + block_tables 间接寻址（未引用块为垃圾数据）、GQA、causal 右对齐、滑动窗口、logit softcap（含 sink 列先 cap 后掩码）、attention sinks（sink 列 logit=sinks[h]、value=0、永不掩码）；alibi/qq_bias/mm_prefix/fp8 KV 留作后续题。审核记录见 benchmark/sources/1030_unified_attention.yaml"
+
+  - id: "2001_activation"
+    name: activation
+    family: norm_rope_act
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/activation.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "activation.py: _act_mul_and_dynamic_mxfp4_quant_kernel / _silu / _silu_exp2 / _tanh / _gelu / _gelu_tanh 共 6 个 Triton kernel（门控激活×SwiGLU 分半乘×逐 32 元素动态 MXFP4 量化三合一融合，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：shuffle=False（scale 未预排布）、scaling_mode=even 的 silu/gelu/gelu_tanh（float32）× 分半乘 × MXFP4 量化（even_round amax→e8m0 块 scale→e2m1 饱和圆整→偶低奇高 nibble 打包，块尾补零参与 amax），输出 uint8 (M, N/4+ceil(N/64)) 单张量，atol=rtol=0 精确匹配。审核记录见 benchmark/sources/2001_activation.yaml"
+
+  - id: "2002_add_swiglu"
+    name: add_swiglu
+    family: norm_rope_act
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/add_swiglu.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "add_swiglu.py: _forward / _backward（训练用 Add+SwiGLU 前向与一阶解析反向 kernel 对，fp32 中间计算 cast 回 fp16/bf16，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：silu((base+delta)[...,:D])·(base+delta)[...,D:] 及其解析梯度（SiLU 导数公式，base/delta 梯度逐元素相同），合并为单次 forward 输出 [out|grad_gate|grad_up] 拼接张量；autograd/once_differentiable、checkpoint 重算、二阶梯度不入在线契约。审核记录见 benchmark/sources/2002_add_swiglu.yaml"
+
+  - id: "2003_fused_mul_add"
+    name: fused_mul_add
+    family: norm_rope_act
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/fused_mul_add.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "fused_mul_add.py: _fused_mul_add_kernel（逐元素 out=a*x+b 单 kernel 单 pass 融合乘加，fp32 中间计算 cast 回 x.dtype，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：a/b 各自支持 Python float/int 标量、单元素张量（广播）或与 x 同形张量任意组合，dtype 覆盖 fp16/bf16/fp32，out-of-place 契约；原地/预分配 out= 变体留作后续题。审核记录见 benchmark/sources/2003_fused_mul_add.yaml"
+
+  - id: "2004_fused_qk_concat"
+    name: fused_qk_concat
+    family: norm_rope_act
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/fused_qk_concat.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "fused_qk_concat.py: _unit_cat / _qk_cat_kernel / _unit_rope_cat / _qk_rope_cat_kernel（BHD 布局下 Q/K 按 head 维 RoPE+拼接单输出，fp32 中间计算 cast 回输入 dtype，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：aiter fused_qk_rope_cat（NEOX/GPTJ × cos/sin 全宽/前半复用 × GQA 按 QH_PER_KH 去重）与 fused_qk_cat 纯拼接合并单题（is_neox/apply_rope 为 init 超参），输出 [B, QH+KH, D_nope+D_pe]，放宽 D_nope/D_pe 至非 2 次幂（kernel 需自掩码分块）；THD/nope_first/attention 分数留作后续题。审核记录见 benchmark/sources/2004_fused_qk_concat.yaml"
+
+  - id: "2005_moe_activation"
+    name: moe_activation
+    family: norm_rope_act
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/moe_activation.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "moe_activation.py: activation_and_mul_kernel / activation_no_mul_1d_kernel / gelu_tanh_and_mul_kernel / gelu_tanh_no_mul_1d_kernel / swiglu_variant_1d_kernel / swiglu_oai_interleaved_1d_kernel 共 6 个核心 Triton kernel（gated chunked 与 interleaved 两布局的 MoE FFN 激活分派，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：全部 9 个激活变体——gated chunked silu 三门控（标准/钳位/缩放钳位）、gelu、gelu_tanh、swiglustep（limit 缺省 7.0）、interleaved swiglu_interleaved（alpha/limit 缺省 1.702/7.0）及 silu_no_mul/gelu_no_mul/gelu_tanh_no_mul/relu2 四个非 gated 激活。审核记录见 benchmark/sources/2005_moe_activation.yaml"
+
+  - id: "2006_norm"
+    name: norm
+    family: norm_rope_act
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/norm.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "norm.py: _fused_add_layernorm_kernel（残差融合 LayerNorm 前向：residual_out=x+residual 舍入回输入 dtype，float32 mean/有偏 var/rsqrt(var+eps)/仿射，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：fused add LayerNorm 前向，双输出沿最后一维拼接为单张量 (M,2N)；量化前向、训练反向、无残差纯前向留作后续题。审核记录见 benchmark/sources/2006_norm.yaml"
+
+  - id: "2007_rmsnorm"
+    name: rmsnorm
+    family: norm_rope_act
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/rmsnorm.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "rmsnorm.py: _rms_norm_kernel / _fused_add_rmsnorm_kernel（RMSNorm 标准前向与残差融合前向，rsqrt(mean+eps) 仿射，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：非量化前向家族——rmsnorm 输出 (M,N)、fused_add 先在输入 dtype 求 residual_out 再归一化并输出 (M,2N) 列拼接，(M,N) 任意（含 N=1/非 2 幂/超单 block 大 N）、eps 可调缺省 1e-5；smoothquant/dynamicquant 量化路径与训练反向留作后续题。审核记录见 benchmark/sources/2007_rmsnorm.yaml"
+
+  - id: "2008_rope"
+    name: rope
+    family: norm_rope_act
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/rope.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "rope.py: _rope_kernel_sbhd_fwd 等 sbhd 稠密布局非缓存 RoPE 前向 kernel（NEOX/GPTJ 两种 rotate 风格，float32 求值 cast 回输入 dtype，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：sbhd 非缓存 RoPE 前向——NEOX/GPTJ × 部分旋转（nope_first 直通段前/后接回）× reuse_freqs_front_part 角度扩展（F∈{D,D/2,D/4}）；thd 变长/cached positions/GQA 2c/反向/2D mrope 留作后续题。审核记录见 benchmark/sources/2008_rope.yaml"
+
+  - id: "2009_softmax"
+    name: softmax
+    family: norm_rope_act
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/softmax.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "softmax.py: _softmax_kernel_online（单 kernel 两遍行内分块 online softmax，沿最后一维逐行归一化，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：softmax 前向全路径，2D (M,N) 任意（含 N=1、非 2 的幂、超 fp16/bf16 单 block 上限 32768 的超长行）、fp16/bf16；官方 fp32 变体与 attention 内联 online softmax 不纳入。审核记录见 benchmark/sources/2009_softmax.yaml"
+
+  - id: "3002_moe_align_block_size"
+    name: moe_align_block_size
+    family: moe
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/moe_align_block_size.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "moe_align_block_size.py: _moe_align_block_size_stage1_kernel / _stage2 / _stage3 / _stage4 四个 Triton kernel（topk_ids 给定，token 按专家分桶 + block_size 对齐排布的调度前置，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：sorted_token_ids/expert_ids/num_tokens_post_pad 三段打包 fp32（expert_ids 尾部 -1 哨兵，L1<=2^24 保证 fp32 精确表示），覆盖官方全部 (M,E,top_k,block_size) 族并扩展空专家/行内重复/E=1 恰整块/非 2 次幂 bs/int32 ids；不含 grouped GEMM 本体与路由打分。审核记录见 benchmark/sources/3002_moe_align_block_size.yaml"
+
+  - id: "3003_moe_op"
+    name: moe_op
+    family: moe
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/moe_op.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "moe_op.py: fused_moe_kernel / fused_moe_splitk_kernel / fused_moe_persistent_kernel / fused_moe_kernel_gptq_awq / _w4a8 / _w4a8_channelwise 共 6 个 Triton kernel（块对齐取数布局的 MoE grouped GEMM 本体，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：官方 test_fused_moe 的非量化 fp16/bf16 变体（routed_weight=True、(fp8_w8a8,int8_w8a16,int8_w8a8)=(False,False,False)、block_shape=None、block_m=64）；fp8/int8/gptq-awq/splitk/persistent 调度/激活融合/mxfp4/e2e 留作后续题。审核记录见 benchmark/sources/3003_moe_op.yaml"
+
+  - id: "3004_moe_op_e2e"
+    name: moe_op_e2e
+    family: moe
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/moe_op_e2e.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "moe_op_e2e.py: e2e_moe_kernel / e2e_moe_persistent_kernel（用户级张量 (a,w1,w2,topk_weights,topk_ids) 直入的端到端 MoE FFN，输出 (M,top_k,K)，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：官方唯一启用的非量化路径（fp8_w8a8=False、int8_w8a16=False）：bf16/fp32 激活与权重、top_k∈{1,2}、E∈{1,2,4,8}、M/K 含 1 与非 2 次幂、路由加权恒启用；量化路径与排序对齐等调度中间量不进题面。审核记录见 benchmark/sources/3004_moe_op_e2e.yaml"
+
+  - id: "3006_moe_op_mxfp4"
+    name: moe_op_mxfp4
+    family: moe
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/moe_op_mxfp4.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "moe_op_mxfp4.py: _fused_moe_kernel_mxfp4（A/B 均为 uint8 双 nibble e2m1 码字 + e8m0 块 scale 的 MoE 分组 GEMM，mul_routed_weight 恒 True，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：官方测试唯一启用的 (a=mxfp4_e2m1, b=mxfp4_e2m1) 组合（c[m,j,n]=w[m,j]·Σ_k a_deq·b_deq，输出 (M,top_k,N) bfloat16）；token-expert 调度元数据不进题面，与 3003 等相邻题精度互补。审核记录见 benchmark/sources/3006_moe_op_mxfp4.yaml"
+
+  - id: "3007_moe_op_silu_fused"
+    name: moe_op_silu_fused
+    family: moe
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/moe_op_silu_fused.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "moe_op_silu_fused.py: _fused_moe_silu_kernel / _fused_moe_persistent_silu_kernel / _fused_moe_silu_kernel_gptq_awq / _fused_moe_persistent_silu_kernel_gptq_awq（silu 融合 MoE grouped GEMM，调度三件套作为输入给出，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：_fused_moe_silu_kernel 语义的 bf16/fp16 稠密与 fp8 w8a8 分块量化（block_n/block_k）两型 × mul_routed_weight 开/关两态（silu 分支可达全部组合）；gptq/awq 组量化、per-tensor fp8 与被 NotImplementedError 排除的 int8_w8a8 不在题内。审核记录见 benchmark/sources/3007_moe_op_silu_fused.yaml"
+
+  - id: "3009_routing"
+    name: routing
+    family: moe
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/routing.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "routing.py: _routing_sigmoid_top1_kernel（sigmoid top-1 路由：专家 id 与权重计算，固定 config 简洁版，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：sigmoid top-1 路由全集——TOPK=1、fused_shared_experts 开/关两态、bf16/fp16、M/K/N>=1 任意形状，正确性用官方 randint(-2,3) 分布、perf 用 randn 口径，输出 [ids|weights] fp32 单张量；同算子 autotune 重复实现（moe_routing_sigmoid_top1_fused.py）不单独成题。审核记录见 benchmark/sources/3009_routing.yaml"
+
+  - id: "3010_topk"
+    name: topk
+    family: moe
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/topk.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "topk.py: _topk_kernel / topk_stage1_kernel / topk_stage2_kernel 与 _compare_and_swap / _bitonic_merge / argsort 位排序 kernel 族（每行 k 个最大值严格降序 + 原始列下标，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：topk() dispatcher 的 last-dim/largest=True/sorted=True 全语义，输出 (B,2k) float32 [values|indices] 逐位精确验收，题面域为官方 fp32 全参数域（batch 1..1335、M 16/128256、k 2/8），forbidden 覆盖函数与 Tensor 方法两种形式；largest=False/sorted=False/dim≠-1 被 dispatcher ValueError 排除，kpool_topk 留作后续题。审核记录见 benchmark/sources/3010_topk.yaml"
+
+  - id: "4001_batched_gemm_a8w8"
+    name: batched_gemm_a8w8
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/batched_gemm_a8w8.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "batched_gemm_a8w8.py: _batched_gemm_a8w8_kernel（TN 布局 batch 维 int8×int8 量化 GEMM，float32 累加后 per-token×per-channel scale 反量化，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：x (B,M,K) 行主 × w (B,N,K) 行主转置 GEMM 语义，per-token (B,M,1) × per-channel (B,1,N) scale，可选 bias（先 cast 再加），输出 (B,M,N) bf16/fp16，码字值域 [-20,20)、无 splitK、K 尾部掩码。审核记录见 benchmark/sources/4001_batched_gemm_a8w8.yaml"
+
+  - id: "4004_batched_gemm_bf16"
+    name: batched_gemm_bf16
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/batched_gemm_bf16.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "batched_gemm_bf16.py: _batched_gemm_bf16_kernel（TN 布局 batch 维 bf16×bf16 GEMM，float32 累加，可选 bias (B,1,N)，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：x 行主 (B,M,K) × weight 行主 (B,N,K) 转置 GEMM 语义，fp32 结果先 cast 到输入 dtype 再加 bias，输出 bf16/fp16、无量化成分；非 TN 布局/YQ 预分配/splitK 变体留作后续题。审核记录见 benchmark/sources/4004_batched_gemm_bf16.yaml"
+
+  - id: "4005_fused_mxfp4_quant"
+    name: fused_mxfp4_quant
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/fused_mxfp4_quant.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "fused_mxfp4_quant.py: _rmsmorm_op / _fused_rms_mxfp4_quant_kernel / _fused_flatten_mxfp4_quant（残差+RMSNorm+MXFP4 动态量化融合，量化块 32、even 圆整、e8m0 块 scale、e2m1 双 nibble 打包，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：fused_rms_mxfp4_quant 核心（eps=1e-6），输出契约改为单张量 uint8 (M, N1//2+ceil(N1/32))（码字|scale 字节拼接）；第二路 RMSNorm 直通输出、残差直通输出、skip_second/无残差特化分支与展平入口留作后续题。审核记录见 benchmark/sources/4005_fused_mxfp4_quant.yaml"
+
+  - id: "4006_gemm_a16w16"
+    name: gemm_a16w16
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/gemm_a16w16.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "gemm_a16w16.py: _gemm_a16_w16_kernel（x[M,K]@weight[N,K] 行主 TN 无 bias 的 fp16/bf16 GEMM，float32 累加后单次 cast，每输出 tile 单 program 完整归约 K 维，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：无 split-K/无原子加/无量化（K 尾按 0 累加、M/N 掩码写回），与 4007（split-K atomic）为同族独立两题，公开 shape 与 hidden/perf case 资产互不重叠；溯源仅存于 benchmark/sources/4006_gemm_a16w16.yaml（task.yaml 以 record 指针引用）。审核记录见 benchmark/sources/4006_gemm_a16w16.yaml"
+
+  - id: "4007_gemm_a16w16_atomic"
+    name: gemm_a16w16_atomic
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/gemm_a16w16_atomic.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "gemm_a16w16_atomic.py: _gemm_a16_w16_atomic_kernel（无 bias 的 fp16/bf16 GEMM，K 维 split-K 分片 fp32 乘累加 + tl.atomic_add 原子合并后整体单次 cast，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：行主 TN 线性层布局 x[M,K]×weight[N,K]^T，省去独立 reduce kernel，M/N/K 为任意正整数（含 1 与非 2 次幂、K 不要求分块对齐）；非 atomic 路径、显式输出传参与非 TN 布局不在本题范围（留作 4006 等后续题）。审核记录见 benchmark/sources/4007_gemm_a16w16_atomic.yaml"
+
+  - id: "4008_gemm_a16w4"
+    name: gemm_a16w4
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/gemm_a16w4.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "gemm_a16w4.py: awq_gemm_kernel 及 inner/splitk/splitk_fused/streamk/fused 调度族共 7 个 Triton kernel（单卡 AWQ W4A16 GEMM，int4 解包+分组反量化+float32 累加 tl.dot 全在 kernel 内，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：gemm_a16w4 主入口，输入即 AWQ int4 打包布局（qweight [N,K//2]/qzeros [K//G,N//2] int8 低半字节=偶数下标、scales [K//G,N] 与激活 fp16），dp/split-K/stream-K 调度不限；独立反量化入口、split-K 归约融合与 TP allreduce 融合变体不并入。审核记录见 benchmark/sources/4008_gemm_a16w4.yaml"
+
+  - id: "4010_gemm_a8w8_blockscale"
+    name: gemm_a8w8_blockscale
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/gemm_a8w8_blockscale.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "gemm_a8w8_blockscale.py: _gemm_a8w8_blockscale_kernel（fp8 e4m3 激活 (M,K)×fp8 e4m3 权重 (N,K) 的 TN 布局 2D block scale GEMM，float32 累加，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：group_k/group_n 为互可不相等的 2 的幂，元素按 (k//gk, n//gn) 块归属反量化，输出 cast bf16/fp16；int8 码字、e5m2、y 预分配、autotune 配置分发等变体留作后续题。审核记录见 benchmark/sources/4010_gemm_a8w8_blockscale.yaml"
+
+  - id: "4016_gemm_w8a8"
+    name: gemm_w8a8
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/gemm_w8a8.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "gemm_w8a8.py: _w8a8_block_int8_matmul（int8 分块量化 GEMM：逐 k 组 int8 点积 int32 精确累加 × As·Bs 后 float32 求和，block_shape (128,128)，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：per-token-group(×128) 激活 scale × 128×128 权重块 scale，无 bias/splitK，K/N 不整除 128 时 floor 索引尾块延拓，输出 cast bf16/fp16，输入生成按官方 run_torch 确定性口径（scale=absmax/127、torch.Generator(seed)）。审核记录见 benchmark/sources/4016_gemm_w8a8.yaml"
+
+  - id: "4017_group_quant_int8"
+    name: group_quant_int8
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/group_quant_int8.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "group_quant_int8.py: _per_token_group_quant_int8（2D 输入 per-token-group int8 动态量化，eps=1e-10 除零保护按 kernel fp32 路径定义，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：fp16/bf16 连续输入、group_size 整除 cols（覆盖官方全部 rows×cols 族与 group_size∈{128,1}），输出按 KernelBench 单张量协议两段打包为一维 float32（码字段+scale 段）；gfx946 split-store 分支与 autotune JSON 机制不入题面。审核记录见 benchmark/sources/4017_group_quant_int8.yaml"
+
+  - id: "4018_quant"
+    name: quant
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/quant.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "quant.py: _static_per_tensor / _dynamic_per_tensor / _dynamic_per_token 的 int8/fp8 量化 kernel 族（round_half_even 与 e4m3，纯 Triton，无外部库）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：官方 test_quant.py 覆盖的全部三个公开 API（static 透传 / dynamic_per_tensor 全张量 absmax / dynamic_per_token 逐行 absmax+clamp(1e-10)，全零行码字全 0）× int8 与 fp8 e4m3 两条 dtype 线，输入 fp16/bf16 含非 2 次幂与零行边界，输出按单张量协议打包一维 float32；mxfp4 留 4005、组量化归 4017。审核记录见 benchmark/sources/4018_quant.yaml"

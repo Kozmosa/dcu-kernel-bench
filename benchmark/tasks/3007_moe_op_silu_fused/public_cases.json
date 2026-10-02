@@ -1,0 +1,18 @@
+{
+  "task_id": "3007_moe_op_silu_fused",
+  "note": "model_class 题目：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。",
+  "shape_family": {
+    "M": 32,
+    "N": 256,
+    "K": 512,
+    "E": 8,
+    "top_k": 4,
+    "block_size_m": 16,
+    "quant": "dense",
+    "mul_routed_weight": true,
+    "dtype": "bfloat16",
+    "len_sorted_token_ids": 248,
+    "len_expert_ids": 136,
+    "out_shape": [128, 256]
+  }
+}

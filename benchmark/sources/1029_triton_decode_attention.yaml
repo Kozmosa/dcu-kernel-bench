@@ -1,0 +1,56 @@
+task_id: "1029_triton_decode_attention"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/triton_decode_attention.py
+      sha256: b35f2d795254cda45f863ed627e7b2a7782f3310ef45c01c5606a961d19b8d44
+      role: device_kernel   # _fwd_kernel_stage1/_fwd_grouped_kernel_stage1/_fwd_kernel_stage2：QK^T、在线 softmax、PV、跨片归约全部在 Triton kernel 内
+    - path: op_tests/triton_tests/test_decode_attention.py
+      sha256: 7a72a4224bd84d9c43f9c5c9f6a95191356d5502c4239ec7f41e4913e9470f86
+      role: official_test   # pytorch_decode_attention_reference（逐 batch gather + GQA repeat + matmul/softmax）为语义唯一权威
+
+admission:
+  core_compute_in_source: true    # stage1 在线 softmax（normal/grouped 两版）+ stage2 跨片归约全在 Triton kernel 内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试参考（CPU 化）移植进题目文件 Model（fp32 中间累加）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：decode_attention_fwd 的完整数学语义——单 token query 的分页
+    decode attention：stage1 按 num_kv_splits 切片在线 softmax、stage2 跨片
+    max 归约的两阶段结构（normal 与 grouped 两种 launch 在题面统一为同一
+    函数，由 group=1 / group>1 自然区分）；分页 KV page_size >= 1 任意
+    （含逐 token 的 page_size=1，官方测试 PAGE_SIZE 参数取 {1,16} 的推广）；
+    GQA/MQA/MHA；K/V 头维可不同（官方测试 D_QK/D_V 参数含 128/192/576 与
+    128/512 组合）；num_kv_splits 作为 __init__ 超参传入（仅并行度、不影响
+    数值，官方测试固定 8）；sm_scale 缺省 1/sqrt(head_dim_qk)；输入值域沿用
+    官方测试生成器（randn / randint 页表）。语义依据：
+    pytorch_decode_attention_reference 逐行移植为 Model（差异见下）。
+    冲突/推广处理：①官方测试参考以输入 dtype 的半精度 matmul+softmax 计算，
+    题目 Model 统一 fp32 中间累加（数值更精；fp16 case 偏差在官方
+    atol=1e-2 内，但 bf16 边界 case 按官方半精度参考实测最大偏差可达
+    1.5625e-02，官方 atol=1e-2、rtol=0 口径会判 fail，故题面容差按本集
+    标准取 2e-2，allclose 语义不变）；②官方测试的
+    req_to_page 形状 [B, num_pages, 1]（尾维 1）题面统一为 2D
+    page_tables [B, max_pages_per_seq]（官方 kernel 以 stride(0) 索引，二者
+    寻址等价）；③官方测试页表用 randint（允许页号重复），题面 make_inputs
+    用 randperm（行内页号互异）——kernel 语义与页号是否重复无关；④官方
+    测试要求 o 与 page_size>1 路径结果 allclose（同一数学函数），题面据此
+    把两种页布局统一为同一契约。与相邻题边界：1001/1002_paged_attention
+    为固定 block 表 + K/V 同头维 + 无显式切片结构；本题 page_size 任意
+    （含 1）、head_dim_qk != head_dim_v、显式 split-KV 两阶段语义；同族的
+    grouped_decode_attention 系列按"二选一"约定不单独出题（本文件依赖最
+    干净且有官方 bench，优先保留）。留作后续独立题：logit_cap > 0 的 tanh
+    截断变体（官方测试未启用，恒为 0）、Lk=576/288 的 BLOCK_DMODEL_SPLIT
+    分块点积特化路径、MHA（group=1）之外带 MLA 吸收（absorb）的
+    q_nope/q_pe 拆分入口（官方 bench 的 mla 形态）。上游源自
+    SGLang/lightllm（vLLM 授权改编），仅记录于此、不进题面。case 由题目
+    文件内 make_inputs(**case) 确定性生成（torch.Generator(seed)，消费顺序
+    seq_lens -> 页表 randperm -> q -> key_cache -> value_cache）；
+    page_size/head_dim_qk/head_dim_v/num_kv_splits 同时是 Model 初始化
+    超参，不影响输入张量取值。

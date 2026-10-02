@@ -1,0 +1,44 @@
+task_id: "4017_group_quant_int8"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/group_quant_int8.py
+      sha256: 707cd632743004355f5f1a97d6c81d24154c3e6302dd87eb60dc301ffe62aef4
+      role: device_kernel   # _per_token_group_quant_int8：absmax/scale/int8 码字全部在 Triton kernel 内完成
+    - path: op_tests/triton_tests/test_group_quant_int8.py
+      sha256: aebacb64cec7537096e1a063f96954f2f3bd240d59a79fc42c95b858e5ab10d0
+      role: official_test   # native_per_token_group_quant_int8 为语义唯一权威
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true    # 组内 absmax、eps 保护、scale、clamp+截断转 int8 全部在 tl.jit kernel 内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试 native 实现移植进题目文件 Model（fp32 eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：2D 连续 fp16/bf16 输入的 per-token-group int8 动态量化（group_size
+    整除 cols，覆盖官方测试全部 rows×cols 族与 group_size∈{128,1}；默认 eps=
+    1e-10 除零保护）。输出为适配 KernelBench 单张量协议的两段打包一维
+    float32（码字段在前、scale 段在后），打包属输出整理不属核心计算。语义依据
+    为官方测试 native_per_token_group_quant_int8（逐行移植）；与源码/官方测试
+    的两处差异均记录如下——(1) 官方 native 在输入 dtype（fp16）里做
+    clamp(min=eps)，eps=1e-10 在 fp16 下溢出为 0，全零组会得 0/0=NaN；Triton
+    kernel 先载入 fp32 再 tl.maximum(absmax, eps)，全零组得 scale=eps/127、
+    码字全 0。官方测试仅用 randn 输入、从不触发该边界，题面按 kernel 的 fp32
+    路径定义此边界（native 与本题参考在官方测试全部输入上逐位一致，构建自检
+    oracle 实测最大绝对偏差 0）。(2) 官方测试容差（码字 atol=1、scale 1e-3）
+    是 fp16-native 与 kernel 间的偏差预算；本评测集参考与候选同为 fp32 确定性
+    算术，按验收规范收紧为码字段等效精确匹配（整数偏差 >=1 超容差）、scale
+    段 1e-6。其余变体留作后续：gfx946 专属 split-store 分支（SPLIT_INT8_STORE）
+    与 autotune JSON 配置机制不在题面；aiter quant 文件的 fp8/int8
+    per-tensor/per-token 与 mxfp4 变体归同族 quant 姊妹题，互不重复。case 由
+    题目文件内 make_inputs(**case) 确定性生成（torch.Generator(seed)，单次
+    randn；value_scale/zero_rows 用于构造 eps 生效与全零组边界）。

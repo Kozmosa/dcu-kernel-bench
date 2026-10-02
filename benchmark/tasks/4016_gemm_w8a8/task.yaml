@@ -1,0 +1,65 @@
+id: "4016_gemm_w8a8"
+name: gemm_w8a8
+family: quant_gemm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  int8 分块量化 GEMM：int8 激活 (M,K) 携带 per-token-group（×128）scale
+  (M, ceil(K/128))，int8 权重 (N,K) 携带 128×128 分块 scale
+  (ceil(N/128), ceil(K/128))；等价计算顺序为沿 K 每 128 一组 int8 点积
+  （int32 精确累加）后乘该组 A/B scale、float32 求和，输出 (M,N) cast 到
+  bfloat16/float16。本题为自包含的 KernelBench 题目文件（reference.py 即
+  题目文件，同时镜像到 benchmark/kernelbench_compat/level3/），可直接走
+  PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 3 --problem-id 4016），无需任何框架
+  改动。starter 由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：
+  helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: aq,      dtype: int8,    layout: contiguous, ndim: 2, shape: [M, K]}
+    - {name: bq,      dtype: int8,    layout: contiguous, ndim: 2, shape: [N, K]}
+    - {name: a_scale, dtype: float32, layout: contiguous, ndim: 2, shape: [M, ceil_K_over_128]}
+    - {name: b_scale, dtype: float32, layout: contiguous, ndim: 2, shape: [ceil_N_over_128, ceil_K_over_128]}
+  outputs:
+    - {name: out, dtype: [bfloat16, float16], layout: contiguous, ndim: 2, shape: [M, N]}
+  init_inputs:
+    - {name: out_dtype, dtype: str, layout: scalar}   # "bfloat16" | "float16"
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见下）
+  fixed_family: {M: 96, N: 1024, K: 768, out_dtype: "bfloat16"}
+  dynamic: true
+  invariants:
+    - "a_scale.shape == (M, ceil(K/128))、b_scale.shape == (ceil(N/128), ceil(K/128))，均 float32"
+    - "K、N 不被 128 整除时按 floor(k/128)、floor(n/128) 索引自然延拓：尾组/尾块只覆盖有效元素"
+    - "码字值域 [-128, 127]；M/N/K >= 1，允许非 2 次幂与不对齐 128 的尾部"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 反量化 + fp32 GEMM 累加后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。int8 码字乘积可在 int32 中精确
+    累加，参考实现为 fp32 反量化后整段 GEMM，两种顺序的差异仅为 fp32 舍入
+    （相对 ~1e-6）；误差主要来自输出 dtype 的舍入（bf16 相对精度约 4e-3），
+    2.0e-2 覆盖且无需更宽。在线（搜索循环内）由 KernelBenchPaperEvaluator
+    判定：triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
+    与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.addmm
+  - torch.einsum
+  - torch._int_mm
+  - F.linear
+  - functional.linear
+  - aiter
+
+# 溯源与准入记录统一存放于 benchmark/sources/4016_gemm_w8a8.yaml（维护者档案）；
+# 本文件面向在线求解器与评测器，不含任何溯源信息。

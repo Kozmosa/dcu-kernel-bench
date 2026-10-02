@@ -1,0 +1,9 @@
+{
+  "task_id": "1026_sage_attention_qk_int8_per_block",
+  "cases": [
+    {"name": "perf_b2_h24_l4352_d128_f16",     "batch": 2, "num_q_heads": 24, "num_kv_heads": 24, "qo_len": 4352, "kv_len": 4352, "head_dim": 128, "tensor_layout": "HND", "mask_mode": "all_true", "dtype": "float16", "seed": 201},
+    {"name": "perf_b1_h32kv8_l2048_d128_f16",  "batch": 1, "num_q_heads": 32, "num_kv_heads": 8,  "qo_len": 2048, "kv_len": 2048, "head_dim": 128, "tensor_layout": "HND", "mask_mode": "all_true", "dtype": "float16", "seed": 202},
+    {"name": "perf_decode_b8_h32kv8_lk8192_f16", "batch": 8, "num_q_heads": 32, "num_kv_heads": 8, "qo_len": 64,   "kv_len": 8192, "head_dim": 128, "tensor_layout": "HND", "mask_mode": "all_true", "dtype": "float16", "seed": 203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

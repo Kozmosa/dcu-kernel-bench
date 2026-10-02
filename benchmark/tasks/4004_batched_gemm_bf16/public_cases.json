@@ -1,0 +1,13 @@
+{
+  "task_id": "4004_batched_gemm_bf16",
+  "note": "model_class 题目：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。",
+  "shape_family": {
+    "B": 8,
+    "M": 128,
+    "N": 256,
+    "K": 512,
+    "use_bias": true,
+    "out_dtype": "bfloat16",
+    "dtype": "bfloat16"
+  }
+}

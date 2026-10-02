@@ -1,0 +1,52 @@
+task_id: "3004_moe_op_e2e"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/moe_op_e2e.py
+      sha256: ff02ef2ae74cfa3b52bed1e1947474b2847322c81eae353c12d5b83f7f366ea3
+      role: device_kernel   # 核心 Triton kernel：e2e_moe_kernel / e2e_moe_persistent_kernel（单 kernel 融合双 grouped GEMM + SiLU + 路由加权）
+    - path: op_tests/triton_tests/test_moe_e2e.py
+      sha256: c14b8cb2e374d4f74eff9c5d18ac0c8a0488d1f507de99795ee7367d3c3d0062
+      role: official_test   # test_correctness：e2e_moe vs torch_e2e_moe，atol=rtol=1e-1
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    语义依据为官方测试 test_correctness：input_helper 生成 a~N(0,1)、
+    w1/w2~U[0,1)、路由取 softmax(logits) 的 top-k，调 e2e_moe（persistent
+    与非 persistent 两 kernel 变体输出等价），与 torch_e2e_moe（einsum 双
+    GEMM + silu_and_mul + 路由加权）在 atol=rtol=1e-1 下比较。题面取的
+    变体子集：官方测试唯一启用的非量化路径（fp8_w8a8=False、
+    int8_w8a16=False），dtype 覆盖官方参数化的 bfloat16 与 float32，
+    top_k∈{1,2}、E∈{1,2,4,8}、M/K 含 1 与非 2 次幂边界；路由加权恒启用
+    （routed_weight=False 仅少一个逐元素乘，不另设变体）。接口取官方
+    torch 参考的用户级张量（a, w1, w2, topk_weights, topk_ids），排序对齐
+    /分块分发（sorted_token_ids、expert_ids、num_tokens_post_padded）是
+    官方 kernel 的调度中间量而非算子语义，不进题面接口，实现策略自由。
+    与 moe_op 系列（GEMM 与激活分离的两 kernel 形态）为不同算子形态而非
+    调参变体，故独立成题。与官方测试的冲突处理：(1) test_moe_e2e.py:8
+    `from op_tests.triton_tests.test_moe import silu_and_mul` 在本 commit 的
+    test_moe.py 中不存在该符号，语义按 torch_silu_and_mul_ref（同文件
+    test_moe.py:34，SiLU 前半 × 后半）与 op_tests/utility/utils.py:161 的
+    silu_and_mul（数学一致）裁定为 SwiGLU；(2) 官方 kernel 对 bf16 输出经
+    fp32 缓存原子累加后再 cast（moe_op_e2e.py:725），与官方 torch 参考
+    bf16 逐步舍入存在数值差异，官方容差 1e-1 即为此设——本题 reference 按
+    评测集规范升为 float32 全程累加、仅输出 cast 一次，构建自检对官方
+    fp32 oracle 的最大绝对偏差与容差结论记录于 tmp/build_check/3004.py
+    运行输出（bf16 最终 cast 相对舍入 <= 2^-8 ≈ 0.0039 < rtol 0.02，
+    task.yaml 沿用评测集默认 2e-2）。其余不并入本题的变体留作后续题：
+    fp8_w8a8 路径（官方测试因精度问题禁用，且 e2e_moe 内激活量化代码被
+    注释、A_scale 传 None 会失效）、int8_w8a16 路径（官方测试未启用，且
+    kernel 按 2 维逐通道 scale 寻址而官方参考量化产生 1 维逐专家 scale，
+    语义不可据实裁定）、float16 dtype（官方参数化中被注释）、
+    moe_set_padding_size / moe_set_quant_func 注入接口。源码文件头带
+    vLLM 上游改编说明，语义以本仓库官方测试为准。

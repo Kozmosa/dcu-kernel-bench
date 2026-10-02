@@ -1,0 +1,44 @@
+task_id: "1011_extend_attention"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/extend_attention.py
+      sha256: a7af325028a59f714fed9d79ca36fe0ccc5ff0cbae094f6aaab0db8ad0590dc9
+      role: device_kernel   # _fwd_kernel/_fwd_kernel_v2/_fwd_kernel_v2_decode：prefix 段 gather + extend 段三角在线 softmax，tl.dot 主计算完整在 Triton kernel 内
+    - path: op_tests/triton_tests/test_extend_attention.py
+      sha256: daa7af5cc70a14035a829eefce193fc074d37788dc08c86f61e4894e5bc9162b
+      role: official_test   # test_op_fwd 的逐序列 einsum+softmax 参考为语义唯一权威
+
+admission:
+  core_compute_in_source: true    # QK^T/在线 softmax/PV 全部在 _fwd_kernel* 的 tl.dot 路径内
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true             # 官方测试参考（fp32 计算）移植进题目文件 Model
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：extend_attention_fwd 的 v1 语义主干——ragged 变长 batch 的
+    prefix（kv_indices 逐 token 收集的 KV 池）+ extend（连续段）混合 attention，
+    GQA（query head h 取 KV head h//group）、causal/非 causal、sm_scale 缺省
+    1/sqrt(head_dim_q)、在线 softmax 与 float32 累加、K 头维==Q 头维而 V 头维
+    独立（允许非 2 次幂）；输入值域沿用官方测试生成器（randn）。语义依据：
+    test_op_fwd 的逐序列参考（einsum scores + cat + softmax，fp32）移植为
+    Model；GQA 的 repeat_interleave 映射取自同测试的 swa 参考，与 kernel 的
+    cur_kv_head = cur_head // kv_group_num 一致。冲突/推广处理：官方测试
+    input_helper 的 kv_indices 恒为 arange（恒等映射），题面按 kernel 寻址
+    语义（K_Buffer[kv_indices[...]] 逐 token gather）推广为任意排列 + 池含
+    未引用垃圾行，参考实现在该推广下与官方参考自然一致（gather 后计算相同）。
+    留作后续独立题：自定义 mask / 滑动窗口（sliding_window_size 与
+    window_kv_offsets）/ attention sink / k_scale·v_scale 反量化（v2 路径）/
+    xai_temperature / logit_cap>0（官方测试仅测 0 值，语义未覆盖）/ fp8 与
+    fp32 dtype / redundant_attention（prefix 段走 prefill context kernel 的
+    冗余路径）/ v2 decode 与 v2 prefill 的分派差异（官方测试
+    test_extend_attention_v2_identity_scales_match_v1 已证 v2 数值与 v1 一致，
+    不构成独立语义）。上游源自 SGLang（Hygon 改造），仅记录于此、不进题面。
+    case 由题目文件内 make_inputs(**case) 确定性生成（torch.Generator(seed)，
+    消费顺序 extend_lens→prefix_lens→randperm→q→k_ext→v_ext→k_buffer→
+    v_buffer）；causal 字段为 Model 初始化超参，不影响输入张量取值。

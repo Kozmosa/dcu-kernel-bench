@@ -1,0 +1,8 @@
+{
+  "task_id": "2004_fused_qk_concat",
+  "cases": [
+    {"name": "perf_mla_reuse_neox_bf16", "B": 512, "KH": 8, "QH_PER_KH": 8, "D_nope": 512, "D_pe": 64, "max_pos": 131072, "d_freq": 32, "dtype": "bfloat16", "seed": 201, "is_neox": true, "apply_rope": true},
+    {"name": "perf_gptj_full_bf16", "B": 1024, "KH": 4, "QH_PER_KH": 8, "D_nope": 512, "D_pe": 128, "max_pos": 65536, "d_freq": 128, "dtype": "bfloat16", "seed": 202, "is_neox": false, "apply_rope": true}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

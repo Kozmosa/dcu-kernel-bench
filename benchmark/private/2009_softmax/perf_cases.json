@@ -1,0 +1,9 @@
+{
+  "task_id": "2009_softmax",
+  "cases": [
+    {"name": "perf_m4096_n8192_f16",  "m": 4096, "n": 8192, "dtype": "float16",  "seed": 2209},
+    {"name": "perf_m8192_n2048_f16",  "m": 8192, "n": 2048, "dtype": "float16",  "seed": 2210},
+    {"name": "perf_m8192_n8192_bf16", "m": 8192, "n": 8192, "dtype": "bfloat16", "seed": 2211}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

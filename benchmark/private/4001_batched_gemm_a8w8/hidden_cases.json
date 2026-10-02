@@ -1,0 +1,10 @@
+{
+  "task_id": "4001_batched_gemm_a8w8",
+  "cases": [
+    {"name": "hidden_min_1111_bf16_bias",       "b": 1, "m": 1,  "n": 1,    "k": 1,    "use_bias": true,  "out_dtype": "bfloat16", "seed": 401},
+    {"name": "hidden_nonpow2_k131_bf16_nobias", "b": 3, "m": 37, "n": 53,   "k": 131,  "use_bias": false, "out_dtype": "bfloat16", "seed": 402},
+    {"name": "hidden_fp16_bias_k129",           "b": 2, "m": 64, "n": 96,   "k": 129,  "use_bias": true,  "out_dtype": "float16",  "seed": 403},
+    {"name": "hidden_skinnym_k4096_bf16_bias",  "b": 2, "m": 1,  "n": 1280, "k": 4096, "use_bias": true,  "out_dtype": "bfloat16", "seed": 404},
+    {"name": "hidden_wide_n_fp16_nobias",       "b": 4, "m": 128, "n": 5120, "k": 256, "use_bias": false, "out_dtype": "float16",  "seed": 405}
+  ]
+}

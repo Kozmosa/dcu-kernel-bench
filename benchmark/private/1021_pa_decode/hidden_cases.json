@@ -1,0 +1,11 @@
+{
+  "task_id": "1021_pa_decode",
+  "cases": [
+    {"name": "hidden_mixed_short_and_just_over_8192_f16", "num_seqs": 2, "num_q_heads": 8,  "num_kv_heads": 8, "head_size": 64,  "block_size": 16, "max_seq_len": 8193,  "dtype": "float16",  "seed": 121, "seq_lens": [1, 8193]},
+    {"name": "hidden_partition_edges_gqa3_f16",          "num_seqs": 6, "num_q_heads": 24, "num_kv_heads": 8, "head_size": 64,  "block_size": 16, "max_seq_len": 16384, "dtype": "float16",  "seed": 122, "seq_lens": [1023, 1025, 8191, 8192, 8193, 16384]},
+    {"name": "hidden_exact_partitions_bf16",             "num_seqs": 4, "num_q_heads": 32, "num_kv_heads": 8, "head_size": 128, "block_size": 32, "max_seq_len": 12288, "dtype": "bfloat16", "seed": 123, "seq_lens": [9216, 9216, 12288, 12288]},
+    {"name": "hidden_nonpow2_head_bf16",                 "num_seqs": 3, "num_q_heads": 16, "num_kv_heads": 4, "head_size": 96,  "block_size": 16, "max_seq_len": 8457,  "dtype": "bfloat16", "seed": 124, "seq_lens": [8193, 8207, 8457]},
+    {"name": "hidden_block_size_1_f16",                  "num_seqs": 2, "num_q_heads": 4,  "num_kv_heads": 4, "head_size": 64,  "block_size": 1,  "max_seq_len": 8193,  "dtype": "float16",  "seed": 125, "seq_lens": [1, 8193]},
+    {"name": "hidden_gqa5_longtail_f16",                 "num_seqs": 5, "num_q_heads": 40, "num_kv_heads": 8, "head_size": 128, "block_size": 16, "max_seq_len": 16411, "dtype": "float16",  "seed": 126, "seq_lens": [12289, 9000, 16384, 8194, 10001]}
+  ]
+}

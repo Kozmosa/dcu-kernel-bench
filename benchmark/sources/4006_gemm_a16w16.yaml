@@ -1,0 +1,41 @@
+task_id: "4006_gemm_a16w16"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/gemm_a16w16.py
+      sha256: 003b1343a79ae408e8d30eb4e0168b7ae46ff8b86065661c196e6c6ccd809f4f
+      role: device_kernel   # 核心 Triton kernel：_gemm_a16_w16_kernel
+    - path: op_tests/triton_tests/test_gemm_a16w16.py
+      sha256: 97c6d57874167ffe0784ff1f259277cf5f8d6c6e0d296a85b8ba4a85cdceb252
+      role: official_test   # test_gemm_a16_w16：Y 与 F.linear(x, w) 对比，atol=rtol=1e-1
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    语义依据为官方测试 test_gemm_a16_w16：Y = X @ W^T（x [M,K] 与
+    weight [N,K] 行主 TN，fp16/bf16），kernel 内 float32 累加
+    （tl.dot input_precision="ieee"）后整体 cast 回输出 dtype，与
+    F.linear(x, w, bias=None) 在 atol=rtol=1e-1 内一致。题面取常规分块
+    store 变体：每个输出 tile 由单一 program 完整归约 K 维（EVEN_K 不成立
+    时 K 尾按 0 参与累加；M/N 越界行/列取模回绕加载 + 掩码写回），无
+    split-K、无原子加、无量化成分（"A16W16" 指双方均为 16 位浮点）。
+    同族边界裁定：与 4007_gemm_a16w16_atomic 为同一官方测试下的两份
+    算子源文件，数学语义相同、差异在归约/写回策略（常规 store vs
+    split-K + tl.atomic_add）；因 4007 已作为独立任务在库，按目录既有
+    状态保留为独立两题（4006 常规 store / 4007 split-K atomic，即
+    基础/进阶两问），公开 shape 族（4006: 256x8192x1024 bf16 /
+    4007: 64x1280x4096 f16）与 case 资产互不重叠。官方测试中
+    output=True 显式传入输出张量、TT/NT/NN 布局变体与 atomic 路径不在
+    本题范围（atomic 留作 4007，非 TN 布局留作后续题）。源码与测试无
+    语义冲突。与 1002 样板的一处形态差异（复核后修正）：task.yaml 不再
+    内联 repo/commit/path 溯源串（隔离检查对题面包文件 grep -i 命中
+    opendas/c39fff8），完整溯源只记于本文件。

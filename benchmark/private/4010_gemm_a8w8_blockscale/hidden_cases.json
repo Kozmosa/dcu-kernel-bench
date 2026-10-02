@@ -1,0 +1,12 @@
+{
+  "task_id": "4010_gemm_a8w8_blockscale",
+  "note": "head_size 为离线终审 harness 的单参构造形态 [group_k, group_n, out_dtype]（audit_model_class.py:78 Model(case[\"head_size\"])），dtype 为容差查找键，两者均与显式参数一致性断言。",
+  "cases": [
+    {"name": "hidden_min_1111_g128_bf16",       "m": 1,   "n": 1,    "k": 1,    "group_k": 128, "group_n": 128, "out_dtype": "bfloat16", "seed": 411, "head_size": [128, 128, "bfloat16"], "dtype": "bfloat16"},
+    {"name": "hidden_nonpow2_tail_g128_bf16",   "m": 37,  "n": 53,   "k": 131,  "group_k": 128, "group_n": 128, "out_dtype": "bfloat16", "seed": 412, "head_size": [128, 128, "bfloat16"], "dtype": "bfloat16"},
+    {"name": "hidden_unequal_groups_g64x256_bf16", "m": 64, "n": 1024, "k": 512, "group_k": 64, "group_n": 256, "out_dtype": "bfloat16", "seed": 413, "head_size": [64, 256, "bfloat16"], "dtype": "bfloat16"},
+    {"name": "hidden_fp16_out_ktail_g128",      "m": 64,  "n": 96,   "k": 129,  "group_k": 128, "group_n": 128, "out_dtype": "float16",  "seed": 414, "head_size": [128, 128, "float16"], "dtype": "float16"},
+    {"name": "hidden_skinny_m1_g128_bf16",      "m": 1,   "n": 1280, "k": 8192, "group_k": 128, "group_n": 128, "out_dtype": "bfloat16", "seed": 415, "head_size": [128, 128, "bfloat16"], "dtype": "bfloat16"},
+    {"name": "hidden_k2049_tail_g128_bf16",     "m": 128, "n": 256,  "k": 2049, "group_k": 128, "group_n": 128, "out_dtype": "bfloat16", "seed": 416, "head_size": [128, 128, "bfloat16"], "dtype": "bfloat16"}
+  ]
+}

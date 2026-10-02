@@ -1,0 +1,9 @@
+{
+  "task_id": "1016_lean_atten_paged",
+  "cases": [
+    {"name": "perf_h64_b1_ctx32768_d64_f16",   "num_heads": 64, "batch": 1, "n_ctx_q": 16, "head_size": 64,  "ctx_lens": [32768],                 "dtype": "float16", "extra_blocks": 0,  "seed": 201},
+    {"name": "perf_h64_b3_ctx4k_16k_d64_f16",  "num_heads": 64, "batch": 3, "n_ctx_q": 16, "head_size": 64,  "ctx_lens": [4096, 8192, 16384],      "dtype": "float16", "extra_blocks": 16, "seed": 202},
+    {"name": "perf_h64_b1_ctx16384_d128_f16",  "num_heads": 64, "batch": 1, "n_ctx_q": 16, "head_size": 128, "ctx_lens": [16384],                 "dtype": "float16", "extra_blocks": 0,  "seed": 203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

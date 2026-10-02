@@ -1,0 +1,73 @@
+id: "1018_mha_fused_bwd"
+name: mha_fused_bwd
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  FlashAttention 反向（fused 形态：单 kernel 同时计算 dQ/dK/dV，dQ 经原子加
+  累积）的自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1018）。给定稠密定长 [batch, seqlen, heads,
+  head_dim]（bshd）布局的 Q/K/V 与上游梯度 dO，一次调用同时返回注意力前向
+  O = softmax(scale·QK^T)·V 对 Q/K/V 的梯度：dQ = scale·(dS·K)、
+  dK = scale·(dS^T·Q)、dV = P^T·dO，其中 dS = P∘(dP-delta)、
+  delta = rowsum(dO∘O)。支持 MHA/GQA、非因果；float32 中间累加，输出
+  cast 回输入 dtype 后按 dQ|dK|dV 顺序平铺拼接为单一一维张量（KernelBench
+  在线评测要求单张量输出）。不含 dropout、bias/ALiBi、causal 掩码、fp8、
+  varlen。starter 由框架 loader 从 Model 自动生成 ModelNew scaffold
+  （锚点：helpers / init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q,  dtype: [float16, bfloat16], layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
+    - {name: k,  dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
+    - {name: v,  dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
+    - {name: do, dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
+  outputs:
+    - name: grads
+      dtype: same_as_q
+      layout: contiguous
+      ndim: 1
+      shape: [batch*seqlen_q*num_q_heads*head_dim + 2*batch*seqlen_k*num_kv_heads*head_dim]
+      note: "dQ/dK/dV 依序按各自 bshd 行主序平铺后拼接"
+  init_inputs:
+    - {name: head_size, dtype: int64, layout: scalar}   # sm_scale 缺省 1/sqrt(head_size)
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；hidden/perf case 覆盖全域）
+  fixed_family: {batch: 2, num_kv_heads: 4, query_group_size: 4, num_q_heads: 16, head_size: 64, seqlen_q: 128, seqlen_k: 256}
+  dynamic: true
+  invariants:
+    - "num_q_heads 是 num_kv_heads 的整数倍（相等即 MHA，否则 GQA）"
+    - "1 <= head_dim <= 256"
+    - "seqlen_q >= 1 且 seqlen_k >= 1（两者可独立取值）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+  # 反向题：禁止借 torch.autograd.grad / .backward() 反传求梯度
+  #（注释须独立成行：static_audit.py 的 forbidden 解析器不识别行尾注释）
+  - autograd
+  - .backward(
+
+# 溯源（repo/commit/path/sha256）统一记录于 benchmark/sources/1018_mha_fused_bwd.yaml；
+# 题面三文件与 compat 镜像内不得重复出现溯源词。

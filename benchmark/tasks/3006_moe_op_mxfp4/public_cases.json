@@ -1,0 +1,20 @@
+{
+  "task_id": "3006_moe_op_mxfp4",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 的输入由 reference.py::make_inputs(**case) 确定性生成（消费顺序 a_raw → b_raw → values）。",
+  "shape_family": {
+    "M": 64,
+    "N": 128,
+    "K": 128,
+    "E": 8,
+    "top_k": 2,
+    "dtype": "bfloat16",
+    "a_q": [64, 64],
+    "a_scales": [64, 4],
+    "b_q": [8, 128, 64],
+    "b_scales": [8, 128, 4],
+    "topk_weights": [64, 2],
+    "topk_ids": [64, 2],
+    "out_shape": [64, 2, 128],
+    "out_dtype": "bfloat16"
+  }
+}

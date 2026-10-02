@@ -1,0 +1,11 @@
+{
+  "task_id": "2001_activation",
+  "cases": [
+    {"name": "hidden_min_m1_n4_silu_f16",        "m": 1,   "n": 4,    "activation": "silu",      "dtype": "float16",  "seed": 2101},
+    {"name": "hidden_tailpad_m280_n20_gelu_bf16", "m": 280, "n": 20,   "activation": "gelu",      "dtype": "bfloat16", "seed": 2102},
+    {"name": "hidden_pad_m3_n68_gelu_tanh_bf16",  "m": 3,   "n": 68,   "activation": "gelu_tanh", "dtype": "bfloat16", "seed": 2103},
+    {"name": "hidden_m128_n28_silu_f16",          "m": 128, "n": 28,   "activation": "silu",      "dtype": "float16",  "seed": 2104},
+    {"name": "hidden_m160_n40_gelu_f16",          "m": 160, "n": 40,   "activation": "gelu",      "dtype": "float16",  "seed": 2105},
+    {"name": "hidden_m256_n1024_gelu_tanh_f16",   "m": 256, "n": 1024, "activation": "gelu_tanh", "dtype": "float16",  "seed": 2106}
+  ]
+}

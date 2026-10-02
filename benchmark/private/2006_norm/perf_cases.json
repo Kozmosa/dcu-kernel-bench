@@ -1,0 +1,9 @@
+{
+  "task_id": "2006_norm",
+  "cases": [
+    {"name": "perf_m8192_n8192_f16",     "m": 8192,  "n": 8192, "dtype": "float16",  "seed": 2701},
+    {"name": "perf_m16384_n4096_bf16",   "m": 16384, "n": 4096, "dtype": "bfloat16", "seed": 2702},
+    {"name": "perf_m4096_n5120_f16",     "m": 4096,  "n": 5120, "dtype": "float16",  "seed": 2703}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

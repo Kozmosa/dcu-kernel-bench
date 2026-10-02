@@ -1,0 +1,66 @@
+id: "1015_lean_atten"
+name: lean_attention
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  ragged batch 变长 KV 的 Lean Attention 前向（连续、非分页 KV）：单条序列的
+  KV 在 k/v 中按序列主序连续存放，每条序列实际参与 attention 的长度由
+  kv_lens 给出；各批 query 段等长 q_len（q 按 [num_seqs*q_len, H, D] 序列
+  主序存放）。覆盖 decode（causal=0，各批 KV 长度独立）与 prefill 方阵因果
+  自注意力（causal=1，各批 kv_len == q_len）两态，MHA（Q/K/V 头数一致），
+  在线 softmax 数值稳定语义、float32 中间累加、输出 cast 回输入 dtype。
+  本题为自包含的 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1015），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q,       dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [num_seqs*q_len, num_heads, head_dim]}
+    - {name: k,       dtype: same_as_q,           layout: contiguous, ndim: 3, shape: [total_kv, num_heads, head_dim]}   # total_kv = sum(kv_lens)
+    - {name: v,       dtype: same_as_q,           layout: contiguous, ndim: 3, shape: [total_kv, num_heads, head_dim]}
+    - {name: kv_lens, dtype: int32,               layout: contiguous, ndim: 1, shape: [num_seqs]}
+    - {name: causal,  dtype: int32,               layout: scalar,     ndim: 0, note: "1=方阵因果掩码，0=无掩码；上游评测器 cast fp32 后需无损恢复"}
+  outputs:
+    - {name: out, dtype: same_as_q, layout: contiguous, ndim: 3, shape: [num_seqs*q_len, num_heads, head_dim]}
+  init_inputs:
+    - {name: head_dim, dtype: int64, layout: scalar}   # sm_scale 缺省 1/sqrt(head_dim)
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；hidden/perf case 覆盖全域）
+  fixed_family: {num_seqs: 4, num_heads: 8, q_len: 16, head_dim: 128, max_kv_len: 2048, causal: 0, dtype: "float16"}
+  dynamic: true
+  invariants:
+    - "Q/K/V 头数一致（MHA，无 GQA）；head_dim ∈ {16,32,64,128,256} 且 Q/K/V 相同"
+    - "kv_lens[b] >= 1；total_kv == sum(kv_lens)；q_len = total_q / num_seqs 为一致正整数，q/k/v 均按序列主序存放"
+    - "causal=1 时 kv_lens[b] == q_len 对所有 b（方阵因果自注意力，各批等长）；causal=0 时各批 kv_len 独立任意"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    本评测集的统一验收容差，用于离线终审；比官方测试（fp16 atol=1e-2 /
+    rtol=3e-3）略宽，以覆盖在线 fp32 cast 路径与低精度 QK/PV 的累加误差，
+    与同族题（1001/1011/1012）一致。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+
+# 溯源信息（repo/commit/path）只在 benchmark/sources/1015_lean_atten.yaml
+# 准入记录中维护，题面呈现层（本文件）不留存。

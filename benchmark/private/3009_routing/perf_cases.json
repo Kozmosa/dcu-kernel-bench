@@ -1,0 +1,9 @@
+{
+  "task_id": "3009_routing",
+  "cases": [
+    {"name": "perf_prefill_m4096_k5120_n128_bf16", "m": 4096, "k": 5120, "n": 128, "fused_shared_experts": true, "dtype": "bfloat16", "dist": "bench", "seed": 3201},
+    {"name": "perf_prefill_m8192_k5120_n16_bf16",  "m": 8192, "k": 5120, "n": 16,  "fused_shared_experts": true, "dtype": "bfloat16", "dist": "bench", "seed": 3202},
+    {"name": "perf_decode_m256_k5120_n128_f16",    "m": 256,  "k": 5120, "n": 128, "fused_shared_experts": true, "dtype": "float16",  "dist": "bench", "seed": 3203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

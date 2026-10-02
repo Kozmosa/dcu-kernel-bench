@@ -1,0 +1,85 @@
+id: "1024_prefill_attention"
+name: prefill_attention
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  非分页（连续 KV）ragged 变长 batch 的 prefill 自注意力：每条序列的多 token
+  query 对本序列连续存放的 KV 做在线 softmax，支持 GQA（query head h 取 KV
+  head h//query_group_size）、causal/非 causal、sm_scale 缺省
+  1/sqrt(head_dim)、float32 中间累加、输出 cast 回输入 dtype；序列边界由
+  b_start_loc（排他前缀和）与 b_seq_len 描述，无 padding。本题为自包含的
+  KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1024），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: q,            dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [total_tokens, num_q_heads, head_dim]}
+    - {name: k,            dtype: same_as_query,      layout: contiguous, ndim: 3, shape: [total_tokens, num_kv_heads, head_dim]}
+    - {name: v,            dtype: same_as_query,      layout: contiguous, ndim: 3, shape: [total_tokens, num_kv_heads, head_dim]}
+    - {name: b_start_loc,  dtype: int32,              layout: contiguous, ndim: 1, shape: [num_seqs]}   # 序列长度排他前缀和
+    - {name: b_seq_len,    dtype: int32,              layout: contiguous, ndim: 1, shape: [num_seqs]}   # 每序列长度 >= 1
+  outputs:
+    - {name: out, dtype: same_as_query, layout: contiguous, ndim: 3, shape: [total_tokens, num_q_heads, head_dim]}
+  init_inputs:
+    - {name: causal, dtype: bool, layout: scalar}   # True=序列内因果掩码；sm_scale 缺省 1/sqrt(head_dim)
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束如下）
+  fixed_family: {num_seqs: 4, num_kv_heads: 4, query_group_size: 4, num_q_heads: 16, head_dim: 64, max_seq_len: 256, dtype: "float16", causal: true}
+  dynamic: true
+  invariants:
+    - "num_q_heads == num_kv_heads * query_group_size（GQA 整除；相等即 MHA）"
+    - "b_start_loc 为 b_seq_len 的排他前缀和，b_start_loc[0] == 0；b_seq_len[i] >= 1；total_tokens == sum(b_seq_len)"
+    - "Q/K/V 头维相同且 >= 16，允许非 2 次幂（越界通道按 head_dim 掩码置零）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    与官方测试（torch.testing.assert_close rtol=atol=2e-2）一致的验收容差，
+    用于离线终审；误差主要来自低精度 QK/PV 与在线 softmax 的 fp32 累加路径。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与
+    模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论
+    不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）。
+# 除模块级符号外，另列 Tensor 方法（.matmul( / .bmm( / .mm( / .baddbmm( 等）、
+# F.xxx 形式与 torch.ops.aten._xxx( 私有算子变体：static_audit 为大小写不敏感
+# 子串匹配，仅列 torch.matmul/torch.softmax 时 x.matmul( / F.softmax /
+# aten._softmax( 等捷径会被绕过；点前缀条目已覆盖 torch.ops.aten.bmm( 这类
+# 普通 aten 形式（含 .bmm( 子串），下划线变体需显式列出。
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - .matmul(
+  - torch.bmm
+  - .bmm(
+  - torch.mm
+  - .mm(
+  - torch.baddbmm
+  - .baddbmm(
+  - torch.einsum
+  - .einsum(
+  - torch.softmax
+  - .softmax(
+  - torch.nn.functional.softmax
+  - F.softmax
+  - torch.ops.aten._matmul(
+  - torch.ops.aten._bmm(
+  - torch.ops.aten._baddbmm(
+  - torch.ops.aten._softmax(
+
+# 溯源信息（repo / commit / sha256 / 准入记录）统一见
+# benchmark/sources/1024_prefill_attention.yaml（仅维护者用）；本文件面向评测
+# 流水线，不携带溯源词。

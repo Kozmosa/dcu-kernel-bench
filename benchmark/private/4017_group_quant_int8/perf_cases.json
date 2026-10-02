@@ -1,0 +1,9 @@
+{
+  "task_id": "4017_group_quant_int8",
+  "cases": [
+    {"name": "perf_4096x7168_gs128_f16",   "rows": 4096,  "cols": 7168, "group_size": 128, "dtype": "float16",  "seed": 517},
+    {"name": "perf_16384x7168_gs128_f16",  "rows": 16384, "cols": 7168, "group_size": 128, "dtype": "float16",  "seed": 518},
+    {"name": "perf_8192x4096_gs128_bf16",  "rows": 8192,  "cols": 4096, "group_size": 128, "dtype": "bfloat16", "seed": 519}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

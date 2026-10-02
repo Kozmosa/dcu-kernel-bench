@@ -1,0 +1,55 @@
+task_id: "1020_mla_decode_rope"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/mla_decode_rope.py
+      sha256: 4e818ae25333e14451d7420e2da1e9f29d84fb4c44f60bf64a5ab362e60fe3cd
+      role: device_kernel   # 核心计算全部在源文件内的 Triton kernel（_fwd_grouped_kernel_stage1_rope / _fwd_kernel_stage2）
+    - path: op_tests/triton_tests/test_mla_decode_rope.py
+      sha256: d6f50e3a554fd28f627831563729fdeaba7926a6585a76c474a2105396b51837
+      role: official_test   # 语义唯一权威（ref_compute / ref_compute_full_fwd 为官方 PyTorch 参考实现）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：DeepSeek MLA 解码 attention 融合 RoPE（page size = 1）。
+    取官方测试三组参数化（test_op_fwd_rope / test_op_fwd_rope_neox /
+    test_op_fwd_rope_integration）共同覆盖的语义：use_rope=True、
+    is_neox_style ∈ {True, False}、rotary_dim=64（2 的幂，<= r）、
+    qk_rope_head_dim ∈ {64, 127, 128}、kv_lora_rank=512、H=128、B ∈ {1, 8}、
+    S ∈ {2..2050}（含非 2 次幂 S=2050 与 r=127）、bf16/fp32（题面按本评测集
+    惯例取 fp16/bf16）、sm_scale 显式标量（官方恒 1.0，题面缺省
+    1/sqrt(c+r)）、logit_cap=0、rope_base=10、rope_scaling=1.0（退化为标准
+    RoPE，mscale=1）。语义依据：官方测试的 PyTorch 参考实现
+    （DeepseekScalingRotaryEmbedding.forward 旋转 q_pe 与每批最后一个
+    token 的 k_pe，ref_preprocess 使 V ≡ KV 行前 c 列，_decode_grouped_att_
+    m_fwd 逐 (batch, head, KV 切片) 在线 softmax 后 _fwd_kernel_stage2 以
+    log-sum-exp 归并），与被测 Triton kernel 逐式对照一致，无冲突。
+    与官方测试的差异处理：① 官方 k_buffer/v_buffer 两指针经 ref_preprocess
+    恒指向同一份数据（V ≡ K 行前 c 列），题面合并为单张 kv_cache 并在
+    task.yaml 不变式显式声明，语义无损；② 官方 kv_indices = arange（无垃圾
+    行），题面推广为"行池可大于已用行数、未引用行为垃圾"（与本评测集
+    1001/1002/1016 的分页语义一致），kernel 只经 kv_indices 寻址，语义良
+    定义；③ 官方测试 positions = [S]·B（= 序列长度），题面语义允许
+    positions 与 seq_len 解耦（kernel 按 positions[cur_batch] 读取），hidden
+    case 含解耦用例，生成端缺省沿用官方约定；④ 官方接口的 attn_logits /
+    k_pe_tokens 输出缓冲与 num_kv_splits 切片数为 launch 细节（输出切片
+    不变），不进入题面接口；⑤ 官方输出的 (o, k_pe_tokens) 双张量在题面
+    平铺拼接为单张量（在线评测器仅支持单张量输出，同 1018_mha_fused_bwd
+    的 dQ|dK|dV 处理），布局在题面规格中显式给出；⑥ cos_sin_cache 由题面
+    输入直接给出（官方 DeepseekScalingRotaryEmbedding 以 base=10、
+    scaling=1 生成，题面生成公式与官方一致）。容差：官方对全部输出用
+    atol=1e-2 / rtol=1e-2，题面沿用本评测集统一的 2e-2/2e-2（见 task.yaml
+    note）。
+    其余变体留作后续题：use_rope=False 的 grouped decode attention（同族
+    相邻题）、logit_cap > 0 的 tanh 封顶、YaRN scaling != 1、rope offset、
+    fp8 KV、autotune 配置族。

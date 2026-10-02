@@ -1,0 +1,9 @@
+{
+  "task_id": "2005_moe_activation",
+  "cases": [
+    {"name": "perf_m65536_n4096_alpha_gate_bf16", "m": 65536, "n": 4096,  "activation": "silu",              "alpha": 1.702, "limit": 7.0,  "dtype": "bfloat16", "seed": 3201, "scale": 1.0},
+    {"name": "perf_m32768_n8192_silu_f16",        "m": 32768, "n": 8192,  "activation": "silu",              "alpha": null,  "limit": null, "dtype": "float16",  "seed": 3202, "scale": 1.0},
+    {"name": "perf_m4096_n16384_interleaved_bf16", "m": 4096, "n": 16384, "activation": "swiglu_interleaved", "alpha": 1.702, "limit": 7.0,  "dtype": "bfloat16", "seed": 3203, "scale": 1.0}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

@@ -1,0 +1,11 @@
+{
+  "task_id": "1020_mla_decode_rope",
+  "cases": [
+    {"name": "hidden_min_s1_bf16",          "batch": 1, "num_heads": 128, "seq_lens": [1],    "kv_lora_rank": 512, "qk_rope_head_dim": 64,  "rotary_dim": 64, "dtype": "bfloat16", "is_neox_style": true,  "seed": 101},
+    {"name": "hidden_partial_rope_f16",     "batch": 2, "num_heads": 128, "seq_lens": [517, 384], "kv_lora_rank": 512, "qk_rope_head_dim": 128, "rotary_dim": 64, "dtype": "float16", "is_neox_style": true, "seed": 102},
+    {"name": "hidden_nonpow2_r127_bf16",    "batch": 1, "num_heads": 128, "seq_lens": [2050], "kv_lora_rank": 512, "qk_rope_head_dim": 127, "rotary_dim": 64, "dtype": "bfloat16", "is_neox_style": true,  "seed": 103},
+    {"name": "hidden_gptj_style_bf16",      "batch": 2, "num_heads": 128, "seq_lens": [1000, 64], "kv_lora_rank": 512, "qk_rope_head_dim": 64, "rotary_dim": 64, "dtype": "bfloat16", "is_neox_style": false, "seed": 104},
+    {"name": "hidden_varlen_bf16",          "batch": 4, "num_heads": 128, "seq_lens": [1, 333, 1024, 65], "kv_lora_rank": 512, "qk_rope_head_dim": 64, "rotary_dim": 64, "dtype": "bfloat16", "is_neox_style": true, "seed": 105},
+    {"name": "hidden_pos_offset_f16",       "batch": 2, "num_heads": 128, "seq_lens": [512, 300], "kv_lora_rank": 512, "qk_rope_head_dim": 64, "rotary_dim": 64, "dtype": "float16", "is_neox_style": true, "positions": [600, 4000], "seed": 106}
+  ]
+}

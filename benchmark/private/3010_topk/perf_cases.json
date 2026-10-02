@@ -1,0 +1,9 @@
+{
+  "task_id": "3010_topk",
+  "cases": [
+    {"name": "perf_b8_m128256_k8_f32",    "batch_size": 8,    "row_len": 128256, "k": 8, "dtype": "float32", "seed": 4201},
+    {"name": "perf_b512_m16384_k8_f16",   "batch_size": 512,  "row_len": 16384,  "k": 8, "dtype": "float16", "seed": 4202},
+    {"name": "perf_b1335_m128256_k8_f32", "batch_size": 1335, "row_len": 128256, "k": 8, "dtype": "float32", "seed": 4203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

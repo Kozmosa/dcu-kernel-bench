@@ -1,0 +1,53 @@
+task_id: "3009_routing"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/routing.py
+      sha256: c911cac58a77d7bcc933c66c9cceb883dc9f7bda759963a1f645032b84839671
+      role: device_kernel
+    - path: op_tests/triton_tests/test_routing.py
+      sha256: def2b9cf549055a31b702362f33b121ffc6d868791ae34a43655325049df25f5
+      role: official_test   # 语义唯一权威
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：routing.py 的 _routing_sigmoid_top1_kernel / routing_sigmoid_top1
+    （固定 config 简洁版，config 由 get_config_heuristic 查表）所覆盖的
+    sigmoid top-1 路由全集——TOPK=1、fused_shared_experts 开/关两态（官方
+    测试恒 True 并以 dummy 列 [N, 1.0] 对照；官方基准 bench_routing.py 的
+    计时路径为 False 缺省）、bf16/fp16 两 dtype。输入分布两种：官方测试的
+    randint(-2,3) 整数分布（隐藏 case 全部采用，整数得分在 fp32 累加链上
+    精确、平局裁决确定）与官方基准的 randn / randn*0.1（perf case 采用）。
+    输出按 KernelBench 单张量协议打包为 fp32 [ids | weights]（在线评测器
+    仅支持单张量输出，构建自检实测 eval.py 的 correctness 路径直接取
+    output.shape / torch.allclose，不支持 tuple）。语义依据：
+    test_routing.py::test_routing_sigmoid_top1——参考链
+    torch_routing_sigmoid_top1（matmul -> sigmoid(fp32) -> topk=1 ->
+    int32 ids / fp32 weights，fused 追加 [N, 1.0] 列），网格
+    M∈{128,1024,2048,4096,8192}、N∈{16,128}、K∈{16,128}、bf16、seed=7，
+    容差 ids 1e-4 / weights 1e-5。与官方测试的冲突处理（源码与测试无数学
+    冲突，两处 CPU 化裁定记录如下）：① 官方 torch 参考的 top-1 选择用
+    torch.topk——GPU 实现平局取最小下标、与 kernel 的
+    tl.argmax(tie_break_left=True) 一致（官方测试绿），但 CPU 实现平局
+    不取首个（构建自检实测 [0.5,0.5,0.2,0.5] 取 idx 1）；题面参考实现改用
+    文档化"取首个最大值下标"的 torch.max(dim)，自检同时对逐字 topk 版在
+    最大值唯一的行上验证一致。② 官方 torch 参考的 matmul 在输入 dtype
+    （bf16）下出栈（fp32 累加、bf16 舍出），题面按评测集规范全程 float32；
+    在官方测试量级内（K<=128、|score|<256 的 bf16 精确区）两路径逐位一致
+    （自检逐 case 断言），超出该量级的大 K case 仅出现在 perf（不做出错
+    比对）与在线 fp32 路径（无 bf16 舍出）。题面在语义层面放开 M/K/N 为
+    任意 >= 1（官方 wrapper 的 config 查表仅覆盖 N∈{16,128}，属实现限制
+    而非语义约束，隐藏 case 含 N=24 / K=96 非官方取值）。其余变体留作后
+    续题/调优参考：同算子的 autotune 重复实现（kernel 同名的
+    moe_routing_sigmoid_top1_fused.py）不单独成题、作本题调优参考；
+    topk>1 通用路由与 renormalize 变体不在本文件内。

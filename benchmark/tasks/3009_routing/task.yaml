@@ -1,0 +1,78 @@
+id: "3009_routing"
+name: routing_sigmoid_top1
+family: moe
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  MoE 门控的 sigmoid top-1 路由（model_class / KernelBench 兼容形态）：
+  score = sigmoid(x·w)（float32 累加）逐行取最大专家，输出 topk_ids /
+  topk_weights，可选融合共享专家列（id=N、权重 1.0）；top_k 恒为 1，argmax
+  平局取最小专家下标。官方实现为单 Triton kernel（逐块 tl.dot fp32 累加 +
+  tl.sigmoid + tl.argmax 平局取左 + 融合列写回），固定 config 查表派发。
+  题面取该算子本身：TOPK=1、fused_shared_experts 开/关两态（官方测试恒
+  True、官方基准计时路径为 False 缺省）、bf16/fp16 两 dtype；不含 topk>1
+  的通用路由与 renormalize 变体（不在源文件内），不含 autotune 调度差异
+  （同算子 autotune 实现仅作调优参考）。输出按 KernelBench 单张量协议打包
+  为 float32 [ids | weights]（在线评测器仅支持单张量输出）。题目文件自包含
+  （reference.py 即题目文件，逐字节镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 3009），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x, dtype: [float16, bfloat16], layout: contiguous, ndim: 2, shape: [M, K]}   # 门控输入，M 个 token
+    - {name: w, dtype: same_as_x,         layout: contiguous, ndim: 2, shape: [K, N]}     # 路由权重，每列一个专家
+  outputs:
+    - {name: out, dtype: float32, layout: contiguous, ndim: 2, shape: [M, 2*C]}   # C = 1 + fused_shared_experts；前 C 列 id、后 C 列权重
+  init_inputs:
+    - {name: fused_shared_experts, dtype: bool, layout: scalar}   # 是否追加共享专家列（id=N、权重 1.0）
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；隐藏/perf case 见 private/）
+  fixed_family: {M: 1024, K: 5120, N: 128, fused_shared_experts: true,
+                 dtype: bfloat16, dist: int, C: 2, out_shape: [1024, 4]}
+  dynamic: true
+  invariants:
+    - "M/K/N >= 1，允许非 2 次幂（官方 wrapper 的 config 查表仅覆盖 N∈{16,128}，属实现限制而非语义约束）"
+    - "top_k 恒为 1；argmax 平局取最小专家下标（tie-break left）"
+    - "fused_shared_experts=True 时 C=2：id 列 [argmax_id, N]（N=专家数，在真实专家区间外），权重列 [top1_score, 1.0]"
+    - "得分以 float32 累加求值；输出打包契约 out[:, :C]=ids（整数，fp32 精确）、out[:, C:]=weights"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  compare: >
+    输出为单个 float32 张量（整数 id 列 + sigmoid 权重列打包）。id 列精确
+    匹配：错选专家 / 漏写融合列的偏差 >= 1，而容差上界 1e-3 + 1e-3*128
+    ≈ 0.129 < 1，任何 id 偏差必然超差判负。权重列 1e-3 覆盖分块累加顺序
+    差与 sigmoid/exp 实现差（隐藏 case 全部为整数得分分布，|score| < 256
+    处于 bf16 精确区，参考与 kernel 的得分一致到 fp32 舍入）。
+  note: >
+    以上为本评测集的验收容差，用于离线终审。不用 fp16/bf16 的 2.0e-2 档：
+    该档在 id=128（融合共享列）处容差上界达 2.58，会放过相邻专家错选。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入
+    与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，id 错选偏差 >= 1
+    必然超差——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）；标准列表中 attention/
+# softmax 类捷径与本路由算子无关，按题裁剪，保留 GEMM 捷径并加本算子的
+# top-1 选择与 sigmoid 的 ATen 捷径（它们一步即给出核心结果）。torch.max
+# 不入列：子串会误伤 torch.maximum，且无矩阵乘捷径时无法独立给出结果
+forbidden:
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.nn.functional.linear
+  - torch.topk
+  - torch.argmax
+  - torch.sigmoid
+
+source:
+  repo: OpenDAS/aiter
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  path: aiter/ops/triton/routing.py   # 仅维护者溯源用；官方测试 op_tests/triton_tests/test_routing.py

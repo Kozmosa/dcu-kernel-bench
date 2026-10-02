@@ -1,0 +1,11 @@
+{
+  "task_id": "1022_pa_prefill",
+  "cases": [
+    {"name": "hidden_zero_ctx_h32qpk4_f16",       "num_seqs": 3, "num_heads": 32, "num_queries_per_kv": 4,  "head_size": 128, "block_size": 32, "max_query_len": 48, "max_ctx_len": 1,   "dtype": "float16",  "seed": 101, "query_lens": [1, 16, 48],     "ctx_lens": [0, 0, 0],   "use_alibi": false},
+    {"name": "hidden_exact_blocks_h16qpk2_f16",   "num_seqs": 4, "num_heads": 16, "num_queries_per_kv": 2,  "head_size": 64,  "block_size": 32, "max_query_len": 40, "max_ctx_len": 128, "dtype": "float16",  "seed": 102, "query_lens": [1, 40, 17, 32],  "ctx_lens": [32, 64, 96, 128], "use_alibi": false},
+    {"name": "hidden_head96_h32qpk4_bf16",        "num_seqs": 4, "num_heads": 32, "num_queries_per_kv": 4,  "head_size": 96,  "block_size": 16, "max_query_len": 48, "max_ctx_len": 80,  "dtype": "bfloat16", "seed": 103},
+    {"name": "hidden_alibi_mha_h8qpk1_f16",       "num_seqs": 4, "num_heads": 8,  "num_queries_per_kv": 1,  "head_size": 64,  "block_size": 16, "max_query_len": 64, "max_ctx_len": 64,  "dtype": "float16",  "seed": 104, "use_alibi": true},
+    {"name": "hidden_alibi_gqa8_head24_h16kv2_f16","num_seqs": 4, "num_heads": 16, "num_queries_per_kv": 8,  "head_size": 24,  "block_size": 32, "max_query_len": 32, "max_ctx_len": 96,  "dtype": "float16",  "seed": 105, "use_alibi": true},
+    {"name": "hidden_tail_block_alibi_h32qpk4_bf16","num_seqs": 6, "num_heads": 32, "num_queries_per_kv": 4, "head_size": 128, "block_size": 32, "max_query_len": 17, "max_ctx_len": 60,  "dtype": "bfloat16", "seed": 106, "query_lens": [17, 1, 16, 17, 2, 1], "ctx_lens": [45, 44, 31, 33, 16, 60], "use_alibi": true}
+  ]
+}

@@ -1,0 +1,38 @@
+task_id: "1019_mha_onekernel_bwd"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/mha_onekernel_bwd.py
+      sha256: 866d5ad20ea8f0a4dc83a646404890659e765c665eaed960ac7972e67a4e5220
+      role: device_kernel   # one-kernel 反向：_bwd_preprocess + bwd_kernel_causal/noncausal（dkdv、dq 两内层同 kernel）
+    - path: op_tests/triton_tests/test_mha.py
+      sha256: 92e59f0977cab90c27707f5426000cd482dc0dabdd1f71fa4b8a5b0042737beb
+      role: official_test   # 语义唯一权威：test_mha_backward 经 FUSED 参数覆盖 one-kernel（False）与 fused（True）两路
+    - path: LICENSE
+      sha256: 8443a38ca6f748e10eb63f07eb343ddca3b5a0a6bb40b0f621fcc54ea03deb3
+      role: header
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面取官方测试 FUSED=False 的 one-kernel 反向子集：稠密定长 bshd 布局
+    （非 varlen）、fp16/bf16、dropout=0、无 ALiBi/bias/fp8、MHA/GQA、
+    causal 与 non-causal（右下对齐）、seqlen_q 与 seqlen_k 大小关系任意
+    （含 causal 全掩码行）。o 与 lse 作为 kernel 输入给定——语义上等价于
+    官方测试 flash_attn_func 前向的 saved tensors（softmax_lse 为 [batch,
+    num_q_heads, seqlen_q] float32 自然对数 log-sum-exp，全掩码行 lse=0/o=0，
+    与 aiter 前向约定一致），delta 由给定 o 计算，与
+    flash_attn_onekernel_backward 的算子契约一致。真值依据
+    test_mha.py::test_mha_backward（FUSED=False 路径，attention_ref 上
+    torch.autograd.grad 对照，atol=rtol=1e-2）。留作后续题：varlen
+    （test_mha_backward_varlen）、dropout、fp8、mha_fused_bwd.py 的
+    fused 反向（FUSED=True，与本题平行的姊妹实现）。源码与官方测试无冲突。

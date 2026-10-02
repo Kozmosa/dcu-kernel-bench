@@ -1,0 +1,44 @@
+task_id: "1018_mha_fused_bwd"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/mha_fused_bwd.py
+      sha256: 565540d7c3336fdb6f92c89761b5aeadcdb18b5a23cc40be724609b305333b58
+      role: device_kernel   # 核心计算全部在源文件内（_bwd_preprocess / _bwd_kernel_dkdvdq_causal / _bwd_kernel_dkdvdq_noncausal / _bwd_dkdvdq_inner）
+    - path: op_tests/triton_tests/test_mha.py
+      sha256: 92e59f0977cab90c27707f5426000cd482dc0dabdd1f71fa4b8a5b0042737beb
+      role: official_test   # 语义唯一权威（test_mha_backward 经 FUSED 参数切换 fused/onekernel 两路反向）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：FlashAttention 反向 fused 路径（mha_set_use_fused_bwd_kernel
+    (True) → flash_attn_fused_backward → _bwd_kernel_dkdvdq_noncausal，
+    IS_VARLEN=False），稠密定长 bshd 布局、非因果、无 dropout、fp16/bf16 非
+    量化输入，MHA/GQA，sm_scale = head_dim^-0.5；输出 dQ/dK/dV 依序按 bshd
+    平铺拼接为单一一维张量（KernelBench 在线评测对 forward 返回值做
+    torch.allclose，要求单张量输出）。语义依据：官方测试 test_mha_backward 以
+    attention_ref（float32 upcast）+ torch.autograd.grad 为真值
+    （atol=rtol=1e-2），反向公式 dV=P^T·dO、dP=dO·V^T、dS=P∘(dP-delta)、
+    dQ=scale·dS·K、dK=scale·dS^T·Q 与源码 _bwd_dkdvdq_inner 一致（delta 由
+    _bwd_preprocess 重算 rowsum(dO∘O)，M 取前向 softmax_lse）。与官方测试的
+    差异处理：① test_mha_backward 对 FUSED+CAUSAL 显式 pytest.skip
+    ("FUSED+CAUSAL results in NaNs")——官方未验证 fused 因果路径，题面因此
+    排除 causal（源码 _bwd_kernel_dkdvdq_causal 保留在源文件内但不入题面，
+    因果反向由平行题 mha_onekernel_bwd 以 FUSED=False 路径覆盖）；② 官方
+    DROPOUT=0.2 用例的 dropout_mask 取自被测 kernel 自身 philox RNG 输出
+    （sd_mask >= 0），无法脱离 kernel 移植为可移植真值，题面排除 dropout；
+    ③ GQA 的 dk/dv 语义为组内 query 头梯度求和，与源码 noncausal kernel 的
+    for hqid in range(hkid*GROUP_SIZE, ...) 累加一致。其余变体（varlen/thd
+    布局反向（官方 test_mha_backward_varlen 覆盖）、fp8 反向 IS_FP8 分支、
+    dbias（源码直接 raise ValueError））留作后续题。题面不含官方用例的
+    BATCH=57/128 大批量（归入 perf case 规模族）。

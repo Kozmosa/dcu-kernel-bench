@@ -1,0 +1,84 @@
+id: "3007_moe_op_silu_fused"
+name: moe_silu_fused_grouped_gemm
+family: moe
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  SiLU-and-multiply 融合进 epilogue 的 MoE grouped GEMM（model_class /
+  KernelBench 兼容形态）：对每个 token 与其路由选中的专家，一次 kernel 完成
+  分组矩阵乘 A[m]·B[e]^T、（可选）路由权重加权与 SwiGLU 式激活
+  out = SiLU(x[:N]) * x[N:]，中间激活不落存。题面取源文件的 bf16/fp16 稠密
+  与 fp8 分块量化（w8a8, block_shape=[block_n, block_k]）两型，以及
+  mul_routed_weight 开/关两态——即官方测试 test_fused_moe 中 silu 融合分支
+  可达的全部参数组合（int8_w8a8 被官方显式 NotImplementedError 排除）。
+  调度三件套（sorted_token_ids / expert_ids / num_tokens_post_padded）由
+  上游对齐算子预计算后作为输入给出，本题不含对齐计算、不含路由打分、
+  不含 gptq/awq int4-int8 组量化变体（留作后续题）。题目文件自包含
+  （reference.py 即题目文件，逐字节镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 3007），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: A,            dtype: [float16, bfloat16, float8_e4m3fn], layout: contiguous, ndim: 2, shape: [M, K]}
+    - {name: B,            dtype: same_as_A,                         layout: contiguous, ndim: 3, shape: [E, 2N, K]}
+    - {name: A_scale,      dtype: float32,                           layout: contiguous, ndim: 2, shape: [M, K/block_k]}   # dense 模式为 (1,) 占位
+    - {name: B_scale,      dtype: float32,                           layout: contiguous, ndim: 3, shape: [E, 2N/block_n, K/block_k]}   # dense 模式为 (1,) 占位
+    - {name: topk_weights, dtype: [float16, bfloat16],               layout: contiguous, ndim: 2, shape: [M, top_k]}
+    - {name: topk_ids,     dtype: int64,                             layout: contiguous, ndim: 2, shape: [M, top_k]}
+    - {name: sorted_token_ids, dtype: int32,                         layout: contiguous, ndim: 1, shape: [M*top_k + E*(block_size_m-1)]}
+    - {name: expert_ids,   dtype: int32,                             layout: contiguous, ndim: 1, shape: [M*top_k + E]}
+    - {name: num_tokens_post_padded, dtype: int32,                   layout: contiguous, ndim: 1, shape: [1]}
+  outputs:
+    - {name: out, dtype: same_as_topk_weights, layout: contiguous, ndim: 2, shape: [M*top_k, N]}
+  init_inputs:
+    - {name: mul_routed_weight, dtype: bool, layout: scalar}   # epilogue 是否乘路由权重
+    - {name: quant, dtype: str, layout: scalar}                # dense / fp8_block
+    - {name: block_n, dtype: int64, layout: scalar}            # fp8_block 的 N 向块（缺省 128）
+    - {name: block_k, dtype: int64, layout: scalar}            # fp8_block 的 K 向块（缺省 128）
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；隐藏/perf case 由任务资产另行提供）
+  fixed_family: {M: 32, N: 256, K: 512, E: 8, top_k: 4, block_size_m: 16,
+                 quant: dense, mul_routed_weight: true, dtype: bfloat16,
+                 len_sorted_token_ids: 248, len_expert_ids: 136, out_shape: [128, 256]}
+  dynamic: true
+  invariants:
+    - "M/K/E/top_k/block_size_m >= 1；2N 为偶数（B 输出维为 chunked gate|up 布局）；top_k <= E"
+    - "topk_ids 元素 ∈ [0, E) 且行内互不相同；topk_weights 同形状、恒正、无归一约束"
+    - "len(sorted_token_ids) = M*top_k + E*(block_size_m-1)，填充哨兵值 = M*top_k；len(expert_ids) = M*top_k + E"
+    - "num_tokens_post_padded[0] = sum_e ceil(cnt_e/block_size_m)*block_size_m；调度三件套与 topk_ids 一致（由其派生）"
+    - "quant=fp8_block 时 A/B 为 e4m3 码字且 K % block_k == 0、2N % block_n == 0；quant=dense 时 A_scale/B_scale 为 (1,) 占位被忽略"
+    - "M*top_k 个输出行行有主（每行恰被一个专家写出），专家间无累加归约"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较（fp8 码字在 reference 中先精确反量化再 fp32 累加）"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。输出是 K 维（数百至数千）fp32
+    累加链上的 SwiGLU 值（官方同量级输入下 |out| ~ O(1)），2e-2/2e-2 覆盖
+    分块累加顺序差与 fp16/bf16 舍入链的偏差（官方测试对 silu 融合分支用
+    atol=rtol=1e-1，本验收更严）。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）；标准列表中 attention/
+# softmax 类捷径与本 grouped GEMM 算子无关，按题裁剪，保留 GEMM/silu 捷径
+# 并加 fp8 GEMM 与激活的 ATen 捷径（它们一步即给出核心结果）
+forbidden:
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch._scaled_mm
+  - torch.nn.functional.silu
+  - torch.SiLU
+  - torch.sigmoid
+
+# 维护者溯源与准入证据见 benchmark/sources/3007_moe_op_silu_fused.yaml

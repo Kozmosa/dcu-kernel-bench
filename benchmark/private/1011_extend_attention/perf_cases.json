@@ -1,0 +1,9 @@
+{
+  "task_id": "1011_extend_attention",
+  "cases": [
+    {"name": "perf_b2_h16kv1_prefix4096_ext1024_f16",  "num_seqs": 2,  "num_q_heads": 16, "num_kv_heads": 1, "head_dim_q": 192, "head_dim_v": 128, "max_prefix_len": 4096, "max_extend_len": 1024, "dtype": "float16",  "seed": 211, "causal": true},
+    {"name": "perf_b16_h16kv1_prefix556_ext32_f16",    "num_seqs": 16, "num_q_heads": 16, "num_kv_heads": 1, "head_dim_q": 192, "head_dim_v": 128, "max_prefix_len": 556,  "max_extend_len": 32,   "dtype": "float16",  "seed": 212, "causal": true},
+    {"name": "perf_b64_h16kv2_prefix556_ext3_bf16",    "num_seqs": 64, "num_q_heads": 16, "num_kv_heads": 2, "head_dim_q": 192, "head_dim_v": 128, "max_prefix_len": 556,  "max_extend_len": 3,    "dtype": "bfloat16", "seed": 213, "causal": true}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

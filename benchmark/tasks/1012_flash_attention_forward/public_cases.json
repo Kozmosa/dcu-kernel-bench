@@ -1,0 +1,16 @@
+{
+  "task_id": "1012_flash_attention_forward",
+  "note": "model_class 形态：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。",
+  "shape_family": {
+    "num_seqs": 4,
+    "num_kv_heads": 4,
+    "query_group_size": 4,
+    "num_q_heads": 16,
+    "head_dim": 64,
+    "max_seq_len_q": 256,
+    "max_seq_len_k": 512,
+    "seq_lens": "随机（全局 RNG）：L_q ~ U[1,256]，L_k ~ max(U[1,512], L_q)，恒满足 0 < L_q <= L_k",
+    "dtype": "float16",
+    "causal": 1
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "task_id": "4001_batched_gemm_a8w8",
+  "status": "placeholder",
+  "note": "在 DCU 真机上用 environment.yaml 锁定环境测量 aiter batched_gemm_a8w8（Triton 路径，调优配置取 configs/gemm/<dev>-BATCHED_GEMM-A8W8.json）基线后填写。",
+  "environment": null,
+  "baselines": []
+}

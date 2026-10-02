@@ -1,0 +1,11 @@
+{
+  "task_id": "3003_moe_op",
+  "cases": [
+    {"name": "hidden_min_m1_topk1",       "num_tokens": 1,   "num_experts": 2,  "top_k": 1, "in_features": 128, "out_features": 64,  "block_m": 64, "dtype": "float16",  "seed": 101},
+    {"name": "hidden_nonpow2_bf16",       "num_tokens": 37,  "num_experts": 8,  "top_k": 3, "in_features": 320, "out_features": 192, "block_m": 64, "dtype": "bfloat16", "seed": 102},
+    {"name": "hidden_sparse_experts",     "num_tokens": 4,   "num_experts": 32, "top_k": 2, "in_features": 256, "out_features": 128, "block_m": 64, "dtype": "float16",  "seed": 103},
+    {"name": "hidden_all_experts_topk8",  "num_tokens": 128, "num_experts": 8,  "top_k": 8, "in_features": 256, "out_features": 128, "block_m": 64, "dtype": "float16",  "seed": 104},
+    {"name": "hidden_standard_bf16",      "num_tokens": 64,  "num_experts": 16, "top_k": 4, "in_features": 512, "out_features": 256, "block_m": 64, "dtype": "bfloat16", "seed": 105},
+    {"name": "hidden_wide_e64_topk6",     "num_tokens": 96,  "num_experts": 64, "top_k": 6, "in_features": 384, "out_features": 192, "block_m": 64, "dtype": "float16",  "seed": 106}
+  ]
+}

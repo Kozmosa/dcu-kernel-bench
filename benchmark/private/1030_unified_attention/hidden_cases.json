@@ -1,0 +1,11 @@
+{
+  "task_id": "1030_unified_attention",
+  "cases": [
+    {"name": "hidden_pure_decode_sw_f16",      "num_seqs": 3,  "num_q_heads": 8,  "num_kv_heads": 8, "head_size": 128, "block_size": 16, "max_seq_len": 1024, "sliding_window": 64,  "softcap": 0.0,  "use_sinks": true,  "dtype": "float16",  "seed": 101, "query_lens": [1, 1, 1],           "kv_lens": [1024, 65, 1]},
+    {"name": "hidden_full_prefill_softcap_bf16", "num_seqs": 3, "num_q_heads": 8, "num_kv_heads": 2, "head_size": 128, "block_size": 16, "max_seq_len": 512,  "sliding_window": 0,   "softcap": 50.0, "use_sinks": true,  "dtype": "bfloat16", "seed": 102, "query_lens": [37, 64, 129],        "kv_lens": [37, 64, 129]},
+    {"name": "hidden_nonpow2_head_nosink_f16", "num_seqs": 4,  "num_q_heads": 16, "num_kv_heads": 4, "head_size": 96,  "block_size": 32, "max_seq_len": 300,  "sliding_window": 32,  "softcap": 0.0,  "use_sinks": false, "dtype": "float16",  "seed": 103, "query_lens": [1, 33, 5, 64]},
+    {"name": "hidden_window_gt_kv_bf16",       "num_seqs": 2,  "num_q_heads": 8,  "num_kv_heads": 2, "head_size": 128, "block_size": 16, "max_seq_len": 256,  "sliding_window": 512, "softcap": 30.0, "use_sinks": true,  "dtype": "bfloat16", "seed": 104, "query_lens": [1, 100],            "kv_lens": [256, 200]},
+    {"name": "hidden_mha_block8_mixed_f16",    "num_seqs": 6,  "num_q_heads": 4,  "num_kv_heads": 4, "head_size": 80,  "block_size": 8,  "max_seq_len": 129,  "sliding_window": 0,   "softcap": 0.0,  "use_sinks": false, "dtype": "float16",  "seed": 105, "query_lens": [1, 17, 1, 33, 1, 80]},
+    {"name": "hidden_block_boundary_bf16",     "num_seqs": 6,  "num_q_heads": 8,  "num_kv_heads": 4, "head_size": 128, "block_size": 16, "max_seq_len": 512,  "sliding_window": 128, "softcap": 50.0, "use_sinks": true,  "dtype": "bfloat16", "seed": 106, "query_lens": [1, 1, 2, 17, 5, 1],  "kv_lens": [16, 17, 31, 32, 33, 512]}
+  ]
+}
