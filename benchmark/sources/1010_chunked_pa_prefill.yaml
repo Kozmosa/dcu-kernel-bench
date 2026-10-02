@@ -1,0 +1,41 @@
+task_id: "1010_chunked_pa_prefill"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/chunked_pa_prefill.py
+      sha256: eb64f05270eca4385ab91c83ca837143f2f3900df732ccc29c5f284d020886ca
+      role: device_kernel   # _kernel_paged_attention_2d（decode 路径）+ chunked_prefill_paged_decode wrapper
+    - path: op_tests/triton_tests/test_chunked_pa_prefill.py
+      sha256: 4f1b79ced5816c74415d214052cc75e60d44d41f461e73460f6b5f5a401bab16
+      role: official_test   # 语义唯一权威：compute_golden_attention 逐 token 因果 softmax 真值
+
+admission:
+  derived_from: 无（独立准入；与 1001/1002 同属分页 KV attention 家族但语义不重叠）
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面变体子集：chunked_prefill_paged_decode 的混合批次语义——query_len==1
+    （decode，_kernel_paged_attention_2d 全序列在线 softmax）与 query_len>1
+    （chunked prefill，超长前缀段语义由 wrapper 转交 context_attention_fwd，
+    题面统一实现为逐 token 因果 softmax）混于同一批次；MHA/GQA
+    （query_group_size ∈ {1,2,4,8,16}，覆盖官方 NUM_QUERIES_PER_KV 全档）；
+    K 通道打包分页布局（x=8，head_size ∈ {24,64,96,128} 含非 2 次幂）；
+    非量化 KV（fp16/bf16）；无 ALiBi、无滑窗（固定因果掩码）。
+    语义依据：官方测试以 compute_golden_attention 为真值（kv_cache_dtype=auto
+    时 atol 1e-4 / rtol 1e-2），输入构造 input_helper 保证：块表覆盖整序列、
+    新 token K/V 同时以 key/value 与缓存双路给出且一致、块池含未引用垃圾块。
+    与官方测试的冲突处理：源码 chunked_prefill_paged_decode / paged_attention_2d
+    的缺省 sm_scale=1/sqrt(query.shape[1])（即 1/sqrt(num_q_heads)，官方 golden
+    与标准 attention 定义均为 1/sqrt(head_size)，判定为继承自上游的历史笔误）；
+    以测试为准——题面 Model 以 head_size 初始化，scale 缺省 1/sqrt(head_size)。
+    其余变体留作后续题：fp8e4m3/fp8e5m2 量化 KV（k_scale/v_scale 反量化路径）、
+    滑窗（SLIDING_WINDOW>0，官方测试已注释停用）、ALiBi 偏置（官方测试已注释
+    停用）。

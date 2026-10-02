@@ -1,0 +1,11 @@
+{
+  "task_id": "1010_chunked_pa_prefill",
+  "cases": [
+    {"name": "hidden_all_decode_h8qpk1_f16",  "num_seqs": 4, "num_heads": 8,  "num_queries_per_kv": 1,  "head_size": 96,  "block_size": 16, "max_query_len": 1,  "max_ctx_len": 64,  "dtype": "float16",  "seed": 101, "query_lens": [1, 1, 1, 1],  "ctx_lens": [1, 15, 16, 64]},
+    {"name": "hidden_zero_ctx_h16qpk8_f16",   "num_seqs": 3, "num_heads": 16, "num_queries_per_kv": 8,  "head_size": 64,  "block_size": 32, "max_query_len": 64, "max_ctx_len": 1,   "dtype": "float16",  "seed": 102, "query_lens": [1, 5, 33],     "ctx_lens": [0, 0, 0]},
+    {"name": "hidden_head24_h32qpk4_f16",     "num_seqs": 4, "num_heads": 32, "num_queries_per_kv": 4,  "head_size": 24,  "block_size": 32, "max_query_len": 48, "max_ctx_len": 80,  "dtype": "float16",  "seed": 103},
+    {"name": "hidden_block48_h16qpk2_bf16",   "num_seqs": 4, "num_heads": 16, "num_queries_per_kv": 2,  "head_size": 128, "block_size": 48, "max_query_len": 40, "max_ctx_len": 96,  "dtype": "bfloat16", "seed": 104, "query_lens": [1, 40, 39, 1],  "ctx_lens": [0, 48, 47, 96]},
+    {"name": "hidden_gqa16_h16kv1_f16",       "num_seqs": 5, "num_heads": 16, "num_queries_per_kv": 16, "head_size": 128, "block_size": 64, "max_query_len": 32, "max_ctx_len": 128, "dtype": "float16",  "seed": 105},
+    {"name": "hidden_tail_block_h32qpk4_bf16","num_seqs": 6, "num_heads": 32, "num_queries_per_kv": 4,  "head_size": 128, "block_size": 32, "max_query_len": 17, "max_ctx_len": 60,  "dtype": "bfloat16", "seed": 106, "query_lens": [17, 1, 16, 17, 2, 1], "ctx_lens": [45, 44, 30, 0, 16, 60]}
+  ]
+}

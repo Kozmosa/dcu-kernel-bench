@@ -72,7 +72,22 @@ operators:
     difficulty: medium
     note: "融合 Norm+RoPE，aiter 强项"
 
-  # ---- 2026-10-02 批量准入：aiter Triton model_class 批次（42 题，工作流构建+独立校验） ----
+  # ---- 2026-10-02 批量准入：aiter Triton model_class 批次（44 题，工作流构建+独立校验） ----
+  - id: "1010_chunked_pa_prefill"
+    name: chunked_pa_prefill
+    family: attention
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/chunked_pa_prefill.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "chunked_pa_prefill.py: _kernel_paged_attention_2d 单 kernel（分页 KV 上 chunked prefill/decode 混合批次的在线 softmax attention，逐 chunk 多 token query，纯 Triton）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：混合批次语义——query_len==1（decode，全序列在线 softmax）与 query_len>1（chunked prefill，超预算长前缀段按 context attention 等价语义展开）。审核记录见 benchmark/sources/1010_chunked_pa_prefill.yaml"
+
   - id: "1011_extend_attention"
     name: extend_attention
     family: attention
@@ -642,6 +657,21 @@ operators:
     status: admitted
     difficulty: hard
     note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：gemm_a16w4 主入口，输入即 AWQ int4 打包布局（qweight [N,K//2]/qzeros [K//G,N//2] int8 低半字节=偶数下标、scales [K//G,N] 与激活 fp16），dp/split-K/stream-K 调度不限；独立反量化入口、split-K 归约融合与 TP allreduce 融合变体不并入。审核记录见 benchmark/sources/4008_gemm_a16w4.yaml"
+
+  - id: "4009_gemm_a8w8"
+    name: gemm_a8w8
+    family: quant_gemm
+    source:
+      repo: OpenDAS/aiter
+      commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+      path: "aiter/ops/triton/gemm_a8w8.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "gemm_a8w8.py: _gemm_a8w8_kernel 单 kernel（2D 8bit 激活×权重 GEMM，per-token 与 per-channel 一维 scale 外乘反量化、可选 fp32 bias、float32 累加 tl.dot 全在 kernel 内，含 XCD remap，纯 Triton）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：2D（无 batch 维）gemm_a8w8，in_dtype 覆盖 fp8e4m3/fp8e5m2/int8，out_dtype 以 bfloat16 为主另设 float16 变体 case，bias 可选（float32，TN 布局）；语义依据官方测试 run_torch（fp32 GEMM→外乘 scale→fp32 域加 bias→cast 输出 dtype）。审核记录见 benchmark/sources/4009_gemm_a8w8.yaml"
 
   - id: "4010_gemm_a8w8_blockscale"
     name: gemm_a8w8_blockscale

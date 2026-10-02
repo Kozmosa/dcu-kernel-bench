@@ -1,0 +1,65 @@
+id: "1010_chunked_pa_prefill"
+name: chunked_pa_prefill
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  chunked prefill / decode 混合批次上的分页 KV attention（model_class 自包含
+  题目文件）：批次内 query_len==1（decode）与 query_len>1（chunked prefill）
+  的序列混排，前缀 K/V 存于分页缓存（K 通道打包布局 x=8），本轮新 token 的
+  K/V 另以 key/value 显式给出，逐 token 因果掩码 + 在线 softmax，float32
+  中间累加。与 1001/1002（单 token decode、K 逐 token 布局）为同家族不同
+  题：本题多 token chunk、前缀/新段双 K/V 来源、K 通道打包布局。
+  starter 由框架 loader 从 Model 自动生成 ModelNew scaffold，本任务包不
+  单独提供 starter。
+
+io:
+  inputs:
+    - {name: query,           dtype: [float16, bfloat16], layout: contiguous, ndim: 3, shape: [num_tokens, num_heads, head_size]}
+    - {name: key,             dtype: same_as_query,      layout: contiguous, ndim: 3, shape: [num_tokens, num_kv_heads, head_size]}
+    - {name: value,           dtype: same_as_query,      layout: contiguous, ndim: 3, shape: [num_tokens, num_kv_heads, head_size]}
+    - {name: key_cache,       dtype: same_as_query,      layout: contiguous, ndim: 5, shape: [num_blocks, num_kv_heads, head_size/x, block_size, x]}   # K 通道打包，x=8
+    - {name: value_cache,     dtype: same_as_query,      layout: contiguous, ndim: 4, shape: [num_blocks, num_kv_heads, head_size, block_size]}
+    - {name: block_tables,    dtype: int32,              layout: contiguous, ndim: 2, shape: [num_seqs, max_blocks_per_seq]}
+    - {name: query_start_loc, dtype: int32,              layout: contiguous, ndim: 1, shape: [num_seqs+1]}   # query_len 前缀和，首元素 0
+    - {name: seq_lens,        dtype: int32,              layout: contiguous, ndim: 1, shape: [num_seqs]}
+  outputs:
+    - {name: out, dtype: same_as_query, layout: contiguous, ndim: 3, shape: [num_tokens, num_heads, head_size]}
+  init_inputs:
+    - {name: head_size, dtype: int64, layout: scalar}   # scale 缺省 1/sqrt(head_size)
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域 shape 约束见 invariants）
+  fixed_family: {num_seqs: 8, num_heads: 32, num_queries_per_kv: 4, num_kv_heads: 8, head_size: 128, block_size: 32, x: 8, max_query_len: 32, max_ctx_len: 64}
+  dynamic: true
+  invariants:
+    - "num_heads == num_kv_heads * num_queries_per_kv"
+    - "query_start_loc 为各序列 query_len 的前缀和（首元素 0），num_tokens = query_start_loc[-1]"
+    - "seq_lens[b] == ctx_len[b] + query_len[b] >= 1；block_tables[b] 覆盖整个 seq_lens[b]"
+    - "K 通道打包：key_cache 第 5 维 x=8，head_size 为 8 的倍数；key/value 给出与缓存一致的本轮新 token K/V"
+    - "物理块池 num_blocks 可大于实际使用块数；未引用块与有效长度之后槽位内容不定（垃圾幅值可达 ±10）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - scaled_dot_product_attention
+  - sdpa
+  - flash_attn
+  - aiter
+  - torch.matmul
+  - torch.bmm
+  - torch.einsum
+  - torch.softmax
+
+# 溯源信息（上游仓库 / commit / 文件 sha256）不进题面包：维护者准入记录见
+# benchmark/sources/1010_chunked_pa_prefill.yaml。

@@ -1,0 +1,9 @@
+{
+  "task_id": "4009_gemm_a8w8",
+  "cases": [
+    {"name": "perf_2048_2048_2048_fp8e4m3_bf16", "m": 2048, "n": 2048, "k": 2048, "in_dtype": "fp8e4m3", "out_dtype": "bfloat16", "use_bias": true, "seed": 201},
+    {"name": "perf_4096_1280_8192_int8_bf16",    "m": 4096, "n": 1280, "k": 8192, "in_dtype": "int8",    "out_dtype": "bfloat16", "use_bias": true, "seed": 202},
+    {"name": "perf_8192_8192_1024_fp8e5m2_bf16", "m": 8192, "n": 8192, "k": 1024, "in_dtype": "fp8e5m2", "out_dtype": "bfloat16", "use_bias": true, "seed": 203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

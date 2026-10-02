@@ -1,4 +1,4 @@
-"""2026-10-02 aiter 批量准入批次（42 题）的资产一致性回归测试。
+"""2026-10-02 aiter 批量准入批次（44 题）的资产一致性回归测试。
 
 一套参数化代码覆盖本批全部任务，代替逐题手写样板：
 - reference.py 语法完整（ast.parse，不触发任何模型构建）
@@ -22,8 +22,9 @@ from conftest import REPO_ROOT, TASKS
 PRIV = REPO_ROOT / "benchmark" / "private"
 COMPAT_ROOT = REPO_ROOT / "benchmark" / "kernelbench_compat"
 
-# 2026-10-02 批量准入的 42 题（与 operator_catalog.yaml 同批条目一一对应）
+# 2026-10-02 批量准入的 44 题（与 operator_catalog.yaml 同批条目一一对应）
 BATCH_TASKS = [
+    "1010_chunked_pa_prefill",
     "1011_extend_attention",
     "1012_flash_attention_forward",
     "1014_hstu_attention",
@@ -62,6 +63,7 @@ BATCH_TASKS = [
     "4006_gemm_a16w16",
     "4007_gemm_a16w16_atomic",
     "4008_gemm_a16w4",
+    "4009_gemm_a8w8",
     "4010_gemm_a8w8_blockscale",
     "4016_gemm_w8a8",
     "4017_group_quant_int8",

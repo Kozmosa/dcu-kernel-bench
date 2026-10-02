@@ -1,0 +1,9 @@
+{
+  "task_id": "1010_chunked_pa_prefill",
+  "cases": [
+    {"name": "perf_chunk8_h32kv8_d128_bs32_q512c1536_f16",  "num_seqs": 8,  "num_heads": 32, "num_queries_per_kv": 4, "head_size": 128, "block_size": 32, "max_query_len": 512,  "max_ctx_len": 1536, "dtype": "float16",  "seed": 201, "query_lens": [512],  "ctx_lens": [1536]},
+    {"name": "perf_mha4_h32kv32_d128_bs32_q512c512_f16",   "num_seqs": 4,  "num_heads": 32, "num_queries_per_kv": 1, "head_size": 128, "block_size": 32, "max_query_len": 512,  "max_ctx_len": 512,  "dtype": "float16",  "seed": 202},
+    {"name": "perf_gqa32_h16kv2_d128_bs64_q256c2048_bf16", "num_seqs": 32, "num_heads": 16, "num_queries_per_kv": 8, "head_size": 128, "block_size": 64, "max_query_len": 256,  "max_ctx_len": 2048, "dtype": "bfloat16", "seed": 203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

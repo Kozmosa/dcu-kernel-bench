@@ -1,0 +1,11 @@
+{
+  "task_id": "4009_gemm_a8w8",
+  "cases": [
+    {"name": "hidden_min_1x1x1_int8",       "m": 1, "n": 1,    "k": 1,    "in_dtype": "int8",    "out_dtype": "bfloat16", "use_bias": true,  "seed": 101},
+    {"name": "hidden_nonpow2_mn_k_int8",    "m": 33, "n": 65,  "k": 130,  "in_dtype": "int8",    "out_dtype": "bfloat16", "use_bias": true,  "seed": 102},
+    {"name": "hidden_k_nonmultiple_e5m2",   "m": 64, "n": 128, "k": 4160, "in_dtype": "fp8e5m2", "out_dtype": "bfloat16", "use_bias": true,  "seed": 103},
+    {"name": "hidden_e4m3_nobias_fp16out",  "m": 96, "n": 64,  "k": 768,  "in_dtype": "fp8e4m3", "out_dtype": "float16",  "use_bias": false, "seed": 104},
+    {"name": "hidden_skinny_m1_e4m3",       "m": 1, "n": 1280, "k": 512,  "in_dtype": "fp8e4m3", "out_dtype": "bfloat16", "use_bias": true,  "seed": 105},
+    {"name": "hidden_int8_nobias_bf16out",  "m": 128, "n": 320, "k": 660, "in_dtype": "int8",    "out_dtype": "bfloat16", "use_bias": false, "seed": 106}
+  ]
+}

@@ -1,0 +1,70 @@
+id: "4009_gemm_a8w8"
+name: gemm_a8w8
+family: quant_gemm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  2D 8bit 量化 GEMM：int8 / fp8（e4m3、e5m2）激活 (M,K) × 同 dtype 权重
+  (N,K)（行主存放，转置 GEMM 语义），float32 累加后外乘 per-token scale
+  (M,1) 与 per-channel scale (1,N) 反量化，可选加 float32 bias (1,N)；
+  输出 (M,N)，dtype 为 bfloat16/float16。本题为自包含的 KernelBench 题目
+  文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 4009），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,       dtype: [int8, float8_e4m3fn, float8_e5m2], layout: contiguous, ndim: 2, shape: [M, K]}
+    - {name: w,       dtype: same_as_x,  layout: contiguous, ndim: 2, shape: [N, K]}
+    - {name: x_scale, dtype: float32,    layout: contiguous, ndim: 2, shape: [M, 1]}
+    - {name: w_scale, dtype: float32,    layout: contiguous, ndim: 2, shape: [1, N]}
+    - {name: bias,    dtype: float32,    layout: contiguous, ndim: 2, shape: [1, N]}   # use_bias=False 时为占位张量，forward 忽略
+  outputs:
+    - {name: out, dtype: [bfloat16, float16], layout: contiguous, ndim: 2, shape: [M, N]}
+  init_inputs:
+    - {name: in_dtype,  dtype: str,  layout: scalar}   # "fp8e4m3" | "fp8e5m2" | "int8"
+    - {name: out_dtype, dtype: str,  layout: scalar}   # "bfloat16" | "float16"
+    - {name: use_bias,  dtype: bool, layout: scalar}
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；全域约束见下）
+  fixed_family: {M: 256, N: 512, K: 1024, in_dtype: "fp8e4m3", out_dtype: "bfloat16", use_bias: true}
+  dynamic: true
+  invariants:
+    - "x.shape[1] == w.shape[1]（K 维一致）"
+    - "x_scale 形状 (M, 1)、w_scale 形状 (1, N)，均为 float32"
+    - "bias 形状 (1, N)，float32；use_bias=False 时可被忽略"
+    - "M/N/K >= 1，允许非 2 次幂与 K 不整除 tile（尾部由掩码补零）"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 GEMM 累加、反量化与加 bias 在 float32 域完成后 cast 输出 dtype 再比较"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。官方测试用 triton.testing.
+    assert_close(atol=0.01, rtol=1e-2)；本集合统一 2.0e-2 覆盖 bf16/fp16
+    输出舍入（fp32 累加误差可忽略，误差主要来自输出 dtype 舍入），无需更宽。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入
+    与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线
+    结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.addmm
+  - torch.einsum
+  - torch._int_mm
+  - torch._scaled_mm
+  - F.linear
+  - functional.linear
+  - aiter
+
+# 溯源信息（repo / commit / path / sha256）统一记录在 sources/4009_gemm_a8w8.yaml，
+# 题面三文件不放溯源词，完整禁用清单见上方 forbidden。

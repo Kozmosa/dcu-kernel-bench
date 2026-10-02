@@ -1,0 +1,33 @@
+task_id: "4009_gemm_a8w8"
+source:
+  repo: OpenDAS/aiter
+  remote: https://developer.sourcefind.cn/codes/OpenDAS/aiter.git
+  commit: c39fff8c77df4e80617649e92fa3c2615f2c43d1
+  license: LICENSE (MIT)
+  files:
+    - path: aiter/ops/triton/gemm_a8w8.py
+      sha256: 1ad4f10aad9ca8b8021f29e068080510f81a75bf5f0929ac73c20978d239beac
+      role: device_kernel   # _gemm_a8w8_kernel：tl.dot 主计算 + scale 反量化 + bias 融合
+    - path: op_tests/triton_tests/test_gemm_a8w8.py
+      sha256: 7bef50e5a4195f1eb205ceea71c69fc5a656afd616cb4b855db22775e8285e6c
+      role: official_test   # 语义唯一权威（run_torch + generate_gemm_a8w8_inputs）
+
+admission:
+  core_compute_in_source: true
+  calls_closed_libs: false
+  builds_standalone: true
+  has_reference: true
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-02"
+  note: >
+    题面子集：2D（无 batch 维）gemm_a8w8，in_dtype 覆盖官方测试全部三种
+    （fp8e4m3 / fp8e5m2 / int8），out_dtype 以 bfloat16 为主、另设 float16
+    变体 case，bias 可选（float32，与官方测试生成器一致），TN 布局
+    （x 行主 (M,K)、w 行主 (N,K)）。语义依据官方测试 run_torch：fp32 GEMM →
+    外乘 scale → fp32 域加 bias → cast 输出 dtype；kernel 的融合顺序
+    （scale 后先 cast 到 bias dtype 再相加）因 bias 恒为 float32 而与之
+    等价，无冲突。官方测试的 output=True/False（y 预分配输出缓冲）不影响
+    返回值语义，不作为题面变体；官方超大 shape（至 8192^3）取规模适中子集
+    入 perf。batch 维变体为 4001_batched_gemm_a8w8，不与本题合并；
+    128x128 分块 scale 的 int8 版（gemm_w8a8）语义不同，留作后续题。
