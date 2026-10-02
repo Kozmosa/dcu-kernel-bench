@@ -62,7 +62,10 @@ def load_init_names(task_dir: Path) -> list:
 
 def resolve_init_args(init_names: list, case: dict) -> dict:
     """按 task.yaml init_inputs 字段名从 case 取 Model/ModelNew 构造参数；
-    无交集时回退 head_size（1002 系历史契约）。"""
+    未声明 init_inputs（无超参任务）时无参构造，有交集缺失时回退 head_size
+    （1002 系历史契约）。"""
+    if not init_names:
+        return {}
     kwargs = {n: case[n] for n in init_names if n in case}
     if not kwargs and "head_size" in case:
         kwargs = {"head_size": case["head_size"]}
