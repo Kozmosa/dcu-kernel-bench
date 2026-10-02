@@ -53,6 +53,40 @@ def load_tolerances(task_dir: Path) -> dict:
     return spec["tolerance"]
 
 
+def load_init_names(task_dir: Path) -> list:
+    """io.init_inputs 的字段名列表（Model 构造参数名）；未声明时为空。"""
+    spec = yaml.safe_load((task_dir / "task.yaml").read_text(encoding="utf-8"))
+    io = spec.get("io") or {}
+    return [e["name"] for e in (io.get("init_inputs") or []) if isinstance(e, dict) and "name" in e]
+
+
+def resolve_init_args(init_names: list, case: dict) -> dict:
+    """按 task.yaml init_inputs 字段名从 case 取 Model/ModelNew 构造参数；
+    无交集时回退 head_size（1002 系历史契约）。"""
+    kwargs = {n: case[n] for n in init_names if n in case}
+    if not kwargs and "head_size" in case:
+        kwargs = {"head_size": case["head_size"]}
+    if not kwargs:
+        raise KeyError(
+            f"case {case.get('name')} 与 io.init_inputs({init_names}) 无公共字段，无法构造 Model"
+        )
+    return kwargs
+
+
+def resolve_tolerance_limit(tol: dict, case_dtype: str, out_dtype) -> dict:
+    """tolerance 按输出 dtype 组织：优先输出 dtype 键（整数量化输出即 atol 0 块），
+    其次 case 的输入 dtype 键，最后任一含 atol 的块。"""
+    out_key = str(out_dtype).replace("torch.", "")
+    for key in (out_key, case_dtype):
+        limit = tol.get(key)
+        if isinstance(limit, dict) and "atol" in limit:
+            return limit
+    for limit in tol.values():
+        if isinstance(limit, dict) and "atol" in limit:
+            return limit
+    raise KeyError(f"task.yaml tolerance 缺少数值条目（尝试过 {out_key}/{case_dtype}）")
+
+
 def stage_static(task_dir: Path, submission: Path) -> dict:
     r = subprocess.run(
         [sys.executable, str(AUDIT), str(task_dir), str(submission)],
@@ -67,19 +101,19 @@ def stage_correctness(task_dir: Path, gen_task_dir: Path, submission: Path, case
     gen_mod = load_module(gen_task_dir / "reference.py", "audit_case_generator")
 
     device = torch.device("cuda")
+    init_names = load_init_names(task_dir)
     failures = []
     for case in cases:
-        fields = {k: v for k, v in case.items() if k not in ("name",)}
-        seq_lens = fields.pop("seq_lens", None)
-        inputs = gen_mod.make_inputs(seq_lens=seq_lens, **fields)
+        fields = {k: v for k, v in case.items() if k != "name"}
+        inputs = gen_mod.make_inputs(**fields)
         inputs = [t.to(device) for t in inputs]
-        query = inputs[0]
 
-        expected = ref_mod.Model(case["head_size"]).to(device)(*inputs)
-        actual = cand_mod.ModelNew(case["head_size"]).to(device)(*inputs)
+        init_kwargs = resolve_init_args(init_names, case)
+        expected = ref_mod.Model(**init_kwargs).to(device)(*inputs)
+        actual = cand_mod.ModelNew(**init_kwargs).to(device)(*inputs)
         torch.cuda.synchronize()
 
-        limit = tol[{"float16": "float16", "bfloat16": "bfloat16"}[case["dtype"]]]
+        limit = resolve_tolerance_limit(tol, str(case.get("dtype", "")), expected.dtype)
         ok = (
             actual.shape == expected.shape
             and actual.dtype == expected.dtype
@@ -95,13 +129,13 @@ def stage_perf(task_dir: Path, gen_task_dir: Path, submission: Path, cases: list
     cand_mod = load_module(submission, "audit_perf_candidate")
     gen_mod = load_module(gen_task_dir / "reference.py", "audit_perf_generator")
     device = torch.device("cuda")
+    init_names = load_init_names(task_dir)
 
     results = []
     for case in cases:
-        fields = {k: v for k, v in case.items() if k not in ("name",)}
-        seq_lens = fields.pop("seq_lens", None)
-        inputs = [t.to(device) for t in gen_mod.make_inputs(seq_lens=seq_lens, **fields)]
-        model = cand_mod.ModelNew(case["head_size"]).to(device)
+        fields = {k: v for k, v in case.items() if k != "name"}
+        inputs = [t.to(device) for t in gen_mod.make_inputs(**fields)]
+        model = cand_mod.ModelNew(**resolve_init_args(init_names, case)).to(device)
 
         for _ in range(5):
             model(*inputs)
