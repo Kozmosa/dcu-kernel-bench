@@ -59,6 +59,34 @@
 
 真机（BW / gfx936，DTK 26.04）已验证（2026-10-01）：测试 26/26 绿；原生路径 quick 冒烟全部节点 correct（mock provider + 真评测器 + cuda_event 计时）；**Triton 3.3.0+das.opt1.dtk2604.torch290 已安装并验证 JIT**（vecadd + tl.dot fp16 矩阵乘）；**首个真 LLM 端到端完成**（GLM-5.3-flash 经 CC Switch 反向隧道，1002 任务 speedup 17.35x，含 debug 修复环路），访问与部署细节见 `../notes/曙光环境访问.md`。
 
+## 本分支相对上游 main 的增量（`main-merge`）
+
+基座 = `origin/main` @ `5094481`（47 道题，四段号段 1xxx/2xxx/3xxx/4xxx）。本分支在其上**以加工具、测试与基线适配器为主**；对上游任务定义的改动只有一处必要的可跑性修复（`1017_mha` / `1019_mha_onekernel_bwd` 的单张量打包，见下文"上游缺陷"）：
+
+| 增量 | 作用 |
+|---|---|
+| `benchmark/tools/dcukb.py` + `scan_candidates.json` | 算子收集流水线：`scan`（AST 扫 aiter 找候选并裁决）→ `admit`（sha256 证据）→ `new`（任务骨架）→ `mirror`（镜像一致性，`--check` 供 CI）。零第三方依赖 |
+| `benchmark/evaluator/record_baseline.py` | aiter 官方基线采集器：逐 perf case 计时，且**先与 reference 按 task.yaml 容差比对通过才记录**（避免记下错误基线） |
+| `benchmark/evaluator/audit_model_class.py`（替换上游版本） | 上游版本的**功能超集**：保留 `io.init_inputs` 按名取参 + 容差按输出 dtype，另加 ①逐参数用 `get_init_inputs()` 补齐 ②`io.init_inputs: []` 时无参构造 ③关键字绑定（`case_init_kwargs`），杜绝稀疏构造参数的位置错位 |
+| `tests/test_compat_mirrors.py` | 通用镜像一致性：按 difficulty→level 映射覆盖**全部** model_class 题，并检查"错 level 的残留镜像" |
+| `tests/test_reference_case_contract.py` | 通用 case 契约：逐 case 生成输入→构造 Model→跑 forward→校验单个 Tensor/数值有限/容差可解析；另含 `io.init_inputs` 声明与 Model 签名前缀一致、case 字段必须生效 |
+| `benchmark/private/<id>/aiter_impl.py`（44 个） | aiter 官方实现适配器，使基线可采集。契约 `run(inputs, init_kwargs: dict, device)`；按号段 1xxx 18 / 2xxx 9 / 3xxx 7 / 4xxx 10。覆盖 44/45（唯一缺口 `4007_gemm_a16w16_atomic`，缺 `BW200-GEMM-A16W16-ATOMIC.json` tuner 配置） |
+
+- `record_baseline.py` 的适配器契约是 `run(inputs, init_kwargs: dict, device)`（按名取参）。**上游一个 `aiter_impl.py` 都没有**，本分支已为 44 道题补齐（见上表）；**基线数值仍待真机采集**——本分支只抢救回 `1002` 的 3 条，其余 43 道仍是 placeholder。
+- 本地跑全部测试（本机无 pytest，驱动自带垫片）：
+  `PYTHONPATH=../PyramidKernel <venv-python> .dcu_runs/run_all_tests.py` → **213 项断言全绿**。
+
+### 迁移时发现的上游缺陷（3 类，均已修）
+
+1. **`1017_mha` / `1019_mha_onekernel_bwd`**：声明 `entry: model_class`，但 reference 的 `forward` **返回 tuple**（`out,lse` / `dq,dk,dv`）。KernelBench 的 `output.shape != output_new.shape` 与终审的 `actual.shape` 都会 AttributeError → **这两题在真机上跑不了**。**已修成"打包成单张量"**（本仓库已有先例：`2002_add_swiglu` 就是单张量拼接）：1017 按最后一维加 1 列（`[B,Sq,Hq,D]` + lse → `[B,Sq,Hq,D+1]`，dtype 不变）；1019 三段梯度形状可不同（GQA、`seqlen_q != seqlen_k`），各自展平后沿第 0 维拼接 → `[numel(dq)+numel(dk)+numel(dv)]`。两者的 `io.outputs`／Model docstring／compat 镜像已同步。测试白名单 `KNOWN_SINGLE_TENSOR_VIOLATIONS` 已清空（这是**唯一**与上游分叉的语义改动，建议回馈上游）。
+2. **`4006_gemm_a16w16` / `4007_gemm_a16w16_atomic`**：case 只给 m/n/k，而构造参数 `in_features`/`out_features` 只在 `get_init_inputs()` 里；上游 `resolve_init_args` 在"case 与声明无公共字段"时直接抛 KeyError → 构造不出 Model。本分支的"逐参数补齐"已修。
+3. **`4008_gemm_a16w4`**：同类缺口，`io.init_inputs` 只声明了 `group_size`，拿到部分 kwargs 后 `Model()` 缺 `in_features`/`out_features` 报 TypeError。同样已修。
+
+### 关于 1001/1002 的重复题（保留上游形态）
+
+在 dev 线上曾按"同一算子不重复登记"把 1001 并入 1002。**换到上游基座后保留两题**，因为代价已反超收益：上游把这对写成 `derived_from` + `inherit` 的**规范样板**（"第 0 步定形态"直接引用它），且 1001 同时是 `test_1002_model_class.py` 的独立 oracle（逐位相等校验）与 `test_reference_1001_*.py` 的被测对象——删它要连带改 3 个上游测试模块、private 资产与文档，而收益只是少一条登记（case 内容本就 inherit 复用，没有双份）。
+**判据：重复的是"登记"还是"内容"——登记重复可接受，内容重复才必须消除。**
+
 ## 环境注意
 
 - 真机评测依赖 DTK ≥ 25.04（Triton track 的硬要求）、hipcc、DTK 版 PyTorch。
