@@ -85,6 +85,17 @@ def resolve_tolerance_limit(tol: dict, case_dtype: str, out_dtype) -> dict:
     raise KeyError(f"task.yaml tolerance 缺少数值条目（尝试过 {out_key}/{case_dtype}）")
 
 
+def move_inputs_to_device(inputs, device) -> list:
+    """把输入搬到设备；**非张量元素原样透传**。
+
+    有的题面有可选输入：例如 `1022_pa_prefill` 的 `alibi_slopes` 在 use_alibi=False 时
+    由 make_inputs 返回 `None`。KernelBench 上游的 `_process_input_tensor` 同样是
+    "非张量原样返回"；这里保持一致——否则 `[t.to(device) for t in inputs]` 会在
+    `None` 上抛 AttributeError，让整题的基线采集与终审直接失败（不是数值错，是崩）。
+    """
+    return [t.to(device) if isinstance(t, torch.Tensor) else t for t in inputs]
+
+
 def stage_static(task_dir: Path, submission: Path) -> dict:
     r = subprocess.run(
         [sys.executable, str(AUDIT), str(task_dir), str(submission)],
@@ -176,7 +187,7 @@ def stage_correctness(task_dir: Path, gen_task_dir: Path, submission: Path, case
     device = torch.device("cuda")
     failures = []
     for case in cases:
-        inputs = [t.to(device) for t in case_inputs(gen_mod, case)]
+        inputs = move_inputs_to_device(case_inputs(gen_mod, case), device)
         init_kwargs = case_init_kwargs(task_dir, ref_mod, case)
 
         expected = ref_mod.Model(**init_kwargs).to(device)(*inputs)
@@ -210,7 +221,7 @@ def stage_perf(task_dir: Path, gen_task_dir: Path, submission: Path, perf: dict,
 
     results = []
     for case in perf["cases"]:
-        inputs = [t.to(device) for t in case_inputs(gen_mod, case)]
+        inputs = move_inputs_to_device(case_inputs(gen_mod, case), device)
         init_kwargs = case_init_kwargs(task_dir, ref_mod, case)
         model = cand_mod.ModelNew(**init_kwargs).to(device)
 
