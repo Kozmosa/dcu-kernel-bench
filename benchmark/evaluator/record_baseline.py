@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit_model_class import (  # noqa: E402
     case_init_kwargs,
     case_inputs,
+    move_inputs_to_device,
     resolve_tolerance_limit,
 )
 
@@ -167,7 +168,7 @@ def main() -> int:
 
     for case in perf["cases"]:
         name = case["name"]
-        inputs = [t.to(device) for t in case_inputs(gen_mod, case)]
+        inputs = move_inputs_to_device(case_inputs(gen_mod, case), device)
         init_kwargs = case_init_kwargs(task_dir, ref_mod, case)
 
         # golden（按 task.yaml 容差校验用）。容差块选取与终审共用同一口径
