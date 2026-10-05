@@ -47,12 +47,14 @@ from audit_model_class import (  # noqa: E402
 # 大于该元素数的 case 在本地测试里跳过前向（真机 audit_model_class.py 仍跑全量）
 MAX_ELEMS = 1 << 24  # 16M 元素
 
-# 已知违反单张量契约的上游任务：它们声明 entry: model_class，但 reference 的
-# forward 返回 tuple。KernelBench 的 run_and_check_correctness 里是
-# `output.shape != output_new.shape`，元组会直接 AttributeError → 记成 runtime
-# error；离线终审 audit_model_class.py 的 `actual.shape` 同理。**这两道题在真机
-# 上跑不了**，需要上游修（改成返回拼好的单张量，或换成 callable 形态）。
-KNOWN_SINGLE_TENSOR_VIOLATIONS = {"1017_mha", "1019_mha_onekernel_bwd"}
+# 已知违反单张量契约的任务白名单。当前为空：上游原本有 `1017_mha`（返回 out, lse）
+# 与 `1019_mha_onekernel_bwd`（返回 dq, dk, dv）两例，KernelBench 的
+# `output.shape` 与终审的 `actual.shape` 都会 AttributeError，真机跑不了。
+# 已在本分支修成"打包成单张量"（1017 按最后一维加 1 列；1019 三段展平后沿
+# 第 0 维拼接），并同步更新了 task.yaml 的 io.outputs 与 Model docstring。
+# 若将来再出现同类任务，把 task id 加进这个集合即可让套件保持绿，但**不要**
+# 当成"修好了"——白名单只记录，不解决问题。
+KNOWN_SINGLE_TENSOR_VIOLATIONS: set = set()
 
 _counter = [0]
 
@@ -169,7 +171,7 @@ def test_every_case_builds_inputs_and_runs_reference():
 
                 if not isinstance(out, torch.Tensor):
                     if task_dir.name in KNOWN_SINGLE_TENSOR_VIOLATIONS:
-                        skipped.append(f"{label}（已知上游契约违规：forward 返回 {type(out).__name__}）")
+                        skipped.append(f"{label}（白名单记录：forward 返回 {type(out).__name__}）")
                         continue
                     problems.append(
                         f"{label}: forward 返回 {type(out).__name__}，model_class 契约要求单个 Tensor"
