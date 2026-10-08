@@ -79,7 +79,7 @@ class Model(nn.Module):
         a32 = a.to(torch.float32)
         tw32 = topk_weights.to(torch.float32)
 
-        out = torch.empty((M, top_k, K), dtype=a.dtype)
+        out = torch.empty((M, top_k, K), dtype=a.dtype, device=a.device)
         for e in range(E):
             sel = topk_ids == e
             if not sel.any():

@@ -129,11 +129,11 @@ class Model(nn.Module):
             q = query[q_start:q_start + q_len].to(torch.float32) * self.scale      # [q_len, H, D]
 
             logits = torch.einsum("qhd,hld->hql", q, k_full)                       # [H, q_len, seq_len]
-            pos = ctx_len + torch.arange(q_len)
-            causal = torch.arange(seq_len)[None, :] > pos[:, None]                 # [q_len, seq_len]
+            pos = ctx_len + torch.arange(q_len, device=query.device)
+            causal = torch.arange(seq_len, device=query.device)[None, :] > pos[:, None]   # [q_len, seq_len]
             logits = logits.masked_fill(causal[None], float("-inf"))
             if slopes is not None:
-                rel = torch.arange(seq_len)[None, :] - pos[:, None]
+                rel = torch.arange(seq_len, device=query.device)[None, :] - pos[:, None]
                 bias = rel[None].to(torch.float32) * slopes.view(num_heads, 1, 1)
                 logits = logits + bias.masked_fill(causal[None], float("-inf"))
             probs = torch.softmax(logits, dim=-1)

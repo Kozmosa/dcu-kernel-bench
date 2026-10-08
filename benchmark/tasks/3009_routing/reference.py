@@ -74,8 +74,8 @@ class Model(nn.Module):
         weights = top1_weights.unsqueeze(1)
         if self.fused_shared_experts:
             # 融合共享专家列：id 追加 N（专家数，真实专家区间之外）、权重追加 1.0
-            ids = torch.cat([ids, torch.full((M, 1), N, dtype=torch.int32)], dim=1)
-            weights = torch.cat([weights, torch.ones((M, 1), dtype=torch.float32)], dim=1)
+            ids = torch.cat([ids, torch.full((M, 1), N, dtype=torch.int32, device=ids.device)], dim=1)
+            weights = torch.cat([weights, torch.ones((M, 1), dtype=torch.float32, device=weights.device)], dim=1)
 
         # 单张量打包协议：[ids（整数，fp32 精确）| weights]
         return torch.cat([ids.to(torch.float32), weights.to(torch.float32)], dim=1)

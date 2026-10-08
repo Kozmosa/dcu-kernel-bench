@@ -27,7 +27,7 @@ def _dequant_mxfp4(codes, scales):
     lo = codes & 0xF
     hi = codes >> 4
     nib = torch.stack((lo, hi), dim=-1).flatten(-2)      # (..., K)
-    x = _E2M1_TABLE[nib.long()]
+    x = _E2M1_TABLE.to(codes.device)[nib.long()]
     scale = torch.exp2(scales.to(torch.float32) - 127.0)
     return x * scale.repeat_interleave(32, dim=-1)
 
@@ -183,7 +183,7 @@ class Model(nn.Module):
         # einsum("mek,menk->men")，分组写回可避免物化大中间量）
         flat_ids = topk_ids.reshape(-1)                     # (M*top_k,)
         a_rep = a.unsqueeze(1).expand(M, top_k, K).reshape(-1, K)
-        c = torch.empty((M * top_k, N), dtype=torch.float32)
+        c = torch.empty((M * top_k, N), dtype=torch.float32, device=a_q.device)
         for e in range(E):
             mask = flat_ids == e
             if mask.any():

@@ -91,7 +91,7 @@ class Model(nn.Module):
         # 参考实现按专家分组做 GEMM（与按槽位逐个点积等价）；
         # sorted_token_ids / expert_ids / num_tokens_post_padded 是供 kernel
         # 消费的块对齐布局，参考实现不依赖它们
-        out = torch.zeros(M, top_k, N, dtype=torch.float32)
+        out = torch.zeros(M, top_k, N, dtype=torch.float32, device=A.device)
         flat_out = out.view(M * top_k, N)
         a_rp = a.repeat_interleave(top_k, dim=0)   # 槽位 p = m*top_k + j -> a[m]
         flat_ids = topk_ids.reshape(-1)

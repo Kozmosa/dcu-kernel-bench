@@ -116,9 +116,9 @@ class Model(nn.Module):
         assert scales.shape[0] == K // group and scales.shape[1] == N
 
         # 解包 int4 码字：低半字节对应偶数下标；算术右移 + & 0xF
-        k_shift = (torch.arange(K) % 2) * 4
+        k_shift = (torch.arange(K, device=input.device) % 2) * 4
         w_int = (qweight.repeat_interleave(2, dim=1) >> k_shift) & 0xF    # [N, K]
-        n_shift = (torch.arange(N) % 2) * 4
+        n_shift = (torch.arange(N, device=input.device) % 2) * 4
         z_int = (qzeros.repeat_interleave(2, dim=1) >> n_shift) & 0xF     # [K//G, N]
 
         # 分组 zeros/scales 沿 K 广播后在 float32 中反量化

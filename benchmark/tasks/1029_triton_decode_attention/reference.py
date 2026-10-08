@@ -93,10 +93,10 @@ class Model(nn.Module):
         key_flat = key_cache.view(num_pages * page_size, H_KV, D_QK)
         value_flat = value_cache.view(num_pages * page_size, H_KV, D_V)
 
-        out = torch.empty(B, H_Q, D_V, dtype=q.dtype)
+        out = torch.empty(B, H_Q, D_V, dtype=q.dtype, device=q.device)
         for b in range(B):
             seq_len = int(seq_lens[b])
-            offs = torch.arange(seq_len)
+            offs = torch.arange(seq_len, device=q.device)
             slots = page_tables[b, offs // page_size] * page_size + offs % page_size
 
             # 按页表收集本序列的 K/V：[seq_len, H_KV, D]，gather 后升 float32

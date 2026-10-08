@@ -112,8 +112,8 @@ class Model(nn.Module):
 
             scores = torch.einsum("qhc,khc->hqk", q, k_full) * scale  # [H_Q, E, P+E]
             if self.causal:
-                pos_q = prefix_len + torch.arange(seq_len)
-                pos_k = torch.arange(prefix_len + seq_len)
+                pos_q = prefix_len + torch.arange(seq_len, device=q_extend.device)
+                pos_k = torch.arange(prefix_len + seq_len, device=q_extend.device)
                 causal_mask = pos_k.unsqueeze(0) > pos_q.unsqueeze(1)  # [E, P+E]
                 scores = scores.masked_fill(causal_mask.unsqueeze(0), float("-inf"))
             p = torch.softmax(scores, dim=-1)

@@ -91,23 +91,23 @@ class Model(nn.Module):
         # 稳定排序：专家编号为主键、展平下标为次序 —— 与逐 token 扫描的
         # 分桶次序一致（专家内按 i 升序）
         order = torch.argsort(flat_ids, stable=True)
-        pos = torch.arange(N, dtype=torch.long)
+        pos = torch.arange(N, dtype=torch.long, device=flat_ids.device)
         dst = pos - seg_start[flat_ids[order]] + slot_start[flat_ids[order]]
 
         L1 = N + E * (B - 1)
         L2 = (L1 + B - 1) // B
-        sorted_ids = torch.full((L1,), N, dtype=torch.long)     # 哨兵 N 预填充
+        sorted_ids = torch.full((L1,), N, dtype=torch.long, device=flat_ids.device)   # 哨兵 N 预填充
         sorted_ids[dst] = order
-        expert_ids = torch.full((L2,), -1, dtype=torch.long)    # 尾部 -1 哨兵
+        expert_ids = torch.full((L2,), -1, dtype=torch.long, device=flat_ids.device)  # 尾部 -1 哨兵
         expert_ids[:total_blocks] = torch.repeat_interleave(
-            torch.arange(E), n_blocks
+            torch.arange(E, device=flat_ids.device), n_blocks
         )
 
         # 单张量输出协议：[sorted_token_ids | expert_ids | num_tokens_post_pad]
         return torch.cat([
             sorted_ids.to(torch.float32),
             expert_ids.to(torch.float32),
-            torch.tensor([S], dtype=torch.float32),
+            torch.tensor([S], dtype=torch.float32, device=flat_ids.device),
         ])
 
 
