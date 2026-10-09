@@ -127,9 +127,19 @@ def time_callable(fn, warmup: int, repeat: int) -> tuple[float, float]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--task", required=True, help="任务 id，如 1002_paged_attention")
-    ap.add_argument("--impl", default="aiter", help="基线实现标识，写入 baselines[].impl")
+    ap.add_argument("--impl", default="aiter",
+                    help="基线实现：aiter（默认，需 private/<id>/aiter_impl.py）"
+                         " 或 eager/torch_eager（直接计时 reference 本身，无需适配器）")
     ap.add_argument("--dry-run", action="store_true", help="只校验不写回 baseline.json")
     args = ap.parse_args()
+
+    # --impl 归一化。eager / torch_eager / reference 都指"用 DTK 版 PyTorch 直接执行
+    # reference 本身"，即 KernelBench 的 torch_eager 参考模式。
+    # 规格允许两种基线来源：benchmark/private/README.md:11 写的是
+    # 「官方实现（aiter / DTK 版 PyTorch）在同机同环境下的性能基线」。
+    impl_kind = {"eager": "torch_eager", "torch_eager": "torch_eager",
+                 "reference": "torch_eager"}.get(args.impl.strip().lower(), "aiter")
+    impl_label = impl_kind
 
     task_id = args.task
     task_dir = TASKS / task_id
@@ -138,7 +148,10 @@ def main() -> int:
         return 2
     perf_path, gen_task_id = case_file(task_id, "perf")
     perf = json.loads(perf_path.read_text(encoding="utf-8"))
-    impl_path = aiter_impl_file(task_id, gen_task_id if gen_task_id != task_id else None)
+    # torch_eager 直接跑 reference，不需要适配器
+    impl_path = None
+    if impl_kind == "aiter":
+        impl_path = aiter_impl_file(task_id, gen_task_id if gen_task_id != task_id else None)
 
     if not torch.cuda.is_available():
         print("[baseline] 需要 CUDA（DCU）设备", file=sys.stderr)
@@ -149,7 +162,7 @@ def main() -> int:
     # io.init_inputs 声明或 Model 签名才能解析构造参数，否则会无参构造。
     ref_mod = load_module(task_dir / "reference.py", f"baseline_ref_{task_id}")
     gen_mod = load_module(TASKS / gen_task_id / "reference.py", f"baseline_gen_{gen_task_id}")
-    impl_mod = load_module(impl_path, f"baseline_impl_{task_id}")
+    impl_mod = load_module(impl_path, f"baseline_impl_{task_id}") if impl_path else None
 
     tol = tolerances(task_dir)
     timing = perf.get("timing") or {}
@@ -157,14 +170,27 @@ def main() -> int:
     repeat = int(timing.get("repeat_iters", 30))
     reduction = timing.get("reduction", "median")
 
+    device = torch.device("cuda")
+
+    def run_impl(inputs, init_kwargs):
+        """执行一次基线实现。aiter 走适配器；torch_eager 直接跑 reference。"""
+        if impl_mod is not None:
+            return impl_mod.run(inputs, init_kwargs, device)
+        return reference_output(ref_mod, inputs, init_kwargs), {
+            "path": "tasks/<id>/reference.py::Model(**init_kwargs)（DTK 版 PyTorch eager，"
+                    "KernelBench torch_eager 口径）"
+        }
+
     print(f"[baseline] task       = {task_id}")
     print(f"[baseline] perf cases = {perf_path}")
     print(f"[baseline] 输入生成器 = tasks/{gen_task_id}/reference.py::make_inputs")
-    print(f"[baseline] aiter 适配 = {impl_path.relative_to(REPO_ROOT)}")
+    if impl_path is not None:
+        print(f"[baseline] aiter 适配 = {impl_path.relative_to(REPO_ROOT)}")
+    else:
+        print(f"[baseline] 基线实现   = torch_eager（直接计时 reference，无需适配器）")
     print(f"[baseline] 计时       = warmup {warmup} + repeat {repeat} ({reduction})")
     print()
 
-    device = torch.device("cuda")
     baselines, failures = [], []
 
     for case in perf["cases"]:
@@ -176,13 +202,14 @@ def main() -> int:
         # （输出 dtype 优先），避免基线与终审各挑一套容差。
         expected = reference_output(ref_mod, inputs, init_kwargs)
 
-        # aiter 官方实现。适配器契约：run(inputs, init_kwargs: dict, device)
-        # —— 按名取参（原 dev 分支的适配器按位置取 init_args[0]，需改成
-        # init_kwargs["head_size"] 之类；稀疏构造参数下位置式不安全）。
-        out, ctx = impl_mod.run(inputs, init_kwargs, device)
+        # 基线实现：aiter 走适配器（契约 run(inputs, init_kwargs: dict, device)，
+        # 按名取参——位置式在稀疏构造参数下会错位）；torch_eager 直接跑 reference。
+        out, ctx = run_impl(inputs, init_kwargs)
 
         # 数值判定与终审共用 check_close（分段感知）；未声明 tolerance_segments
         # 的题行为与原来的整体 allclose 完全一致。
+        # torch_eager 时这是"两次 reference 跑同一输入"的自比较 —— 仍然保留，
+        # 它同时验证了 reference 在该 case 上的确定性（非确定性实现会被拦下）。
         if out is not None and out.shape == expected.shape and out.dtype == expected.dtype:
             ok, detail = check_close(out, expected, tol, str(case.get("dtype", "")),
                                      ref_mod=ref_mod, init_kwargs=init_kwargs,
@@ -196,13 +223,13 @@ def main() -> int:
                   f"(max_diff={detail.get('max_diff')}, mode={detail['mode']})")
             continue
 
-        median_us, mean_us = time_callable(lambda: impl_mod.run(inputs, init_kwargs, device),
+        median_us, mean_us = time_callable(lambda: run_impl(inputs, init_kwargs),
                                            warmup + EXTRA_WARMUP, repeat)
         baselines.append({
             "case": name,
             "us": round(median_us, 3),
             "mean_us": round(mean_us, 3),
-            "impl": args.impl,
+            "impl": impl_label,
             "timing": {"warmup_iters": warmup, "repeat_iters": repeat, "reduction": "median",
                        "method": "cuda_event"},
             "max_diff_vs_reference": round(detail.get("max_diff") or 0.0, 6),
@@ -226,7 +253,13 @@ def main() -> int:
         return 0
 
     doc["status"] = "measured"
-    doc["baselines"] = baselines
+    # **按 impl 合并**，不是整体覆盖：一题可以同时有 aiter 与 torch_eager 两套基线
+    # （schema 的 baselines[].impl 就是为此设计的）。同 impl 的旧条目被本次替换，
+    # 其它 impl 原样保留 —— 否则跑 torch_eager 会把已采的 aiter 基线清掉。
+    kept = [b for b in (doc.get("baselines") or []) if b.get("impl") != impl_label]
+    doc["baselines"] = kept + baselines
+    doc.setdefault("impls", [])
+    doc["impls"] = sorted({b.get("impl") for b in doc["baselines"] if b.get("impl")})
     doc["environment"] = {
         "device": torch.cuda.get_device_name(0),
         "gcn_arch": torch.cuda.get_device_properties(0).gcnArchName,
@@ -237,7 +270,9 @@ def main() -> int:
     baseline_path.write_text(
         json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
-    print(f"[baseline] 已写入 {baseline_path}（{len(baselines)} 条）")
+    print(f"[baseline] 已写入 {baseline_path}"
+          f"（本次 {len(baselines)} 条 impl={impl_label}；"
+          f"文件内共 {len(doc['baselines'])} 条，impls={doc['impls']}）")
     return 0
 
 
