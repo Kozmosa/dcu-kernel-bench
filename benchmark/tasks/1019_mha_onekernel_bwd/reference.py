@@ -39,7 +39,11 @@ class Model(nn.Module):
       k, v      [batch, seqlen_k, num_kv_heads, head_dim] 与 q 同 dtype
       lse       [batch, num_q_heads, seqlen_q] float32——缩放后得分的自然对数
                 log-sum-exp（全掩码行为 0）
-      输出 (dq, dk, dv)：dq 与 q 同形、dk/dv 与 k 同形，dtype 同输入
+      返回单个一维张量 packed（多输出打包协议）：
+      packed = cat([dq 展平, dk 展平, dv 展平])（各段先 cast 回输入 dtype
+      再转 float32）
+      其中 dq 与 q 同形、dk/dv 与 k 同形；packed 总长 =
+      (batch*seqlen_q*num_q_heads + 2*batch*seqlen_k*num_kv_heads) * head_dim。
     全域约束：num_q_heads 是 num_kv_heads 的整数倍（GQA，相等即 MHA）；
       1 <= head_dim <= 256（可非 2 次幂）；1 <= seqlen_q, seqlen_k；
       o 与 lse 是 (q, k, v) 的自洽前向统计量（题面生成器保证）。
@@ -52,6 +56,8 @@ class Model(nn.Module):
         一类的自动微分捷径。
       - ModelNew 的 __init__ 与 forward 签名不可更改。
       - 中间累加用 float32；输出 cast 回输入 dtype。
+      - forward 必须按上述打包协议返回单个一维 float32 张量（内部先算出
+        dq/dk/dv，再各自展平拼接）。
 
     目标硬件：海光 DCU（gfx936），实现语言 Triton。
     本题范围：稠密定长（非 varlen）、非量化输入、无 dropout / ALiBi / bias /
@@ -104,7 +110,13 @@ class Model(nn.Module):
                 )
                 dq[b, :, h, :] = torch.matmul(ds, kh) * self.sm_scale
 
-        return dq, dk.to(k.dtype), dv.to(v.dtype)
+        # 多输出打包协议：单张量一维拼接（评测器仅支持单张量输出）。
+        # 各梯度先 cast 回输入 dtype（沿用输出 dtype 约定），再转 float32 拼接
+        return torch.cat([
+            dq.reshape(-1).to(k.dtype).to(torch.float32),
+            dk.reshape(-1).to(k.dtype).to(torch.float32),
+            dv.reshape(-1).to(v.dtype).to(torch.float32),
+        ])
 
 
 def _forward_stats(q, k, v, sm_scale, causal):

@@ -29,8 +29,16 @@ io:
     - {name: causal,       dtype: int32,               layout: scalar,     ndim: 0, note: "1=因果掩码，0=无掩码；上游评测器 cast fp32 后需无损恢复"}
     - {name: alibi_slopes, dtype: float32,             layout: contiguous, ndim: 2, shape: [batch, num_q_heads], note: "元素 >= 0，全 0 即无 ALiBi"}
   outputs:
-    - {name: out, dtype: same_as_q, layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
-    - {name: lse, dtype: float32,   layout: contiguous, ndim: 3, shape: [batch, num_q_heads, seqlen_q], note: "每行 log-sum-exp（自然对数）；整行掩码行恒为 0"}
+    - name: packed
+      dtype: float32
+      layout: contiguous
+      ndim: 1
+      note: >
+        多输出打包协议：cat([out 展平, lse 展平])，总长
+        batch*seqlen_q*num_q_heads*(head_dim+1)；out 段
+        [batch, seqlen_q, num_q_heads, head_dim]（输入 dtype 计算后转
+        float32），lse 段 [batch, num_q_heads, seqlen_q]（自然对数，
+        整行掩码行恒为 0）。
   init_inputs:
     - {name: head_dim, dtype: int64, layout: scalar}   # sm_scale 缺省 1/sqrt(head_dim)
 

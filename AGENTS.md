@@ -32,10 +32,11 @@
 
 - `callable`（函数式，样板 1001）：题面框架无关，reference.py 提供 `reference()` + `make_inputs()`，starter 为待补全骨架。生成侧需自建 harness（loader/evaluator，尚未实现）。
 - `model_class`（KernelBench 兼容，样板 1002，**当前唯一全链路打通的形态，新任务默认**）：reference.py 为自包含题目文件（`Model` + `get_init_inputs` + `get_inputs`），无 starter——`ModelNew` scaffold 由 PyramidKernel loader 从 Model 自动生成；**Model 的 docstring 就是 Agent 可见题面全文**（语义 + 约束 + forbidden + DCU 目标），不得含 aiter 溯源与 private 路径。
+  - **硬约束：forward 必须返回单个张量**。KernelBench 评测器的 correctness check 直接调 `output.shape` 与 `torch.allclose(output, output_new)`，只支持单 tensor 输出——多值 tuple 输出的题无论产物对错都会在评测器内炸 `'tuple' object has no attribute 'shape'` 并被判负（1017/1019 首批实测踩坑，产物逐位正确仍被误杀）。算子天然多输出时用**一维拼接打包**：各输出按既有 dtype 约定 cast 后 `reshape(-1)`、`torch.cat` 成单个 float32 一维张量，docstring 与 task.yaml 写明分段协议（样板：1018 的 dq/dk/dv 拼接、1019 修正版、1020、3009 的"单张量打包协议"）。
 
 1. `operator_catalog.yaml` 登记（来源路径、commit、impl_lang、core_compute、entry、difficulty）。
 2. 准入审核 → `benchmark/sources/<id>.yaml`：核心计算在可审查源码中、非闭源库包装，记录文件 sha256 证据；同语义变体用 `derived_from` 引用母题（样板：1002 引用 1001）。
-3. 创建 `benchmark/tasks/<id>/`：task.yaml（语义、dtype/shape 域、**容差**、forbidden）、reference.py（按形态）、public_cases.json（callable：公开 case 列表；model_class：get_inputs 固定 shape 族契约）。
+3. 创建 `benchmark/tasks/<id>/`：task.yaml（语义、dtype/shape 域、**容差**、forbidden、多输出题的打包分段协议）、reference.py（按形态，model_class 的 forward 输出遵守单张量硬约束）、public_cases.json（callable：公开 case 列表；model_class：get_inputs 固定 shape 族契约）。
 4. model_class 形态镜像到 `benchmark/kernelbench_compat/level{N}/<id>_<name>.py`（level 映射 difficulty：basic=1 / medium=2 / hard=3），与 tasks 侧逐字节一致。
 5. `benchmark/private/<id>/`：hidden_cases.json（边界/极值/正确性）、perf_cases.json、baseline.json 占位；与已有任务同语义时用 `{"inherit": "<task_id>"}` 复用，生成器为母题的 `make_inputs`，不复制内容防漂移。
 6. 写测试进 `tests/`：产物一致性（case/catalog/sources 交叉核对）、reference 语义（独立 oracle）、model_class 另需——镜像字节一致、PyramidKernel loader 构建 scaffold 且静态守卫通过、与母题输出逐位相等、fp32 cast 生存、隔离自检（TaskSpec 全字段无 `pa_decode`/`OpenDAS`/commit/`private` 等溯源词）。
@@ -52,7 +53,9 @@
 - 本机（WSL，CPU）验证到"缺 GPU"为止：26/26 测试绿；quick profile（mock provider）全链路冒烟通过——静态守卫 0 拦截、全部节点到达评测器、唯一失败原因为 `CUDA is not available`。
 - 语义边界（有意为之）：在线评测为 KernelBench 语义（输入统一 cast fp32、allclose 1e-4、全局 RNG 输入、forbidden 仅 docstring 软约束）；本评测集的容差/隐藏 case/static_audit 硬审计/aiter 基线属**离线终审**，工具为 `benchmark/evaluator/audit_model_class.py`（静态审计 → 隐藏 case 正确性 → perf 计时；case 资产经 private/1002 的 `inherit` 字段复用 1001；static_audit 已支持剥除 docstring，避免题面声明禁用项被误杀）。GLM-5.3-flash 首个产物已通过全部终审（7 隐藏 case 含非 2 次幂 head/bf16/GQA，在线从未见过的 shape 族）。
 
-待办：构建 aiter 性能基线（真机装 aiter 后测，填 baseline.json）；扩大真 LLM 实验规模（多任务、多预算、与 aiter 基线对比）。
+- **本地批量生成实测（2026-10-09，RTX 4050 Laptop + triton-windows 3.8 + CC Switch 网关 GLM-5.3-flash，quick 档 6 attempts/题）**：10xx 段前 10 道题全量跑通，8 道 correct（speedup：1016 57.6x、1014 23.1x、1011 11.2x、1002 8.7x、1010 7.7x、1015 3.0x、1012 1.02x、1018 1.01x），1017/1019 因多值 tuple 输出被评测器误杀（产物数值逐位正确，已改为单张量打包协议修正）。运行环境要点：`PYTHONUTF8=1`（中文题面临时文件编码）、provider 配 `timeout_seconds: 1200` + `stream: false`、境外端点走 `NO_PROXY` 直连。产物在 `../PyramidKernel/runs/grokbatch/`。
+
+待办：构建 aiter 性能基线（真机装 aiter 后测，填 baseline.json）；扩大真 LLM 实验规模（多任务、多预算、与 aiter 基线对比，1017/1019 打包修正后重跑）。
 
 真机（BW / gfx936，DTK 26.04）已验证（2026-10-01）：测试 26/26 绿；原生路径 quick 冒烟全部节点 correct（mock provider + 真评测器 + cuda_event 计时）；**Triton 3.3.0+das.opt1.dtk2604.torch290 已安装并验证 JIT**（vecadd + tl.dot fp16 矩阵乘）；**首个真 LLM 端到端完成**（GLM-5.3-flash 经 CC Switch 反向隧道，1002 任务 speedup 17.35x，含 debug 修复环路），访问与部署细节见 `../notes/曙光环境访问.md`。
 

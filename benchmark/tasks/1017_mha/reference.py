@@ -38,9 +38,11 @@ class Model(nn.Module):
       k, v         [batch, seqlen_k, num_kv_heads, head_dim]  与 q 同 dtype
       causal       0-dim int32 张量，1=因果掩码，0=无掩码
       alibi_slopes [batch, num_q_heads] float32，元素 >= 0（全 0 即无 ALiBi）
-      返回 (out, lse)：
-      out          [batch, seqlen_q, num_q_heads, head_dim]，与 q 同 dtype
-      lse          [batch, num_q_heads, seqlen_q]，float32
+      返回单个一维张量 packed（多输出打包协议）：
+      packed = cat([out.reshape(-1).to(float32), lse.reshape(-1)])
+      其中 out [batch, seqlen_q, num_q_heads, head_dim]（按输入 dtype 计算后
+      转 float32 参与拼接）、lse [batch, num_q_heads, seqlen_q] float32；
+      packed 总长 = batch * seqlen_q * num_q_heads * (head_dim + 1)。
     全域约束：num_q_heads 是 num_kv_heads 的整数倍（相等即 MHA，否则 GQA）；
     1 <= seqlen_q、1 <= seqlen_k（任意组合，含 seqlen_q > seqlen_k）；
     1 <= head_dim <= 256。
@@ -53,6 +55,8 @@ class Model(nn.Module):
         第三方算子库的同义封装。
       - ModelNew 的 __init__ 与 forward 签名不可更改。
       - 中间累加用 float32；out cast 回输入 dtype，lse 为 float32。
+      - forward 必须按上述打包协议返回单个一维 float32 张量（内部先算出
+        out 与 lse，再各自展平拼接）。
 
     目标硬件：海光 DCU（gfx936），实现语言 Triton。
     本题范围：稠密 4D 前向、非量化输入、无 bias、无 dropout、无滑窗。
@@ -108,7 +112,8 @@ class Model(nn.Module):
         acc = torch.where(fully_masked[:, :, :, None], torch.zeros_like(acc), acc)
 
         out = acc.permute(0, 2, 1, 3).to(q.dtype)             # [B, Sq, Hq, D]
-        return out, lse
+        # 多输出打包协议：单张量一维拼接（评测器仅支持单张量输出）
+        return torch.cat([out.reshape(-1).to(torch.float32), lse.reshape(-1)])
 
 
 def get_init_inputs():

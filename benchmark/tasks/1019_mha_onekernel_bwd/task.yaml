@@ -29,9 +29,14 @@ io:
     - {name: lse, dtype: float32,             layout: contiguous, ndim: 3, shape: [batch, num_q_heads, seqlen_q], note: "缩放后得分的自然对数 log-sum-exp；全掩码行为 0"}
     - {name: do,  dtype: same_as_q,           layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
   outputs:
-    - {name: dq, dtype: same_as_q, layout: contiguous, ndim: 4, shape: [batch, seqlen_q, num_q_heads, head_dim]}
-    - {name: dk, dtype: same_as_q, layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
-    - {name: dv, dtype: same_as_q, layout: contiguous, ndim: 4, shape: [batch, seqlen_k, num_kv_heads, head_dim]}
+    - name: packed
+      dtype: float32
+      layout: contiguous
+      ndim: 1
+      note: >
+        多输出打包协议：cat([dq 展平, dk 展平, dv 展平])，总长
+        (batch*seqlen_q*num_q_heads + 2*batch*seqlen_k*num_kv_heads)*head_dim；
+        dq 段与 q 同形、dk/dv 段与 k 同形（输入 dtype 计算后转 float32）。
   init_inputs:
     - {name: head_dim, dtype: int64, layout: scalar}   # sm_scale 缺省 1/sqrt(head_dim)
     - {name: causal,   dtype: int64, layout: scalar, note: "1=右下对齐因果掩码（causal kernel），0=无掩码（noncausal kernel）"}
