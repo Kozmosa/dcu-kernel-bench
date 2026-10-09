@@ -96,6 +96,84 @@ def move_inputs_to_device(inputs, device) -> list:
     return [t.to(device) if isinstance(t, torch.Tensor) else t for t in inputs]
 
 
+def load_tolerance_segments(task_dir: Path) -> list | None:
+    """读 task.yaml 的 `tolerance_segments`（可选）。
+
+    单张量输出里若拼了语义不同的段（例如 `4017` = int8 码字段 + fp32 scale 段），
+    一套 atol/rtol 无法同时表达"码字允许 ±1、scale 要求 1e-6"。分段容差让每段各用
+    各的容差；段的边界由 reference 的 `output_segments()` 给出。
+    """
+    spec = yaml.safe_load((task_dir / "task.yaml").read_text(encoding="utf-8"))
+    segs = spec.get("tolerance_segments")
+    if not isinstance(segs, list) or not segs:
+        return None
+    return segs
+
+
+def output_segments(ref_mod, init_kwargs: dict, numel: int, inputs=None) -> list | None:
+    """从 reference 取分段边界：[(name, start, end), ...]；没有则 None。
+
+    `inputs` 一并发给 reference —— 有的题段长依赖输入形状（如 per-token 的
+    scale 段长 = 行数），仅凭 init_kwargs 与 numel 推不出来。
+    """
+    fn = getattr(ref_mod, "output_segments", None)
+    if not callable(fn):
+        return None
+    segs = fn(dict(init_kwargs or {}), int(numel), inputs)
+    if not segs:
+        return None
+    return [(str(n), int(s), int(e)) for n, s, e in segs]
+
+
+def check_close(actual, expected, tol: dict, case_dtype: str, ref_mod=None,
+                init_kwargs=None, task_dir: Path | None = None, inputs=None) -> tuple:
+    """分段感知的容差判定，返回 (ok, detail)。
+
+    两处评测器（终审 `stage_correctness` 与基线采集 `record_baseline`）共用本函数，
+    避免各写一套判定而漂移。task.yaml 未声明 `tolerance_segments`、或 reference 未
+    提供 `output_segments()` 时，行为与原来的整体 allclose 完全一致。
+
+    每段支持的可选键：
+      atol / rtol            该段的绝对/相对容差
+      max_mismatch_frac      允许超出该段容差的元素比例上限（默认 0 = 一个都不许）。
+                             用于"边界效应允许 ±1、但绝不接受系统性偏离"的场景：
+                             例如 `4017` 的整数码字段允许 ±1，同时限制失配比例，
+                             既容得下除法舍入边界，又拦得住真正写错的实现。
+    """
+    limit = resolve_tolerance_limit(tol, case_dtype, expected.dtype)
+    a, e = actual.float().reshape(-1), expected.float().reshape(-1)
+
+    seg_specs = load_tolerance_segments(task_dir) if (ref_mod is not None and task_dir) else None
+    bounds = output_segments(ref_mod, init_kwargs or {}, e.numel(), inputs) if seg_specs else None
+
+    if seg_specs and bounds and len(seg_specs) == len(bounds):
+        per, ok = [], True
+        for spec, (name, s, end) in zip(seg_specs, bounds):
+            atol = float(spec.get("atol", limit["atol"]))
+            rtol = float(spec.get("rtol", limit["rtol"]))
+            max_frac = float(spec.get("max_mismatch_frac", 0.0))
+            sa, se = a[s:end], e[s:end]
+            n = int(sa.numel())
+            badn = int((~torch.isclose(sa, se, atol=atol, rtol=rtol)).sum()) if n else 0
+            frac = (badn / n) if n else 0.0
+            within = bool(torch.allclose(sa, se, atol=atol, rtol=rtol))
+            good = within or (frac <= max_frac)
+            per.append({
+                "name": name, "atol": atol, "rtol": rtol,
+                "max_mismatch_frac": max_frac, "mismatch": badn, "numel": n,
+                "mismatch_frac": frac, "ok": good,
+                "max_diff": float((sa - se).abs().max()) if n else 0.0,
+            })
+            ok = ok and good
+        return ok, {"mode": "segments", "per_segment": per,
+                    "max_diff": max((p["max_diff"] for p in per), default=0.0)}
+
+    return bool(torch.allclose(a, e, atol=limit["atol"], rtol=limit["rtol"])), {
+        "mode": "global", "atol": limit["atol"], "rtol": limit["rtol"],
+        "max_diff": float((a - e).abs().max()) if a.numel() else 0.0,
+    }
+
+
 def stage_static(task_dir: Path, submission: Path) -> dict:
     r = subprocess.run(
         [sys.executable, str(AUDIT), str(task_dir), str(submission)],
@@ -194,15 +272,19 @@ def stage_correctness(task_dir: Path, gen_task_dir: Path, submission: Path, case
         actual = cand_mod.ModelNew(**init_kwargs).to(device)(*inputs)
         torch.cuda.synchronize()
 
-        limit = resolve_tolerance_limit(tol, str(case.get("dtype", "")), expected.dtype)
-        ok = (
-            actual.shape == expected.shape
-            and actual.dtype == expected.dtype
-            and torch.allclose(actual.float(), expected.float(), atol=limit["atol"], rtol=limit["rtol"])
-        )
+        # 形状/dtype 不合直接判失败；数值比较走分段感知的 check_close
+        # （task.yaml 未声明 tolerance_segments 时与原来的整体 allclose 等价）
+        if actual.shape == expected.shape and actual.dtype == expected.dtype:
+            ok, detail = check_close(
+                actual, expected, tol, str(case.get("dtype", "")),
+                ref_mod=ref_mod, init_kwargs=init_kwargs, task_dir=task_dir,
+                inputs=inputs,
+            )
+        else:
+            ok, detail = False, {"mode": "shape-or-dtype", "max_diff": None}
         if not ok:
-            diff = (actual.float() - expected.float()).abs().max().item() if actual.shape == expected.shape else None
-            failures.append({"case": case["name"], "max_diff": diff})
+            failures.append({"case": case["name"], "max_diff": detail.get("max_diff"),
+                             "detail": detail})
     return {"passed": not failures, "case_count": len(cases), "failures": failures}
 
 
