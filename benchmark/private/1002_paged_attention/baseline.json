@@ -1,8 +1,13 @@
 {
   "task_id": "1002_paged_attention",
-  "status": "placeholder",
-  "note": "aiter 基线与 1001 共用，待 DCU 真机构建 aiter 后测量（不得用 module_pa/预编译 aiter_ 路径，见 sources/1001_paged_attention.yaml）。measured_context 为同机信息性参考，口径为题目文件 get_inputs 的固定 shape 族（8/32/8/64/bs16/1024/fp16），非 perf_cases 口径，不作为正式基线。",
-  "environment": null,
+  "status": "measured",
+  "note": "aiter 官方实现（pa_decode.py 的 v1 Triton decode 路径）同机实测基线，逐 perf case 采集，口径为 private/1002_paged_attention/perf_cases.json（沿用上游的 inherit 自 1001）。采集器：benchmark/evaluator/record_baseline.py；调用适配器：private/1002_paged_attention/aiter_impl.py（经最小导入垫片加载 commit c39fff8c 的 pa_decode.py，sha256 02bc511b…，内核文件字节未改）。每条基线在采集时均与 tasks/1002_paged_attention/reference.py 按 task.yaml 容差比对通过，见 max_diff_vs_reference。不得用 module_pa/预编译 aiter_ 路径替代（见 sources/1002_paged_attention.yaml 的排除说明）。measured_context 是另一口径（题目 get_inputs 固定 shape 族）的信息性参考，不作为正式基线。",
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  },
   "measured_context": {
     "date": "2026-10-01",
     "device": "HCU BW (gfx936), 64G",
@@ -13,5 +18,92 @@
     "human_triton_kernel_us": 382,
     "glm_5_3_flash_triton_kernel_us": 204
   },
-  "baselines": []
+  "baselines": [
+    {
+      "case": "perf_b128_h32kv8_d128_bs32_l4096_f16",
+      "us": 2379.12,
+      "mean_us": 2378.426,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 6.1e-05
+    },
+    {
+      "case": "perf_b256_h32kv8_d128_bs32_l2048_f16",
+      "us": 2358.88,
+      "mean_us": 2358.496,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.000122
+    },
+    {
+      "case": "perf_b64_h16kv16_d128_bs32_l8192_bf16",
+      "us": 4235.6,
+      "mean_us": 4239.616,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.000488
+    },
+    {
+      "case": "perf_b128_h32kv8_d128_bs32_l4096_f16",
+      "us": 92005.985,
+      "mean_us": 92603.446,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b256_h32kv8_d128_bs32_l2048_f16",
+      "us": 128909.096,
+      "mean_us": 129107.56,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b64_h16kv16_d128_bs32_l8192_bf16",
+      "us": 70172.23,
+      "mean_us": 71148.081,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    }
+  ],
+  "provenance_caveat": "本文件 3 条用时采集于 2026-10-01，当时 private/1002 的 perf case 尚未带 init_inputs，所以 Model 恒按 get_init_inputs()=[64] 构造、scale=1/sqrt(64)，与 case 声明的 head_size=128 不符。scale 只是 kernel 里的一个运行时标量，不改变 FLOPs 与访存，故**用时数值仍可用**；但 max_diff_vs_reference 是在 scale=1/sqrt(64) 口径下比对出来的，服务器恢复后应随 recalibration 一并复核（并重采一次更干净）。2026-10-02 已给全部 case 补上 init_inputs=[head_size]，并加了 tests/test_reference_case_contract.py 的构造参数一致性断言防复发。",
+  "impls": [
+    "aiter",
+    "torch_eager"
+  ]
 }

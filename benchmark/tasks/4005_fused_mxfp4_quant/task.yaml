@@ -39,15 +39,30 @@ shape:
 
 tolerance:
   uint8:  {atol: 0.0, rtol: 0.0}
-  compare: "量化码字与 e8m0 scale 字节均为 uint8 整数输出，精确匹配（atol=rtol=0）"
+  compare: "量化码字与 e8m0 scale 字节均为 uint8 整数输出，逐位一致；允许极小比例的失配字节（见 tolerance_segments）"
   note: >
     与官方测试语义一致：官方对量化输出先解码回 fp32 再 assert_close（默认
     fp32 容差 1e-6 级），单个码字/scale 字节差异必然越界，等效逐位一致。
     在线（搜索循环内）KernelBenchPaperEvaluator 用 fp32 allclose(1e-4)
     比较 uint8——整数差 >=1 同样必然越界，在线亦等效精确匹配。实现须按
     题面位级算法复现（amax 圆整、floor-log2 scale、round-half-up 饱和、
-    低 4 位偶下标打包），float32 中间量的最后一比特差异只会在极接近舍入
-    边界的元素上翻码，标准实现（rsqrt/按位操作）与参考实现逐位一致。
+    低 4 位偶下标打包）。
+    **失配预算（2026-10 修正，实测证据）**：原假设"标准实现与参考实现逐位一致"
+    不成立。aiter 官方 Triton kernel 与参考实现实测差异：
+      perf_m4096_n1_8192_bf16：2/17825792 字节不同（0.000011%），差值 1 与 16
+      perf_m8192_n1_4096_f16：1/17825792 字节不同（0.000006%），差值 16
+      perf_m16384_n1_2048_bf16：0/17825792（完全一致）
+    即差异只出现在极接近 e2m1 舍入边界的元素上，双方在最后一比特上翻码。
+    若坚持 atol=rtol=0 且不设预算，一个写法正确的实现同样会因边界翻码而失败。
+    故保留逐位一致为主判据，另允许 **max_mismatch_frac=1e-6**（本题规模下约 17 个
+    字节，实测用掉 1~2 个）的失配额度——比任何逐元素宽容差都严得多：整体 nibble
+    次序写错会命中几乎全部字节，远超声明的额度，仍会被拦下。
+
+# 输出两段的边界由 reference.output_segments() 给出
+# （codes = M×(N1//2) 字节，scales = M×ceil(N1/32) 字节）
+tolerance_segments:
+  - {name: codes,  atol: 0.0, rtol: 0.0, max_mismatch_frac: 1.0e-6}
+  - {name: scales, atol: 0.0, rtol: 0.0}
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）
 forbidden:

@@ -1,5 +1,100 @@
 {
   "task_id": "4017_group_quant_int8",
-  "status": "placeholder",
-  "baselines": []
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_4096x7168_gs128_f16",
+      "us": 719.36,
+      "mean_us": 722.385,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 1.0,
+      "compare_mode": "segments"
+    },
+    {
+      "case": "perf_16384x7168_gs128_f16",
+      "us": 2319.843,
+      "mean_us": 2321.448,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 1.0,
+      "compare_mode": "segments"
+    },
+    {
+      "case": "perf_8192x4096_gs128_bf16",
+      "us": 797.521,
+      "mean_us": 797.686,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 1.0,
+      "compare_mode": "segments"
+    },
+    {
+      "case": "perf_4096x7168_gs128_f16",
+      "us": 1712.96,
+      "mean_us": 1724.955,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "segments"
+    },
+    {
+      "case": "perf_16384x7168_gs128_f16",
+      "us": 6576.799,
+      "mean_us": 6597.279,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "segments"
+    },
+    {
+      "case": "perf_8192x4096_gs128_bf16",
+      "us": 1964.88,
+      "mean_us": 1970.33,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "segments"
+    }
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  },
+  "impls": [
+    "aiter",
+    "torch_eager"
+  ]
 }

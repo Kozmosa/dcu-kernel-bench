@@ -1,7 +1,98 @@
 {
   "task_id": "4001_batched_gemm_a8w8",
-  "status": "placeholder",
+  "status": "measured",
   "note": "在 DCU 真机上用 environment.yaml 锁定环境测量 aiter batched_gemm_a8w8（Triton 路径，调优配置取 configs/gemm/<dev>-BATCHED_GEMM-A8W8.json）基线后填写。",
-  "environment": null,
-  "baselines": []
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  },
+  "baselines": [
+    {
+      "case": "perf_b16_m1024_n1024_k1024_bf16_bias",
+      "us": 655.599,
+      "mean_us": 658.389,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 32.0
+    },
+    {
+      "case": "perf_b2_m4096_n4096_k4096_bf16_nobias",
+      "us": 28958.079,
+      "mean_us": 28966.095,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 128.0
+    },
+    {
+      "case": "perf_b8_m4096_n1280_k8192_fp16_nobias",
+      "us": 67184.399,
+      "mean_us": 67236.826,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 16.0
+    },
+    {
+      "case": "perf_b16_m1024_n1024_k1024_bf16_bias",
+      "us": 1441.12,
+      "mean_us": 1444.938,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b2_m4096_n4096_k4096_bf16_nobias",
+      "us": 10807.119,
+      "mean_us": 10822.442,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b8_m4096_n1280_k8192_fp16_nobias",
+      "us": 19751.201,
+      "mean_us": 19721.579,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    }
+  ],
+  "impls": [
+    "aiter",
+    "torch_eager"
+  ]
 }

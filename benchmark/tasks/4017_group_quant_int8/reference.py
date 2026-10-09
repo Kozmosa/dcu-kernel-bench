@@ -76,6 +76,16 @@ class Model(nn.Module):
         return torch.cat([codes, scales])
 
 
+def output_segments(init_kwargs, numel, inputs=None):
+    """给评测器：输出里两段的边界（见 task.yaml 的 tolerance_segments）。
+
+    codes 段在前、scales 段在后；scale 段长 = 组数 = numel/(group_size+1)。
+    """
+    gs = int(init_kwargs.get("group_size", 128))
+    s_len = int(numel) // (gs + 1)
+    return [("codes", 0, int(numel) - s_len), ("scales", int(numel) - s_len, int(numel))]
+
+
 def get_init_inputs():
     return [128]   # group_size；eps 缺省 1e-10
 
