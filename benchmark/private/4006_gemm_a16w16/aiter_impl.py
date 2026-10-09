@@ -144,9 +144,10 @@ def _resolve_config(M, N, K):
     except Exception as exc:  # pragma: no cover - 仅探测，失败即回退
         source = f"fallback_config(probe {type(exc).__name__})"
 
-    # _get_config:136-139 的分桶规则（回退 config 无 "small" 键 → 恒取 "any"）
-    bucket = "small" if (M < 128 and "small" in _FALLBACK_DEFAULT_CONFIG) else "any"
-    return dict(_FALLBACK_DEFAULT_CONFIG[bucket]), f"{source}:{bucket}", fpath
+    # _FALLBACK_DEFAULT_CONFIG 已经是 MI300X-GEMM-A16W16.json 里 "any" 桶的内容
+    # （扁平字典，见 :92-106），此处**不可**再按桶索引一次——那会 KeyError: 'any'。
+    # 官方 _get_config:136-139 的分桶规则在无 "small" 键时也恒取 "any"，故直接返回。
+    return dict(_FALLBACK_DEFAULT_CONFIG), f"{source}:any", fpath
 
 
 def run(inputs, init_kwargs, device):

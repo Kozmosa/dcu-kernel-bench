@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from audit_model_class import (  # noqa: E402
     case_init_kwargs,
     case_inputs,
+    check_close,
     move_inputs_to_device,
     resolve_tolerance_limit,
 )
@@ -174,27 +175,25 @@ def main() -> int:
         # golden（按 task.yaml 容差校验用）。容差块选取与终审共用同一口径
         # （输出 dtype 优先），避免基线与终审各挑一套容差。
         expected = reference_output(ref_mod, inputs, init_kwargs)
-        limit = resolve_tolerance_limit(tol, str(case.get("dtype", "")), expected.dtype)
 
         # aiter 官方实现。适配器契约：run(inputs, init_kwargs: dict, device)
         # —— 按名取参（原 dev 分支的适配器按位置取 init_args[0]，需改成
         # init_kwargs["head_size"] 之类；稀疏构造参数下位置式不安全）。
         out, ctx = impl_mod.run(inputs, init_kwargs, device)
 
-        ok = (
-            out is not None
-            and out.shape == expected.shape
-            and out.dtype == expected.dtype
-            and torch.allclose(out.float(), expected.float(), atol=limit["atol"], rtol=limit["rtol"])
-        )
+        # 数值判定与终审共用 check_close（分段感知）；未声明 tolerance_segments
+        # 的题行为与原来的整体 allclose 完全一致。
+        if out is not None and out.shape == expected.shape and out.dtype == expected.dtype:
+            ok, detail = check_close(out, expected, tol, str(case.get("dtype", "")),
+                                     ref_mod=ref_mod, init_kwargs=init_kwargs,
+                                     task_dir=task_dir, inputs=inputs)
+        else:
+            ok, detail = False, {"mode": "shape-or-dtype", "max_diff": None}
         if not ok:
-            max_diff = (
-                (out.float() - expected.float()).abs().max().item()
-                if out is not None and out.shape == expected.shape
-                else None
-            )
-            failures.append({"case": name, "max_diff": max_diff})
-            print(f"  [FAIL] {name}: 与 reference 不一致 (max_diff={max_diff})")
+            failures.append({"case": name, "max_diff": detail.get("max_diff"),
+                             "detail": detail})
+            print(f"  [FAIL] {name}: 与 reference 不一致 "
+                  f"(max_diff={detail.get('max_diff')}, mode={detail['mode']})")
             continue
 
         median_us, mean_us = time_callable(lambda: impl_mod.run(inputs, init_kwargs, device),
@@ -206,9 +205,8 @@ def main() -> int:
             "impl": args.impl,
             "timing": {"warmup_iters": warmup, "repeat_iters": repeat, "reduction": "median",
                        "method": "cuda_event"},
-            "max_diff_vs_reference": round(
-                (out.float() - expected.float()).abs().max().item(), 6
-            ),
+            "max_diff_vs_reference": round(detail.get("max_diff") or 0.0, 6),
+            "compare_mode": detail["mode"],
         })
         print(f"  [OK]   {name}: median {median_us:.1f} us  (mean {mean_us:.1f} us)")
 
