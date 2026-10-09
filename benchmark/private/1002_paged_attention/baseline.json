@@ -57,7 +57,53 @@
         "method": "cuda_event"
       },
       "max_diff_vs_reference": 0.000488
+    },
+    {
+      "case": "perf_b128_h32kv8_d128_bs32_l4096_f16",
+      "us": 92005.985,
+      "mean_us": 92603.446,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b256_h32kv8_d128_bs32_l2048_f16",
+      "us": 128909.096,
+      "mean_us": 129107.56,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b64_h16kv16_d128_bs32_l8192_bf16",
+      "us": 70172.23,
+      "mean_us": 71148.081,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
     }
   ],
-  "provenance_caveat": "本文件 3 条用时采集于 2026-10-01，当时 private/1002 的 perf case 尚未带 init_inputs，所以 Model 恒按 get_init_inputs()=[64] 构造、scale=1/sqrt(64)，与 case 声明的 head_size=128 不符。scale 只是 kernel 里的一个运行时标量，不改变 FLOPs 与访存，故**用时数值仍可用**；但 max_diff_vs_reference 是在 scale=1/sqrt(64) 口径下比对出来的，服务器恢复后应随 recalibration 一并复核（并重采一次更干净）。2026-10-02 已给全部 case 补上 init_inputs=[head_size]，并加了 tests/test_reference_case_contract.py 的构造参数一致性断言防复发。"
+  "provenance_caveat": "本文件 3 条用时采集于 2026-10-01，当时 private/1002 的 perf case 尚未带 init_inputs，所以 Model 恒按 get_init_inputs()=[64] 构造、scale=1/sqrt(64)，与 case 声明的 head_size=128 不符。scale 只是 kernel 里的一个运行时标量，不改变 FLOPs 与访存，故**用时数值仍可用**；但 max_diff_vs_reference 是在 scale=1/sqrt(64) 口径下比对出来的，服务器恢复后应随 recalibration 一并复核（并重采一次更干净）。2026-10-02 已给全部 case 补上 init_inputs=[head_size]，并加了 tests/test_reference_case_contract.py 的构造参数一致性断言防复发。",
+  "impls": [
+    "aiter",
+    "torch_eager"
+  ]
 }
