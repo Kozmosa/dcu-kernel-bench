@@ -1,1 +1,51 @@
-{"task_id": "1016_lean_atten_paged", "status": "placeholder", "baselines": []}
+{
+  "task_id": "1016_lean_atten_paged",
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_h64_b1_ctx32768_d64_f16",
+      "us": 1121.6,
+      "mean_us": 1130.491,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 1.5e-05
+    },
+    {
+      "case": "perf_h64_b3_ctx4k_16k_d64_f16",
+      "us": 1348.88,
+      "mean_us": 1368.357,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 3.1e-05
+    },
+    {
+      "case": "perf_h64_b1_ctx16384_d128_f16",
+      "us": 3105.839,
+      "mean_us": 3126.363,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 3.1e-05
+    }
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  }
+}

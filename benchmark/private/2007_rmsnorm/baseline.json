@@ -1,5 +1,51 @@
 {
   "task_id": "2007_rmsnorm",
-  "status": "placeholder",
-  "baselines": []
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_m4096_n8192_add_f16",
+      "us": 772.88,
+      "mean_us": 773.984,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.003906
+    },
+    {
+      "case": "perf_m8192_n1280_add_f16",
+      "us": 476.321,
+      "mean_us": 477.237,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.003906
+    },
+    {
+      "case": "perf_m16384_n4096_add_bf16",
+      "us": 1571.281,
+      "mean_us": 1581.691,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.03125
+    }
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  }
 }

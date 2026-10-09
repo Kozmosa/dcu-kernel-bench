@@ -1,1 +1,51 @@
-{"task_id": "1015_lean_atten", "status": "placeholder", "baselines": []}
+{
+  "task_id": "1015_lean_atten",
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_decode_ragged_h16_d128_f16",
+      "us": 3332.48,
+      "mean_us": 3326.469,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 3.1e-05
+    },
+    {
+      "case": "perf_causal_prefill_h16_d128_f16",
+      "us": 2883.359,
+      "mean_us": 2887.749,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.000977
+    },
+    {
+      "case": "perf_decode_longkv_h16_d64_bf16",
+      "us": 3370.64,
+      "mean_us": 3359.963,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 6.1e-05
+    }
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  }
+}
