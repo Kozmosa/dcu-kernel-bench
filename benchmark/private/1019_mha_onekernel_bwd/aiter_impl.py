@@ -55,11 +55,13 @@
 #     return（:908-913），**不写 dq**，故 dq 必须预分配为 0（官方 caller 亦用
 #     zeros_like(q)，mha.py:1157）；这些行在 reference 里 p/ds 恒 0、dq 全 0，一致。
 #
-# 输出打包：reference.forward 返回单个打包张量
-#   packed = cat([dq.flatten(), dk.to(dtype).flatten(), dv.to(dtype).flatten()])
-#   （reference.py:116-123，形状 [numel(dq)+numel(dk)+numel(dv)]、dtype 同输入）。
-# 适配器按**同样顺序**把就地写好的 dq/dk/dv 展平后 cat 回去；三段与 reference 的
-# dq/dk/dv 逐位同形同序（各自 [batch, seq, heads, head_dim] 行优先），dtype 同输入
+# 输出打包（上游 bd991d0 的单张量协议，1 维 float32）：reference.forward 返回
+#   packed = cat([dq.to(k.dtype).to(float32).flatten(),
+#                 dk.to(k.dtype).to(float32).flatten(),
+#                 dv.to(v.dtype).to(float32).flatten()])
+#   （reference.py:115-119，形状 [numel(dq)+numel(dk)+numel(dv)]，dtype float32）。
+# 适配器按**同样顺序**把就地写好的 dq/dk/dv 展平后 cast 再 cat；三段与 reference 的
+# dq/dk/dv 逐位同形同序（各自 [batch, seq, heads, head_dim] 行优先）
 # （官方 caller 也是 zeros_like(q)/empty_like(k)/empty_like(v)，mha.py:1157）。
 #
 # head_dim 限制：宿主把 HEAD_DIM=head_sz、ACTUAL_HEAD_DIM=next_power_of_2(head_sz)
@@ -271,9 +273,15 @@ def run(inputs, init_kwargs, device):
 
     torch.cuda.synchronize()
 
-    # ---- 打包成单张量（顺序与 reference.py:116-123 完全一致）---------------
+    # ---- 打包成单张量（与 reference.py:115-119 逐句同构）-------------------
+    # 上游 bd991d0 的单张量协议：各梯度先 cast 回输入 dtype（输出 dtype 约定），
+    # 再转 float32，最后沿第 0 维拼接成一维 float32。
     out = torch.cat(
-        [dq.reshape(-1), dk.reshape(-1), dv.reshape(-1)],
+        [
+            dq.reshape(-1).to(k.dtype).to(torch.float32),
+            dk.reshape(-1).to(k.dtype).to(torch.float32),
+            dv.reshape(-1).to(v.dtype).to(torch.float32),
+        ],
         dim=0,
     )
 

@@ -30,9 +30,11 @@
 # 归一。alibi_slopes 用题目给的原生 [batch, num_q_heads] fp32（mha.py:619-621
 # 按 off_z*stride_alibi_z + off_q_head*stride_alibi_h 取值，且 mha.py:1282-1284
 # 明确支持 (batch, nheads)），与 reference 的 alibi_slopes[:, :, None, None]
-# 逐 (b,h) 语义一致。输出打包与 reference 完全同构：
-#   out 占前 head_dim 列，lse 由 [B,Hq,Sq] permute 到 [B,Sq,Hq] 后 cast 回 q.dtype
-#   作为最后一列 → packed [B, Sq, Hq, head_dim+1]（reference.py:116-118）。
+# 逐 (b,h) 语义一致。输出打包与 reference 完全同构（上游 bd991d0 的单张量协议）：
+#   packed = cat([out.to(q.dtype).reshape(-1).to(float32), lse.reshape(-1)])
+#   → 一维 float32，长 B*Sq*Hq*(head_dim+1)（reference.py:116）。
+#   注意 lse 保持 fp32、**不降精度**到 q.dtype；out 先按输出 dtype 约定 cast 回
+#   q.dtype 再转 fp32。（早期版本曾把 lse 降精度塞进 4 维最后一列，已废弃。）
 #
 # 语义对齐（与 sources/1017_mha.yaml 的准入说明一致）：
 #   - 右下对齐因果掩码：offs_n_causal = offs_n + (seqlen_q - seqlen_k)，整行掩码行
@@ -233,9 +235,14 @@ def run(inputs, init_kwargs, device):
 
     torch.cuda.synchronize()
 
-    # ---- 打包（与 reference.py:116-118 逐句同构）---------------------------
-    lse_col = lse.permute(0, 2, 1).to(q_c.dtype)          # [B, Sq, Hq]
-    packed = torch.cat([out, lse_col.unsqueeze(-1)], dim=-1)  # [B, Sq, Hq, D+1]
+    # ---- 打包（与 reference.py:116 逐句同构）------------------------------
+    # 上游的单张量打包协议（1 维 float32）：out 先按输出 dtype 约定 cast 回
+    # q.dtype，再转 float32 展平；lse 本身即 float32，直接展平。两段拼接。
+    # 旧写法把 lse 降精度到 q.dtype 塞进 4 维最后一列，已随上游 bd991d0 废弃。
+    packed = torch.cat([
+        out.to(q_c.dtype).reshape(-1).to(torch.float32),   # 先 cast 回 q.dtype，再转 fp32
+        lse.reshape(-1),                                   # lse 本身即 fp32，不降精度
+    ])                                                    # [B*Sq*Hq*(D+1)] float32
 
     ctx = {
         "impl": "aiter",
