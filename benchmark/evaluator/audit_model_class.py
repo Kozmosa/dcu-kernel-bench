@@ -349,8 +349,12 @@ def stage_perf(task_dir: Path, gen_task_dir: Path, submission: Path, perf: dict,
         "baseline_status": baseline.get("status"),
     }
     if baselines:
+        # 关键：把 impl 与 baseline_us 一并带进结果。一题可能同时有 aiter 与
+        # torch_eager 两套基线（baseline.json 的 baselines[].impl 区分），
+        # 旧写法只加 speedup 字段会让两条记录无法区分。
         out["speedups"] = [
-            {**r, "speedup": b["us"] / r["median_us"]}
+            {**r, "impl": b.get("impl"), "baseline_us": b["us"],
+             "speedup": b["us"] / r["median_us"]}
             for r in results
             for b in baselines
             if b.get("case") == r["case"]
