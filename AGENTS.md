@@ -55,13 +55,13 @@
 
 - **本地批量生成实测（2026-10-09，RTX 4050 Laptop + triton-windows 3.8 + CC Switch 网关 GLM-5.3-flash，quick 档 6 attempts/题）**：10xx 段前 10 道题全量跑通，8 道 correct（speedup：1016 57.6x、1014 23.1x、1011 11.2x、1002 8.7x、1010 7.7x、1015 3.0x、1012 1.02x、1018 1.01x），1017/1019 因多值 tuple 输出被评测器误杀（产物数值逐位正确，已改为单张量打包协议修正）。运行环境要点：`PYTHONUTF8=1`（中文题面临时文件编码）、provider 配 `timeout_seconds: 1200` + `stream: false`、境外端点走 `NO_PROXY` 直连。产物在 `../PyramidKernel/runs/grokbatch/`。
 
-待办：构建 aiter 性能基线（真机装 aiter 后测，填 baseline.json）；扩大真 LLM 实验规模（多任务、多预算、与 aiter 基线对比，1017/1019 打包修正后重跑）。
+待办：扩大真 LLM 实验规模（多任务、多预算、按 `impl` 分别与 aiter 基线对比，1017/1019 打包修正后重跑）。**性能基线已采齐**——DCU 真机实测 45/45 道题至少有一种基线，见下文"本分支相对上游 main 的增量"。
 
 真机（BW / gfx936，DTK 26.04）已验证（2026-10-01）：测试 26/26 绿；原生路径 quick 冒烟全部节点 correct（mock provider + 真评测器 + cuda_event 计时）；**Triton 3.3.0+das.opt1.dtk2604.torch290 已安装并验证 JIT**（vecadd + tl.dot fp16 矩阵乘）；**首个真 LLM 端到端完成**（GLM-5.3-flash 经 CC Switch 反向隧道，1002 任务 speedup 17.35x，含 debug 修复环路），访问与部署细节见 `../notes/曙光环境访问.md`。
 
 ## 本分支相对上游 main 的增量（`main-merge`）
 
-基座 = `origin/main` @ `5094481`（47 道题，四段号段 1xxx/2xxx/3xxx/4xxx）。本分支在其上**以加工具、测试与基线适配器为主**；对上游任务定义的改动只有一处必要的可跑性修复（`1017_mha` / `1019_mha_onekernel_bwd` 的单张量打包，见下文"上游缺陷"）：
+基座 = `origin/main` @ `bd991d0`（47 道题，四段号段 1xxx/2xxx/3xxx/4xxx）。本分支在其上**只加工具、测试与基线资产，不改上游的题目语义**；基座对齐时上游已自行修掉 `1017`/`1019` 的多值输出（`bd991d0`），本分支改为**跟随上游的打包协议**并按新协议重采基线，故与上游**零语义分叉**：
 
 | 增量 | 作用 |
 |---|---|
@@ -71,14 +71,16 @@
 | `tests/test_compat_mirrors.py` | 通用镜像一致性：按 difficulty→level 映射覆盖**全部** model_class 题，并检查"错 level 的残留镜像" |
 | `tests/test_reference_case_contract.py` | 通用 case 契约：逐 case 生成输入→构造 Model→跑 forward→校验单个 Tensor/数值有限/容差可解析；另含 `io.init_inputs` 声明与 Model 签名前缀一致、case 字段必须生效 |
 | `benchmark/private/<id>/aiter_impl.py`（44 个） | aiter 官方实现适配器，使基线可采集。契约 `run(inputs, init_kwargs: dict, device)`；按号段 1xxx 18 / 2xxx 9 / 3xxx 7 / 4xxx 10。覆盖 44/45（唯一缺口 `4007_gemm_a16w16_atomic`，缺 `BW200-GEMM-A16W16-ATOMIC.json` tuner 配置） |
+| `benchmark/private/<id>/baseline.json`（45 个，**真机实测**） | DCU 真机（BW / gfx936，DTK 26.04）采集的性能基线：27 道 `aiter`+`torch_eager` 双基线、18 道仅 `torch_eager`、**45/45 至少有一种基线**。`record_baseline.py --impl {aiter,eager}` 按 impl **合并**写入（不覆盖另一种），`stage_perf` 带回 `impl`/`baseline_us`/`speedup`——**报加速比必须说明分母是哪个 impl**（例：`1017_mha` aiter 57 ms vs `torch_eager` 180 ms，相差 3.2x） |
+| `audit_model_class.py` 的**分段容差** | `task.yaml` 的 `tolerance_segments` + `reference.output_segments()`，解"同一张量里不同段量级差几个数量级、单一 atol/rtol 表达不了"（样板 `4017`/`4018`/`4005`）；`max_mismatch_frac` 在分段与全局两条路径都生效，缺省 0 即等价于原 `allclose` |
 
-- `record_baseline.py` 的适配器契约是 `run(inputs, init_kwargs: dict, device)`（按名取参）。**上游一个 `aiter_impl.py` 都没有**，本分支已为 44 道题补齐（见上表）；**基线数值仍待真机采集**——本分支只抢救回 `1002` 的 3 条，其余 43 道仍是 placeholder。
+- `record_baseline.py` 的适配器契约是 `run(inputs, init_kwargs: dict, device)`（按名取参）。**上游一个 `aiter_impl.py` 都没有、45 份 `baseline.json` 全是 placeholder**，本分支补齐 44 个适配器，并在真机采到 45/45 实测基线。两个已知天花板：`1019_mha_onekernel_bwd` 的 aiter 基线**不可得**（DTK 版 aiter 的 onekernel bwd 报 `PassManager::run failed`，shared memory 81920 > 65536 超出 DCU 上限，非配置问题）；`1014/1017/4001/4004/4006` 全部 + `4008` 部分 case 的 aiter 基线落在 **MI 系列 fallback tuner 配置**上（未针对 DCU 调优 → 性能次优 → **这些题的 speedup 会偏高**，引用时须标注）。
 - 本地跑全部测试（本机无 pytest，驱动自带垫片）：
   `PYTHONPATH=../PyramidKernel <venv-python> .dcu_runs/run_all_tests.py` → **213 项断言全绿**。
 
-### 迁移时发现的上游缺陷（3 类，均已修）
+### 迁移时发现的上游缺陷（3 类，均已消解；与上游零语义分叉）
 
-1. **`1017_mha` / `1019_mha_onekernel_bwd`**：声明 `entry: model_class`，但 reference 的 `forward` **返回 tuple**（`out,lse` / `dq,dk,dv`）。KernelBench 的 `output.shape != output_new.shape` 与终审的 `actual.shape` 都会 AttributeError → **这两题在真机上跑不了**。**已修成"打包成单张量"**（本仓库已有先例：`2002_add_swiglu` 就是单张量拼接）：1017 按最后一维加 1 列（`[B,Sq,Hq,D]` + lse → `[B,Sq,Hq,D+1]`，dtype 不变）；1019 三段梯度形状可不同（GQA、`seqlen_q != seqlen_k`），各自展平后沿第 0 维拼接 → `[numel(dq)+numel(dk)+numel(dv)]`。两者的 `io.outputs`／Model docstring／compat 镜像已同步。测试白名单 `KNOWN_SINGLE_TENSOR_VIOLATIONS` 已清空（这是**唯一**与上游分叉的语义改动，建议回馈上游）。
+1. **`1017_mha` / `1019_mha_onekernel_bwd`**：声明 `entry: model_class`，但 reference 的 `forward` **返回 tuple**（`out,lse` / `dq,dk,dv`）。KernelBench 的 `output.shape != output_new.shape` 与终审的 `actual.shape` 都会 AttributeError → **这两题在真机上跑不了**。本分支先自制过一版"4 维加一列"的打包；**基座对齐时发现上游 `bd991d0` 已独立用"一维 float32 拼接"修好**（`cat([out.reshape(-1).to(float32), lse.reshape(-1)])`），其写法不把 `lse` 降精度到 `q.dtype`，比自制版更优 → **直接采用上游版本**，故本项**不再是分叉**。本分支在该点的增量只剩"把 aiter 适配器的打包同步到新协议"（`1017`/`1019` 两个），否则官方基线会因形状/精度不对齐而判负（真机复测 `1017` 三条 aiter case 全部 `[OK]`，坐实协议已对齐）。
 2. **`4006_gemm_a16w16` / `4007_gemm_a16w16_atomic`**：case 只给 m/n/k，而构造参数 `in_features`/`out_features` 只在 `get_init_inputs()` 里；上游 `resolve_init_args` 在"case 与声明无公共字段"时直接抛 KeyError → 构造不出 Model。本分支的"逐参数补齐"已修。
 3. **`4008_gemm_a16w4`**：同类缺口，`io.init_inputs` 只声明了 `group_size`，拿到部分 kwargs 后 `Model()` 缺 `in_features`/`out_features` 报 TypeError。同样已修。
 
