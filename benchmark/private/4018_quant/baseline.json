@@ -43,6 +43,48 @@
       },
       "max_diff_vs_reference": 0.0,
       "compare_mode": "segments"
+    },
+    {
+      "case": "perf_8960x2048_dyn_token_i8",
+      "us": 1057.12,
+      "mean_us": 1061.221,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "segments"
+    },
+    {
+      "case": "perf_16384x7168_dyn_token_i8",
+      "us": 6225.92,
+      "mean_us": 6228.118,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "segments"
+    },
+    {
+      "case": "perf_8192x8192_dyn_tensor_fp8",
+      "us": 3072.96,
+      "mean_us": 3079.483,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "segments"
     }
   ],
   "environment": {
@@ -50,5 +92,9 @@
     "gcn_arch": "gfx936:sramecc+:xnack-",
     "torch": "2.9.0",
     "triton": "3.3.0"
-  }
+  },
+  "impls": [
+    "aiter",
+    "torch_eager"
+  ]
 }

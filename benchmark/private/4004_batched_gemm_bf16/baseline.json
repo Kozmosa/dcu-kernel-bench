@@ -40,6 +40,48 @@
         "method": "cuda_event"
       },
       "max_diff_vs_reference": NaN
+    },
+    {
+      "case": "perf_b16_m1024_n1024_k1024_bf16_bias",
+      "us": 1236.4,
+      "mean_us": 1238.261,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b2_m4096_n4096_k4096_bf16_nobias",
+      "us": 10306.32,
+      "mean_us": 10345.264,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b8_m2048_n1280_k8192_fp16_nobias",
+      "us": 10183.998,
+      "mean_us": 10186.751,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": NaN,
+      "compare_mode": "global"
     }
   ],
   "environment": {
@@ -47,5 +89,9 @@
     "gcn_arch": "gfx936:sramecc+:xnack-",
     "torch": "2.9.0",
     "triton": "3.3.0"
-  }
+  },
+  "impls": [
+    "aiter",
+    "torch_eager"
+  ]
 }
