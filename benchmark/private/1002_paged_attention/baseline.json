@@ -21,9 +21,9 @@
   "baselines": [
     {
       "case": "perf_b128_h32kv8_d128_bs32_l4096_f16",
-      "us": 2347.28,
-      "mean_us": 2350.874,
-      "impl": "aiter_pa_decode_v1",
+      "us": 2379.12,
+      "mean_us": 2378.426,
+      "impl": "aiter",
       "timing": {
         "warmup_iters": 10,
         "repeat_iters": 30,
@@ -34,9 +34,9 @@
     },
     {
       "case": "perf_b256_h32kv8_d128_bs32_l2048_f16",
-      "us": 2315.28,
-      "mean_us": 2317.386,
-      "impl": "aiter_pa_decode_v1",
+      "us": 2358.88,
+      "mean_us": 2358.496,
+      "impl": "aiter",
       "timing": {
         "warmup_iters": 10,
         "repeat_iters": 30,
@@ -47,9 +47,9 @@
     },
     {
       "case": "perf_b64_h16kv16_d128_bs32_l8192_bf16",
-      "us": 4198.16,
-      "mean_us": 4201.648,
-      "impl": "aiter_pa_decode_v1",
+      "us": 4235.6,
+      "mean_us": 4239.616,
+      "impl": "aiter",
       "timing": {
         "warmup_iters": 10,
         "repeat_iters": 30,
