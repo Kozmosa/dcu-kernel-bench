@@ -31,7 +31,7 @@ def _mxfp4_quant(x):
             * MXFP4_QUANT_BLOCK_SIZE
         ]
         shape = tuple(shape)
-        x_padded = torch.zeros(shape, dtype=x.dtype)
+        x_padded = torch.zeros(shape, dtype=x.dtype, device=x.device)
         x_padded[..., : x.shape[-1]] = x
     else:
         x_padded = x

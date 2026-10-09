@@ -89,7 +89,7 @@ class Model(nn.Module):
         blocks = out
         if d % BLOCK != 0:
             # 块尾补零（补零参与 amax）
-            padded = torch.zeros(M, n_blocks * BLOCK, dtype=torch.float32)
+            padded = torch.zeros(M, n_blocks * BLOCK, dtype=torch.float32, device=out.device)
             padded[:, :d] = out
             blocks = padded
         blocks = blocks.reshape(M, n_blocks, BLOCK)
