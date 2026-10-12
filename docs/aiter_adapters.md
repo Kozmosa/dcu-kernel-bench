@@ -2,28 +2,31 @@
 
 离线终审与基线采集都依赖 `benchmark/private/<id>/aiter_impl.py`：它把题面的
 （`make_inputs` 返回顺序 + `io` 规格）绑定到 aiter 官方算子的（入口签名 + layout 约定）。
-**上游 47 道题一个适配器都没有**，本批一次性补齐。
+**上游一个适配器都没有**，本批为当时的 45 道题一次性补齐 44 个。
+
+> 2026-10-12 上游新增 21 道题（后述）后，分母变成 **66 道 model_class**；
+> 这 21 道**尚无适配器**（题源是 hipDNN 样例集而非 aiter，aiter 里未必有对等算子）。
 
 ## 覆盖
 
 | 项 | 数 |
 |---|---|
-| model_class 题 | 45 |
-| **已有适配器** | **44**（含原有 1002） |
-| 缺 | 1（`4007_gemm_a16w16_atomic`，见下） |
-| 号段分布 | 1xxx: 18 ｜ 2xxx: 9 ｜ 3xxx: 7 ｜ 4xxx: 10 |
+| model_class 题 | **66**（旧 45 + 新准入 21） |
+| **已有适配器** | **44**（含原有 1002；全部落在旧 45 道内） |
+| 缺 | **22** = `4007_gemm_a16w16_atomic`（见下）+ 新增 21 道 |
+| 号段分布 | 1xxx: 18 ｜ 2xxx: 9 ｜ 3xxx: 7 ｜ 4xxx: 10 ｜ 5xxx–8xxx: 0 |
 
 ## 真机采集结果（BW / gfx936，DTK 26.04）
 
-45 道 model_class 题**全部采到至少一种基线**，`benchmark/private/<id>/baseline.json`
-已从 placeholder 换成实测值：
+**旧 45 道 model_class 题全部采到至少一种基线**，`baseline.json` 已从 placeholder
+换成实测值；**2026-10-12 新准入的 21 道仍是 placeholder**：
 
 | 覆盖面 | 题数 |
 |---|---|
 | `aiter` + `torch_eager` 双基线 | 27 |
 | 仅 `torch_eager` | 18 |
 | 仅 `aiter` | 0 |
-| **无基线** | **0** |
+| **无基线（= 新增 21 道）** | **21** |
 
 - **分母必须说清**：`record_baseline.py --impl {aiter,eager}` 按 `impl` **合并**写入，
   同一条 case 可以同时有两条基线。两者量级差别很大（例：`1017_mha` aiter 57 ms vs
@@ -49,6 +52,23 @@
   m4864·n4096·k8192 的 bf16 GEMM 而言明显异常慢。其余已采题不依赖 tuner 配置或配置齐备。
 - `1017` 与 `1019` 的适配器改完打包协议后已在新协议下重新采集，`1017` 三条 aiter case
   真机判 `[OK]`（证明打包对齐）；`1019` 的 `torch_eager` 三条也补齐。
+
+### 新增 21 道题的基线怎么采
+
+它们**没有 aiter 适配器也能采**——`--impl eager` 直接计时 `reference.py`，不经过适配器：
+
+```bash
+for t in 1031_deform_attention_fwd 2010_batchnorm_fwd 5001_conv2d_fwd ... ; do
+  python benchmark/evaluator/record_baseline.py --task $t --impl eager
+done
+```
+
+- 这 21 道题源是 hipDNN 官方样例集（`opendtk/hipdnn_samples` @ `b67a3f9`），
+  不是 aiter；**aiter 里是否有对等算子需要逐个评估**，有才谈得上补 aiter 基线。
+- 它们的私有资产是齐的（各 3 个 perf case 带 `timing` 块 + 6~10 个 hidden case），
+  所以 `eager` 基线随时可采，不需要额外造 case。
+- 注意分母口径：若某题只有 `torch_eager` 基线，报出的 speedup 是**对 torch eager 的**，
+  不是对 aiter 的——两者量级可差数倍（见上文）。
 
 ## 适配器契约
 
