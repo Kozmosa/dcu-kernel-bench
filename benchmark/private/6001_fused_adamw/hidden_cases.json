@@ -1,0 +1,11 @@
+{
+  "task_id": "6001_fused_adamw",
+  "cases": [
+    {"name": "hidden_adamw_step1_unit_f32",   "variant": "adamw",            "lr": 1e-3, "beta1": 0.9,  "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.05, "shape": [1],          "dtype": "float32", "step": 1,    "seed": 6101},
+    {"name": "hidden_trf_step1_nonpow2_f32",  "variant": "transformer_adamw", "lr": 0.01, "beta1": 0.9,  "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.1,  "shape": [257, 33],    "dtype": "float32", "step": 1,    "seed": 6102},
+    {"name": "hidden_adamw_altbetas_3d_f32",  "variant": "adamw",            "lr": 0.02, "beta1": 0.8,  "beta2": 0.95,  "eps": 1e-8, "weight_decay": 0.15, "shape": [3, 5, 123],  "dtype": "float32", "step": 2,    "seed": 6103},
+    {"name": "hidden_trf_bigstep_f32",        "variant": "transformer_adamw", "lr": 0.05, "beta1": 0.9,  "beta2": 0.999, "eps": 1e-6, "weight_decay": 0.2,  "shape": [401],        "dtype": "float32", "step": 1000, "seed": 6104},
+    {"name": "hidden_adamw_sample4d_f16",     "variant": "adamw",            "lr": 0.01, "beta1": 0.9,  "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.1,  "shape": [2, 3, 4, 5], "dtype": "float16", "step": 5,    "seed": 6105},
+    {"name": "hidden_trf_nonpow2_f16",        "variant": "transformer_adamw", "lr": 0.01, "beta1": 0.85, "beta2": 0.98,  "eps": 1e-8, "weight_decay": 0.1,  "shape": [873, 1245],  "dtype": "float16", "step": 3,    "seed": 6106}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "task_id": "5004_deform_conv2d_bwd",
+  "cases": [
+    {"name": "hidden_dgrad_min_1x1_r1",  "n": 1, "c": 1,  "h": 1,  "w": 1,  "out_c": 1,   "r": 1, "s": 1, "stride_h": 1, "stride_w": 1, "pad_h": 0, "pad_w": 0, "dil_h": 1, "dil_w": 1, "variant": "dgrad", "dtype": "float32", "seed": 5104},
+    {"name": "hidden_wrw_r1_nonpow2",    "n": 3, "c": 5,  "h": 11, "w": 9,  "out_c": 4,   "r": 1, "s": 1, "stride_h": 1, "stride_w": 1, "pad_h": 0, "pad_w": 0, "dil_h": 1, "dil_w": 1, "variant": "wrw",   "dtype": "float32", "seed": 5105},
+    {"name": "hidden_dgrad_dil4x4",      "n": 2, "c": 6,  "h": 23, "w": 21, "out_c": 7,   "r": 4, "s": 4, "stride_h": 1, "stride_w": 1, "pad_h": 2, "pad_w": 2, "dil_h": 2, "dil_w": 2, "variant": "dgrad", "dtype": "float32", "seed": 5106},
+    {"name": "hidden_wrw_strided_odd",   "n": 2, "c": 8,  "h": 19, "w": 17, "out_c": 6,   "r": 3, "s": 3, "stride_h": 2, "stride_w": 2, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "wrw",   "dtype": "float32", "seed": 5107},
+    {"name": "hidden_dgrad_pad0_r5s3",   "n": 1, "c": 4,  "h": 13, "w": 15, "out_c": 3,   "r": 5, "s": 3, "stride_h": 1, "stride_w": 1, "pad_h": 0, "pad_w": 0, "dil_h": 1, "dil_w": 1, "variant": "dgrad", "dtype": "float32", "seed": 5108},
+    {"name": "hidden_wrw_wide_k32",      "n": 4, "c": 16, "h": 16, "w": 16, "out_c": 32,  "r": 3, "s": 3, "stride_h": 1, "stride_w": 1, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "wrw",   "dtype": "float32", "seed": 5109}
+  ]
+}

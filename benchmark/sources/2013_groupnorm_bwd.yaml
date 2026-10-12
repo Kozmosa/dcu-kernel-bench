@@ -1,0 +1,86 @@
+task_id: "2013_groupnorm_bwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/groupnorm/groupnorm_bwd.py
+      sha256: 9c8d94000e3e7dbf91c56b04eecfa0ac5ba3a043a47c33ff191350792852d99b
+      role: semantic_spec   # 主样例（I/O 契约来源）：graph.groupnorm_backward(x, dy, scale, epsilon, mean, inv_variance, groups) 三输出 dx/dbias/dscale；x/dy 为 (2,16,512,512) NCHW fp32、scale (C,) 一维、epsilon=1e-5 graph 标量（(1,1,1,1) CPU 张量 set_value）、groups=2、mean/inv_variance 以入参形式声明 (groups*batch,) float32（即统计量 (N, G) 行主序展平、恒 float32 的形状依据）；dbias 输出不依赖 bias 取值，故反向签名不含 bias
+    - path: python/groupnorm/groupnorm_fwd.py
+      sha256: 41b64f1d111ad5140de23f7d3fcb99e8ab531877d1b0833579b31ec900d4dd37
+      role: semantic_spec   # 关联训练前向口径（即 2012_groupnorm_fwd 的主样例）：本题反传的前向即该口径——逐组有偏统计、inv_var=1/sqrt(有偏方差+eps)、逐通道仿射、groups=2、eps=1e-5
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch：对内联重建的 2012 同口径前向 autograd 反传（enable_grad 包裹，恒等拼接使统计量取值=题面给定保存值、导数结构取前向图），不依赖任何闭源库；生成侧核心计算要求在提交文件内以 Triton kernel 完成（task.yaml forbidden 强制）
+  calls_closed_libs: false        # 题目本体不调用 hipDNN/MIOpen；样例的 hipDNN graph 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 miopen/hipdnn
+  builds_standalone: true
+  has_reference: true             # 语义金标内联于题目文件 Model（2012 同口径前向 autograd 反传，reference 不受 forbidden 约束；在线评测器 no_grad 调用下经 enable_grad 生存）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集与 variant 划分：hipDNN 样例集 groupnorm_bwd 单样例的完整反向
+    路径——graph.groupnorm_backward 的三输出 dx/dscale/dbias 全梯度（无
+    variant 分维；"变体"体现为多逻辑输出的单张量打包协议）。语义口径与
+    冲突处理：样例仅 graph 构造/执行冒烟、无数值 oracle，I/O 契约按样例
+    入参逐项移植（x/dy (N,C,H,W)、scale (C,)、mean/inv_variance 以入参
+    给定且形状 (groups*batch,) float32——统计量 (N, G) 行主序展平的形状
+    依据；epsilon=1e-5；groups=2），数值语义取行业标准 GroupNorm 训练反向
+    （与 PyTorch native_group_norm autograd / cuDNN BatchNormBackward 同构
+    的完整链式公式）并在题面逐式写明：xhat=(x-mean_ng)*inv_var_ng、
+    dgamma[c]=Σ_{n,h,w} dy·xhat、dbeta[c]=Σ_{n,h,w} dy、
+    dx=(inv_var_ng/D)(D·dy·scale_c − S_ng − xhat·T_ng)，其中
+    S_ng=Σ_{c'∈g,h,w} dy·scale_{c'}、T_ng=Σ_{c'∈g,h,w} dy·xhat·scale_{c'}
+    （D=(C//G)*H*W）。反向图必须以 x 为输入的样例接口本身即印证 dx 取完整
+    链式公式（仅 xhat 缩放式反向无需 x）。输出契约：样例输出序
+    dx/dbias/dscale 归一为题面段序 dx/dgamma/dbeta（沿用 2011"dgamma 段在
+    前、dbeta 段在后"的打包约定、参照 1018 平铺拼接），按 model_class 单张
+    量硬约束打包为一维 float32 [dx | dgamma | dbeta]（长度
+    N*C*H*W + 2C，分段协议写入题面与 task.yaml）。reference 专项口径（题
+    面约束"reference 对 2012 同口径前向用 autograd 反传"的实现）：前向图
+    逐式同 2012 reference（组内有偏统计→rsqrt(有偏方差+eps)→
+    repeat_interleave 通道广播→逐通道仿射），给定统计量经恒等拼接
+    （given + t − t.detach()，取值恒等、导数走前向图）作为求值点——即
+    "在给定保存统计量处对 2012 前向反传"；在线评测器在 no_grad 下调用
+    reference forward，反传段以 torch.enable_grad() 包裹生存（构建自检
+    实测 no_grad 包裹下输出与常规路径逐位一致）。统计量口径：样例以独立
+    随机值填充 mean/inv_variance（仅演示接口，非训练语义）；题目全部评测
+    case 的统计量按该前向口径由 x 确定性导出（训练快照口径，2011 的
+    stats="derived" 缺省同款，不设 random 口径——该口径下"按给定值消费"
+    与"由 x 重算"数值重合，消费语义靠题面软约束钉死，autograd 金标无法
+    在非 derived 统计量上仲裁闭式公式，如实记录）。eps：样例 epsilon 为
+    graph 标量 1e-5；题目 eps 为 init 超参，仅参与统计量导出与前向导数
+    结构，反向闭式数学不含 eps（eps 已在前向吸收，2011 同款表述），隐藏
+    case hidden_eps_custom_f32 显式携带自定义 eps 覆盖该路径。dtype/shape
+    域：样例 dtype 仅 float32，故 fp32 为主档（容差 1e-3，为组内归约重结
+    合误差留余量），补充 fp16/bf16 输入量化档（输入按该 dtype 生成后
+    cast fp32 全程 float32 计算，输出恒 float32 不回 cast——2012 同款，
+    避免量化口径不一致污染统一容差档），容差 2e-2 与家族一致；shape 放宽
+    为各维 >= 1 任意组合（含全 1、非 2 幂、非对齐），G 域为整除 C 的任意
+    1<=G<=C（G=1 全通道、G=C 逐通道、D=1（xhat=0/dx=0/dgamma=0）与 C=1、
+    N=1 边界在隐藏 case 覆盖）。数值验证（构建自检
+    tmp/build_check/2013_groupnorm_bwd.py，全部 8 隐藏 case，CPU 双
+    oracle）：Model（2012 同口径前向 autograd 反传）对独立闭式循环 oracle
+    （题面公式直译，显式 per-group 循环，不同代码路径）——dx 段
+    max|Δ|<=1.9e-6（最大 rel 4.6e-5）、dgamma 段 max|Δ|<=3.1e-4（量级
+    ~5e2 的大归约段，rel<=1.5e-5）、dbeta 段 max|Δ|<=1.8e-4（rel<=2.0e-6），
+    全部在 float32 容差 1e-3/1e-3 内且有约两个数量级裕量；
+    torch.ops.aten.native_group_norm 训练前向 autograd 第三路径交叉
+    rel<=1.3e-4（D=1 边界 dx=dgamma=0 与循环 oracle 逐位一致，对 native
+    的残差为 atol 量级 3.3e-5）；no_grad 包裹下 forward 输出与常规路径
+    逐位一致（在线评测器 no_grad 调用路径生存）。另：镜像字节一致、四
+    json 与 task.yaml / 本 yaml 可解析、audit_model_class 消费路径
+    （resolve_init_args 取 groups/eps + make_inputs(**fields)）全 case 可
+    构造；静态审计正反两用实测：干净
+    候选（_groupnorm_bwd_kernel 合法命名 + docstring 声明禁用项）通过、
+    作弊候选（F.group_norm / autograd / torch.nn.GroupNorm）被拦。
+    留作后续变体：groupnorm_swish 融合反向、instancenorm /
+    layernorm 反向样例、5D (N,C,D,H,W) 与 NHWC 布局、推理 phase 变体。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调题目
+    文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，随机
+    消费顺序 x -> dy -> scale，统计量不消费 RNG）；Model 构造超参由
+    audit_model_class.resolve_init_args 按 task.yaml io.init_inputs 字段
+    名从 case 取（groups 必带，eps 缺省 1e-5，hidden_eps_custom_f32 显式
+    携带自定义 eps）。

@@ -1,0 +1,61 @@
+task_id: "5004_deform_conv2d_bwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/deformconvolution/deform_convolution_bwd.py
+      sha256: 479e37255db29f5543d63b4764fcc0c59e15c9f107f282661ad7cb2952f07772
+      role: official_sample  # deform_conv_dgrad 图：dgrad 方向输出契约 dx/doffset/dmask 与各张量维度（语义唯一权威）
+    - path: python/deformconvolution/deform_convolution_wrw.py
+      sha256: eee6de11c9c7da5d264c2ec3067ec91cf6f85e202ffeee3f666bfd8ee9a7d21b
+      role: official_sample  # deform_conv_wgrad 图：wrw 方向输出契约 dw(k,c,r,s)（无 weight 输入）
+    - path: python/deformconvolution/deform_convolution.py
+      sha256: 67b519f1b58cea6e14592a9711836721c051ebe82d1d94bf722e80abb0fb60b9
+      role: official_sample  # deform_conv_fprop 图：前向语义口径（offset/mask 通道布局、输出尺寸公式、bias 仅前向）
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（手写 DCNv2 前向 + autograd 反传），不依赖任何闭源库
+  calls_closed_libs: false        # 题目本体不调用闭源库；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用
+  builds_standalone: true
+  has_reference: true             # 手写 DCNv2 前向（零填充双线性采样 + mask 调制）autograd 反传内联于题目文件 Model
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipdnn_samples deformconvolution 三样例的反向两方向——
+    deform_conv_dgrad（variant="dgrad"：输出 dx/doffset/dmask）与
+    deform_conv_wgrad（variant="wrw"：输出 dw(k,c,r,s)，样例图本就无
+    weight 输入），命名与样例文件/图名对齐。fprop 样例的 bias 仅出现在
+    前向图：两方向反向图（dgrad/wgrad）均不消费 bias，且 bias 平移不改变
+    任何反向输出，故本题不含 bias。dtype 口径：三样例均为
+    hipdnn.data_type.FLOAT / torch.float32，题目域定 float32 单档——
+    反向为跨 (N,out_h,out_w) 的散射/归约累加，半精度数值语义不安全，
+    fp16/bf16 不入题。shape 口径：以样例维度为准适度放宽（样例 dgrad
+    n=1,c=16,k=1、wrw n=4,c=64,k=64，均 3x3 核、stride=1、dilation=1、
+    pad=0），全域允许 R/S=1、奇数与非 2 的幂 H/W、stride/dilation>=1、
+    四向对称 padding>=0；get_inputs 固定族取 n=2,c=16,k=32、pad=1（覆盖
+    填充路径）。语义口径与冲突处理：样例只给出图算子名、张量维度与
+    conv 属性，未内联核实现，语义按 DCNv2 通行定义移植（torchvision/
+    mmcv 一致）——offset 通道行主序对应核采样点（2m 为 H 偏移、2m+1 为
+    W 偏移，m = pm*S + pn）、整数坐标即像素中心的零填充双线性采样、mask
+    逐点调制；reference 以手写前向（标准 torch 可导算子组合）autograd
+    反传保证与前向语义一致（5002_conv2d_bwd 同口径），构建自检
+    tmp/build_check/5004_deform_conv2d_bwd.py 以显式循环解析梯度 oracle
+    （与 autograd 完全不同的代码路径）逐 case 实测偏差。样例的
+    channels_last 内存排布是 hipDNN 图 API 约定，不入题面（NCHW
+    contiguous，与 5002 一致）。输出契约：forward 单张量硬约束——dgrad
+    天然三输出，按一维拼接打包 cat([dx.reshape(-1), doffset.reshape(-1),
+    dmask.reshape(-1)])（段序与样例输出声明序 dx|doffset|dmask 一致，各段
+    C 序展平，段序不得交换，样板同 1018 dq/dk/dv 打包）；wrw 天然单输出
+    (out_c,C,R,S) 无打包（样板同 5002）。留作后续变体：deformable
+    group>1（offset/mask 通道分组）、fprop 样例单独成题（5003 口径）、
+    转置可变形卷积、fp16/bf16（若后续有量化训练场景证据）、以及样例
+    bwd/wrw 的 hipDNN 设备路径性能基线（真机 baseline.json 待测）。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，
+    消费顺序 dy -> weight -> x -> offset -> mask）；Model 构造超参由
+    audit_model_class.resolve_init_args 按 task.yaml io.init_inputs 字段名
+    从 case 取（variant/stride_h/stride_w/pad_h/pad_w/dil_h/dil_w 均在
+    case 内）。

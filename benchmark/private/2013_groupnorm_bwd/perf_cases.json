@@ -1,0 +1,9 @@
+{
+  "task_id": "2013_groupnorm_bwd",
+  "cases": [
+    {"name": "perf_n8c16h512w512_g2_f32",  "batch": 8, "channels": 16, "height": 512, "width": 512, "groups": 2, "dtype": "float32",  "seed": 2213},
+    {"name": "perf_n4c32h256w256_g4_f32",  "batch": 4, "channels": 32, "height": 256, "width": 256, "groups": 4, "dtype": "float32",  "seed": 2214},
+    {"name": "perf_n2c16h512w512_g2_bf16", "batch": 2, "channels": 16, "height": 512, "width": 512, "groups": 2, "dtype": "bfloat16", "seed": 2215}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

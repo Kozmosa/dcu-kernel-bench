@@ -1,0 +1,9 @@
+{
+  "task_id": "5008_conv_bias_act",
+  "cases": [
+    {"name": "perf_resnet_stem_relu_f16", "n": 16, "c": 64,  "h": 112, "w": 112, "k": 128, "r": 3, "s": 3, "variant": "relu",  "dtype": "float16",  "slope": 0.01, "seed": 5901},
+    {"name": "perf_channel_wide_swish_f16", "n": 8, "c": 128, "h": 40, "w": 40,  "k": 128, "r": 3, "s": 3, "variant": "swish", "dtype": "float16",  "slope": 0.01, "seed": 5902},
+    {"name": "perf_nonpow2_prelu_f32",    "n": 12, "c": 48,  "h": 131, "w": 89,  "k": 96,  "r": 3, "s": 3, "variant": "prelu", "dtype": "float32",  "slope": 0.02, "seed": 5903}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

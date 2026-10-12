@@ -1,0 +1,9 @@
+{
+  "task_id": "5004_deform_conv2d_bwd",
+  "cases": [
+    {"name": "perf_dgrad_large",     "n": 8,  "c": 64,  "h": 64, "w": 64, "out_c": 128, "r": 3, "s": 3, "stride_h": 1, "stride_w": 1, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "dgrad", "dtype": "float32", "seed": 5204},
+    {"name": "perf_wrw_large",       "n": 8,  "c": 128, "h": 32, "w": 32, "out_c": 256, "r": 3, "s": 3, "stride_h": 1, "stride_w": 1, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "wrw",   "dtype": "float32", "seed": 5205},
+    {"name": "perf_dgrad_strided",   "n": 16, "c": 32,  "h": 48, "w": 48, "out_c": 64,  "r": 3, "s": 3, "stride_h": 2, "stride_w": 2, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "dgrad", "dtype": "float32", "seed": 5206}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

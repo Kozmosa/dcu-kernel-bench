@@ -1,0 +1,20 @@
+{
+  "task_id": "5007_spconv_indice_pairs",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成（6 个几何超参同时是 Model 的 init 超参）。",
+  "shape_family": {
+    "n": 1024,
+    "batch_size": 2,
+    "input_dims": [4, 32, 32],
+    "ksize": [3, 3, 3],
+    "stride": [1, 1, 1],
+    "padding": [1, 1, 1],
+    "dilation": [1, 1, 1],
+    "dtype": "int32",
+    "kv": 27,
+    "output_dims": [4, 32, 32],
+    "cap": 8192,
+    "out_ndim": 1,
+    "out_len": 88091,
+    "out_layout": "三段一维 int32 拼接：[0, cap*(ndim+1)) = out_indices 展平（容量 cap = min(kv*n, batch_size*prod(output_dims))、行号 >= 有效数 m 的行填 -1）；[cap*(ndim+1), cap*(ndim+1)+2*kv*n) = indice_pairs 展平（(2, kv, n) row-major，平面 0 = 输入行号、平面 1 = 输出行号，每偏移密集前缀槽位、其余 -1）；尾部 kv 个 = indice_num_per_loc"
+  }
+}

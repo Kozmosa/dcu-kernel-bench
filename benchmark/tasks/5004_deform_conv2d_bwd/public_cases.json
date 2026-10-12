@@ -1,0 +1,26 @@
+{
+  "task_id": "5004_deform_conv2d_bwd",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成。",
+  "shape_family": {
+    "n": 2,
+    "c": 16,
+    "h": 16,
+    "w": 16,
+    "out_c": 32,
+    "r": 3,
+    "s": 3,
+    "stride_h": 1,
+    "stride_w": 1,
+    "pad_h": 1,
+    "pad_w": 1,
+    "dil_h": 1,
+    "dil_w": 1,
+    "variant": "dgrad",
+    "dtype": "float32",
+    "out_h": 16,
+    "out_w": 16,
+    "out_ndim": 1,
+    "out_shape": [22016],
+    "out_layout": "dgrad：一维拼接打包（单张量硬约束），段序 dx(N*C*H*W=8192) | doffset(N*2*R*S*out_h*out_w=9216) | dmask(N*R*S*out_h*out_w=4608)，各段为对应 4-D 张量的 C 序 reshape(-1)；wrw：单张量 (out_c, C, R, S)，无打包"
+  }
+}

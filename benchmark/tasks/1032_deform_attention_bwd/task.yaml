@@ -1,0 +1,103 @@
+id: "1032_deform_attention_bwd"
+name: deform_attention_bwd
+family: attention
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  多尺度可变形注意力反向（deform_attn_dgrad）：对 1031 同口径的多尺度可变形
+  注意力前向（value (N, n_keys, heads, D) 按多尺度层拼接、sampling_locations
+  归一化坐标四角点零填充双线性插值、attention_weights 沿 (levels×points) 展
+  平一维 softmax 归一化加权、float32 中间计算），给定上游梯度 grad_output
+  (N, Q, heads*D)，一次调用同时计算 value、sampling_locations、
+  attention_weights 三者的解析梯度：grad_value 逐角点散射累加（越界角点不散
+  射）、grad_sampling_locations 只经插值分数 fx/fy 回传（floor/索引路径梯度
+  为 0 的标准双线性次梯度，x 乘 W_l、y 乘 H_l 缩放，越界角点导数为 0）、
+  grad_attention_weights 为 softmax 反传 g = w*(t - Σw·t)（t 为采样值与上游
+  梯度的内积，L*P=1 时恒为 0）。全部梯度累加 float32，三段分别 cast 回
+  value dtype 后按固定段序一维拼接为单张量 out：grad_value |
+  grad_sampling_locations | grad_attention_weights（行主序展平，段序不得交
+  换，长度 = n*n_keys*heads*D + n*Q*heads*L*P*2 + n*Q*heads*L*P）。fp32 为
+  主，另含 fp16 档（float32 中间计算后 cast 回）。shape 域含非 2 的幂与非
+  16 对齐维度、单层单像素 (1,1)、1×N / N×1 细条层、Q=1、P=1、L=1 等边界值。
+  本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 1032），无需任何框架改动。starter 由框架 loader 从
+  Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: value,              dtype: [float32, float16], layout: contiguous, ndim: 4, shape: [N, n_keys, heads, D]}
+    - {name: spatial_shapes,     dtype: int64,              layout: contiguous, ndim: 2, shape: [L, 2]}
+    - {name: level_start_index,  dtype: int64,              layout: contiguous, ndim: 1, shape: [L]}
+    - {name: sampling_locations, dtype: same_as_value,      layout: contiguous, ndim: 6, shape: [N, Q, heads, L, P, 2]}
+    - {name: attention_weights,  dtype: same_as_value,      layout: contiguous, ndim: 5, shape: [N, Q, heads, L, P]}
+    - {name: grad_output,        dtype: same_as_value,      layout: contiguous, ndim: 3, shape: [N, Q, heads*D]}
+  outputs:
+    - {name: out, dtype: same_as_value, layout: contiguous, ndim: 1, shape: "[n*n_keys*heads*D + n*Q*heads*L*P*2 + n*Q*heads*L*P]；三段拼接：grad_value | grad_sampling_locations | grad_attention_weights，各段行主序展平"}
+  # 本题无构造超参（io.init_inputs 为空 => Model 无参构造）；公开/隐藏 case
+  # 的字段名即 make_inputs 形参：n / n_heads / embed_dims_per_head /
+  # n_queries / n_levels / n_points / spatial_shapes（可省略，缺省逐元素
+  # randint[1, max_size]）/ max_size（可省略，缺省 15）/ dtype / seed
+  init_inputs: []
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下；
+  # 键名与 make_inputs/case 语义字段一致）
+  fixed_family: {n: 2, n_queries: 32, n_heads: 2, embed_dims_per_head: 32, n_levels: 2, n_points: 2, spatial_shapes: "randint[1, 16)（逐轮随全局 RNG 变化，n_keys / value 形状由其推导）", dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "n / n_queries / n_heads / embed_dims_per_head / n_levels / n_points 均为任意正整数（允许 1、非 2 的幂、非 16 对齐）；每层 spatial_shapes[l] = (H_l, W_l) 且 H_l / W_l >= 1（随机生成域 [1, 15]，边界含 1）；n_keys = Σ_l H_l*W_l，value 第 1 维恒等于 n_keys（<= 2^24，保证 fp32 可精确表示索引）"
+    - "level_start_index 必须是各层 H_l*W_l 的前缀和（首元素 0）；spatial_shapes / level_start_index 恒为 int64；在线评测器会把全部输入整体 cast fp32，实现须无损恢复为整数索引"
+    - "sampling_locations 生成域 [0,1)（rand）：最后一维为 (x, y)，第 0 通道沿 W、第 1 通道沿 H，采样坐标 loc_x = x*W_l、loc_y = y*H_l（fp16 输入下个别元素可因 cast 舍入到恰为 1.0，此时采样点完全越界、采样值为 0，按零填充语义处理）；前向为四角点零填充双线性插值（角点越界贡献记 0，不做 clamp / 最近邻回拉），反向梯度只经插值分数 fx/fy 回传（floor 路径梯度 0），越界角点不散射、导数为 0"
+    - "attention_weights 生成域 [0,1) 非负分数（未归一化）：前向先沿 (levels×points) 展平一维做数值稳定 softmax 归一化再加权，反向为该 softmax 的反传 g = w*(t - Σw·t)；L*P=1 时 grad_attention_weights 恒为 0"
+    - "grad_output 生成域 [0,1)（rand，前向输出 (N, Q, heads*D) 布局的上游梯度）；梯度链建立在 float32 中间前向（输出 cast 回 value dtype 之前）上，全部梯度累加 float32，三段梯度分别 cast 回 value dtype；输入值域常规（rand 张量 [0,1)，无 inf/NaN）"
+    - "forward 返回单张量 out：1-D 三段拼接 grad_value | grad_sampling_locations | grad_attention_weights，各段为对应原生形状张量的行主序展平，段序固定不得交换"
+
+tolerance:
+  float32: {atol: 1.0e-3, rtol: 1.0e-3}
+  float16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 中间前向 autograd 反传，三段梯度 cast 回 value dtype 后拼接比较；输出为 1-D 单张量，按三段整体以容差检验（容差按输出 dtype 取档，输出与 value 同 dtype）；L*P=1 时 grad_attention_weights 段须为全零"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。数值差异来源：grad_value 跨
+    （query × 层 × 采样点 × 角点）散射累加的次序、softmax 反传与角点偏导的
+    算术次序。构建自检 tmp/build_check/1032_deform_attention_bwd.py 逐 case
+    实测 reference（float32 autograd 反传）vs 独立手写解析梯度标量循环
+    oracle 的最大绝对/相对偏差（数字见 sources yaml 记录），float32 档容差
+    据此取 atol=rtol=1e-3（与 1031 同档）；fp16 档中间计算强制 float32 后
+    仅剩输出 cast 量化误差与累加次序差，取 atol=rtol=2e-2（与 norm / conv
+    家族低精度档一致）。在线（搜索循环内）由 KernelBenchPaperEvaluator 判
+    定：triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
+    与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - torchvision
+  - torchvision.ops.ms_deform_attn
+  - ms_deform_attn
+  - mmcv
+  - miopen
+  - hipdnn
+  - aiter
+  - torch.nn.functional.grid_sample
+  - F.grid_sample
+  - torch.nn.functional.interpolate
+  - F.interpolate
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.einsum
+  - torch.tensordot
+  - torch.softmax
+  - torch.nn.functional.softmax
+  - F.softmax
+  - torch.autograd
+  - autograd.grad
+  - .backward(
+  - .backward()
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/1032_deform_attention_bwd.yaml，题面元数据不重复携带库源标识

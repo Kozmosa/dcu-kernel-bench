@@ -1,0 +1,12 @@
+{
+  "task_id": "2011_batchnorm_bwd",
+  "cases": [
+    {"name": "hidden_dx_c1_hw1_f32",          "n": 2, "c": 1,  "h": 1,  "w": 1,  "variant": "dx",           "dtype": "float32",  "seed": 2111},
+    {"name": "hidden_dgamma_nchw1_f32",       "n": 1, "c": 1,  "h": 1,  "w": 1,  "variant": "dgamma_dbeta", "dtype": "float32",  "seed": 2112},
+    {"name": "hidden_dx_nonpow2_f16",         "n": 3, "c": 13, "h": 17, "w": 19, "variant": "dx",           "dtype": "float16",  "seed": 2113},
+    {"name": "hidden_dgamma_nonpow2_bf16",    "n": 5, "c": 7,  "h": 11, "w": 23, "variant": "dgamma_dbeta", "dtype": "bfloat16", "seed": 2114},
+    {"name": "hidden_dx_random_stats_f32",    "n": 4, "c": 16, "h": 56, "w": 56, "variant": "dx",           "dtype": "float32",  "seed": 2115, "stats": "random"},
+    {"name": "hidden_dgamma_h1_f16",          "n": 6, "c": 3,  "h": 1,  "w": 32, "variant": "dgamma_dbeta", "dtype": "float16",  "seed": 2116},
+    {"name": "hidden_dx_n1_f16",              "n": 1, "c": 8,  "h": 7,  "w": 7,  "variant": "dx",           "dtype": "float16",  "seed": 2117}
+  ]
+}

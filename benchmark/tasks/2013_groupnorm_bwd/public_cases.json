@@ -1,0 +1,16 @@
+{
+  "task_id": "2013_groupnorm_bwd",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用，随机消费顺序 x -> dy -> scale；mean/inv_var 不消费 RNG，按 2012 前向同口径由 x 确定性导出）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成。",
+  "shape_family": {
+    "batch": 2,
+    "channels": 16,
+    "height": 512,
+    "width": 512,
+    "groups": 2,
+    "dtype": "float32",
+    "eps": 1e-05,
+    "out_ndim": 1,
+    "out_shape": [8388640],
+    "out_layout": "单张量一维 float32 三段紧排：[0, N*C*H*W) dx | [N*C*H*W, N*C*H*W+C) dgamma | [N*C*H*W+C, N*C*H*W+2*C) dbeta（N=2,C=16 时总长 2*16*512*512+32 = 8388640）"
+  }
+}

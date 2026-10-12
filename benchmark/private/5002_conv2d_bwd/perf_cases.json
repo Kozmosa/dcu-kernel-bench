@@ -1,0 +1,9 @@
+{
+  "task_id": "5002_conv2d_bwd",
+  "cases": [
+    {"name": "perf_dgrad_n16_c64_34x34_k3",     "n": 16, "c": 64,  "h": 34, "w": 34, "out_c": 128, "r": 3, "s": 3, "stride_h": 1, "stride_w": 1, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "dgrad", "dtype": "float32", "seed": 2602},
+    {"name": "perf_wgrad_n8_c128_33x33_k3",     "n": 8,  "c": 128, "h": 33, "w": 33, "out_c": 256, "r": 3, "s": 3, "stride_h": 1, "stride_w": 1, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "wgrad", "dtype": "float32", "seed": 2603},
+    {"name": "perf_dgrad_n8_c96_56x56_k3_sh2",  "n": 8,  "c": 96,  "h": 56, "w": 56, "out_c": 96,  "r": 3, "s": 3, "stride_h": 2, "stride_w": 2, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "dgrad", "dtype": "float32", "seed": 2604}
+  ],
+  "timing": {"warmup_iters": 5, "repeat_iters": 20, "reduction": "median"}
+}

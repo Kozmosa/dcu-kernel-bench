@@ -1,0 +1,11 @@
+{
+  "task_id": "5007_spconv_indice_pairs",
+  "cases": [
+    {"name": "hidden_1d_sample_params",        "n": 3,   "batch_size": 1, "input_dims": [4],        "ksize": [2],   "stride": [2],    "padding": [0],    "dilation": [1], "seed": 5307},
+    {"name": "hidden_2d_nonpow2_stride2",      "n": 37,  "batch_size": 1, "input_dims": [19, 17],   "ksize": [2, 2], "stride": [2, 2], "padding": [0, 0], "dilation": [1, 1], "seed": 5308},
+    {"name": "hidden_3d_nonpow2_dil2_pad2",    "n": 53,  "batch_size": 1, "input_dims": [9, 11, 13], "ksize": [3, 3, 3], "stride": [1, 1, 1], "padding": [2, 2, 2], "dilation": [2, 2, 2], "seed": 5309},
+    {"name": "hidden_min_n1_1d",               "n": 1,   "batch_size": 1, "input_dims": [7],        "ksize": [3],   "stride": [1],    "padding": [1],    "dilation": [1], "seed": 5310},
+    {"name": "hidden_2d_sparse_kv9_multibatch", "n": 23, "batch_size": 2, "input_dims": [11, 13],   "ksize": [3, 3], "stride": [1, 1], "padding": [1, 1], "dilation": [1, 1], "seed": 5311},
+    {"name": "hidden_1d_k5_stride3",           "n": 41,  "batch_size": 1, "input_dims": [61],       "ksize": [5],   "stride": [3],    "padding": [2],    "dilation": [1], "seed": 5312}
+  ]
+}

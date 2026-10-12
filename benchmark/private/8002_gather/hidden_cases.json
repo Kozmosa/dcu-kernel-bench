@@ -1,0 +1,14 @@
+{
+  "task_id": "8002_gather",
+  "cases": [
+    {"name": "hidden_gather_1d_min_f32",        "variant": "gather",         "data_shape": [1],           "index_shape": [1],        "axis": 0,  "dtype": "float32",  "seed": 8301},
+    {"name": "hidden_gather_3d_nonpow2_f32",    "variant": "gather",         "data_shape": [3, 7, 5],     "index_shape": [13],       "axis": 1,  "dtype": "float32",  "seed": 8302},
+    {"name": "hidden_gather_2d_negaxis_f16",    "variant": "gather",         "data_shape": [37, 129],     "index_shape": [257],      "axis": -1, "dtype": "float16",  "seed": 8303},
+    {"name": "hidden_gather_4d_prime_f32",      "variant": "gather",         "data_shape": [2, 3, 1013, 17], "index_shape": [511],   "axis": 2,  "dtype": "float32",  "seed": 8304},
+    {"name": "hidden_gather_2d_wide_bf16",      "variant": "gather",         "data_shape": [1024, 333],   "index_shape": [4096],     "axis": -1, "dtype": "bfloat16", "seed": 8305},
+    {"name": "hidden_gelem_2d_sample_f32",      "variant": "gather_elements", "data_shape": [2, 3],       "index_shape": [2, 3],     "axis": 1,  "dtype": "float32",  "seed": 8306},
+    {"name": "hidden_gelem_2d_kne_f16",         "variant": "gather_elements", "data_shape": [5, 8],       "index_shape": [5, 3],     "axis": 1,  "dtype": "float16",  "seed": 8307},
+    {"name": "hidden_gelem_3d_negaxis_bf16",    "variant": "gather_elements", "data_shape": [4, 101, 7],  "index_shape": [4, 101, 5], "axis": -1, "dtype": "bfloat16", "seed": 8308},
+    {"name": "hidden_gelem_4d_axis0_f32",       "variant": "gather_elements", "data_shape": [3, 5, 7, 9], "index_shape": [2, 5, 7, 9], "axis": 0, "dtype": "float32",  "seed": 8309}
+  ]
+}

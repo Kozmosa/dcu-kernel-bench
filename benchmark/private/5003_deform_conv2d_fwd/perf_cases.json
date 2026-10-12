@@ -1,0 +1,9 @@
+{
+  "task_id": "5003_deform_conv2d_fwd",
+  "cases": [
+    {"name": "perf_n8_c32_h64w64_k64_f32_mod",       "n": 8,  "c": 32, "h": 64, "w": 64, "k": 64, "r": 3, "s": 3, "variant": "modulated", "dtype": "float32", "seed": 5103, "stride": [1, 1], "padding": [1, 1], "dilation": [1, 1]},
+    {"name": "perf_n8_c64_h48w80_k64_stride2_f32",   "n": 8,  "c": 64, "h": 48, "w": 80, "k": 64, "r": 3, "s": 3, "variant": "modulated", "dtype": "float32", "seed": 5104, "stride": [2, 2], "padding": [1, 1], "dilation": [1, 1]},
+    {"name": "perf_n16_c16_h32w32_k16_dil2_f32_mod", "n": 16, "c": 16, "h": 32, "w": 32, "k": 16, "r": 3, "s": 3, "variant": "modulated", "dtype": "float32", "seed": 5105, "stride": [1, 1], "padding": [2, 2], "dilation": [2, 2]}
+  ],
+  "timing": {"warmup_iters": 5, "repeat_iters": 20, "reduction": "median"}
+}

@@ -1,0 +1,13 @@
+{
+  "task_id": "8003_scatter_nd",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成；本题 Model 无构造超参（task.yaml io.init_inputs 为空），case 仅含 make_inputs 语义字段。",
+  "shape_family": {
+    "data_shape": [4, 4],
+    "num_updates": 2,
+    "index_dtype": "int64",
+    "dtype": "float32",
+    "out_ndim": 2,
+    "out_shape": [4, 4],
+    "out_layout": "与 data 同形状同 dtype、单张量输出（无分段打包）：命中位置 = updates 对应元素（覆盖写，indices 元组互异故至多写一次），未命中位置 = data 原值逐位保留"
+  }
+}

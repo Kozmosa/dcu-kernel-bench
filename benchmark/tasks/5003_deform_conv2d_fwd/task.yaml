@@ -1,0 +1,91 @@
+id: "5003_deform_conv2d_fwd"
+name: deform_conv2d_fwd
+family: conv
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  可变形 2D 卷积前向家族（调制型 / 无掩码型）：对 (N, C, H, W) 输入，在常规
+  卷积采样网格 (oi*stride + i*dilation - padding) 上叠加逐（输出位置 × 卷积核
+  位置）偏移，offset 通道按卷积核位置成对排布（偶数通道 = y 偏移、奇数通道 =
+  x 偏移，p = i*S + j 行主序），对偏移后的实数坐标手写双线性插值采样（角点
+  越界贡献记 0 的零填充语义，不做 clamp）；variant="modulated" 时采样值再乘
+  以逐位置调制掩码 mask（通道按卷积核位置排布），variant="plain" 时 mask 不
+  参与计算。插值与加权归约全程 float32，输出 out 为单张量
+  (N, K, H_out, W_out)（天然单输出，无打包），cast 回输入 dtype。fp32 为主，
+  另含 fp16/bf16 档（float32 中间计算后 cast 回）。shape 域含非 2 的幂与非
+  16 对齐维度、非方形空间尺寸、膨胀/跨步/非对称 padding、H_out=1 等边界值；
+  offset 为 randn 量级任意实数，允许把采样点推出图像边界。本题为自包含
+  KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat --level 3
+  --problem-id 5003），无需任何框架改动。starter 由框架 loader 从 Model 自动
+  生成 ModelNew scaffold（锚点：helpers / init_body / forward_stmt_N），本任务
+  包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,      dtype: [float32, float16, bfloat16], layout: contiguous, ndim: 4, shape: [N, C, H, W]}
+    - {name: offset, dtype: same_as_x,                    layout: contiguous, ndim: 4, shape: [N, 2*R*S, H_out, W_out]}
+    - {name: weight, dtype: same_as_x,                    layout: contiguous, ndim: 4, shape: [K, C, R, S]}
+    - {name: bias,   dtype: same_as_x,                    layout: contiguous, ndim: 1, shape: [K]}
+    - {name: mask,   dtype: same_as_x,                    layout: contiguous, ndim: 4, shape: [N, R*S, H_out, W_out]}
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: 4, shape: "[N, K, H_out, W_out]；天然单张量输出，无多输出打包；H_out = (H + 2*padding_h - dilation_h*(R-1) - 1) // stride_h + 1，W_out 同理"}
+  init_inputs:
+    - {name: variant,  dtype: str, layout: scalar}      # "modulated" | "plain"
+    - {name: stride,   dtype: int, layout: "list(2)"}   # (stride_h, stride_w)
+    - {name: padding,  dtype: int, layout: "list(2)"}   # (padding_h, padding_w)，>= 0
+    - {name: dilation, dtype: int, layout: "list(2)"}   # (dilation_h, dilation_w)
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下；
+  # 键名与 make_inputs/case 语义字段一致）
+  fixed_family: {n: 4, c: 16, h: 32, w: 32, k: 32, r: 3, s: 3, stride: [1, 1], padding: [1, 1], dilation: [1, 1], variant: "modulated", dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "n/c/h/w/k/r/s 均 >= 1，r/s 为奇数（1/3/5 档）；dilation_h*(r-1)+1 <= h + 2*padding_h 且 w 同理（保证 H_out/W_out >= 1）；允许非 2 的幂、非 16 对齐、非方形 h/w"
+    - "offset 通道数恰为 2*R*S（每卷积核位置 2 通道：偶数 = y 偏移、奇数 = x 偏移，p = i*S + j 行主序），mask 通道数恰为 R*S；modulated 与 plain 两 variant 的张量布局完全一致"
+    - "offset 为任意实数（randn 量级，允许把采样点推出图像边界）：越界按零填充语义（有效角点照常加权），不做 clamp / 最近邻回拉"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；插值与加权归约全程 float32，输出 cast 回输入 dtype"
+    - "variant=plain 时 mask 为垃圾输入，不得影响输出"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 构建采样网格、手写双线性插值（四角点、越界角点记 0）并加权归约，输出 cast 回输入 dtype 后比较；容差按 case 的输入 dtype 取档，输出与输入同 dtype"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。双线性插值存在多种等价算术
+    次序（逐点四角点加权求和 vs 先 y 后 x 因式分解）、归约存在多种累加
+    次序（逐卷积核位置累加 vs 一次性 GEMM），float32 下相互偏差约 1e-5
+    ～ 1e-4 量级（构建自检 tmp/build_check/5003_deform_conv2d_fwd.py 逐
+    case 实测，见 sources yaml 记录），float32 档容差据此放宽到
+    atol=rtol=1e-3；fp16/bf16 档输出值域达 O(10)，低精度 ulp 主导，取
+    atol=rtol=2e-2。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
+    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与
+    上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - torchvision
+  - torchvision.ops.deform_conv2d
+  - miopen
+  - hipdnn
+  - aiter
+  - torch.nn.functional.conv2d
+  - F.conv2d
+  - nn.Conv2d
+  - torch.nn.functional.grid_sample
+  - F.grid_sample
+  - torch.nn.functional.unfold
+  - F.unfold
+  - torch.matmul
+  - torch.bmm
+  - torch.mm
+  - torch.einsum
+  - torch.tensordot
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/5003_deform_conv2d_fwd.yaml，题面元数据不重复携带库源标识

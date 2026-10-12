@@ -1,0 +1,75 @@
+task_id: "6001_fused_adamw"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: "样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准"
+  files:
+    - path: python/adamw/adamw.py
+      sha256: e12ada845849658af31d73e3fc34305e9d9d219020448978df38195cf0625bba
+      role: device_kernel   # hipDNN graph API 标准 AdamW 样例：params/grads/exp_avg/exp_avg_sq/max_exp_avg_sqs 五张量图执行（in-place），本题 variant="adamw" 的 I/O 契约与 fp32 口径来源
+    - path: python/adamw/transformer_adamw.py
+      sha256: 123a7ea4c6856e72c5dce57e4ffd5e2c34f541c68921e6de91580eaf509dfae8
+      role: device_kernel   # hipDNN graph API Transformer AdamW 样例（is_transformeradamw=True）：四张量、无 max_exp_avg_sqs，本题 variant="transformer_adamw" 的 I/O 契约来源
+    - path: cpp/adamw/Adamw.cpp
+      sha256: ba1411b51a1484eee9389cd299c284caffef9f19b9cc90451fa277956d164e0b
+      role: official_test   # 属性证据：transformeradamw=false + 提供 max_exp_avg_sqs；io=half / compute=FLOAT——fp16 io、fp32 内部计算口径的样例依据
+    - path: cpp/adamw/TransformerAdamw.cpp
+      sha256: df4fdc8a377e20c9b2f5b702d5311d5fbacb0864dccfad6668f66899adffc6bb
+      role: official_test   # 属性证据：correct_bias=false + transformeradamw=true——transformer 变体"无 bias correction"口径的唯一显式样例依据
+    - path: python/torch_wrapper/test_adamw.py
+      sha256: ddea598fb3dbd98a6e5959c47aa7cf20085df8c09a96191eebf1fb640e992977
+      role: official_test   # hipdnn.TorchAdamW(lr=1e-3, betas=(0.9,0.999), weight_decay=0.01)：超参口径=torch.optim.AdamW 缺省族的样例依据
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（解耦权重衰减+矩更新+bias correction+sqrt 逐元素式），不依赖任何库的优化器入口
+  calls_closed_libs: false        # 题目本体不调用闭源库；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 hipdnn/miopen
+  builds_standalone: true
+  has_reference: true             # reference.py 内联 fp32 eager 实现（torch.optim.AdamW 单步口径 + transformer 无 bias correction 分支）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipdnn_samples 的 adamw 双样例——标准 AdamW（python/adamw/
+    adamw.py，五张量含 max_exp_avg_sqs）与 Transformer 调度 AdamW
+    （python/adamw/transformer_adamw.py，四张量无 max_exp_avg_sqs），
+    分别对应本题 variant="adamw" 与 variant="transformer_adamw"。
+    语义口径依据与推断链：两样例均为 hipDNN graph API 演示，图节点不暴露
+    lr/beta/eps/weight_decay/step 等超参（闭源插件内部封装），样例可读证据
+    仅有三处——(a) python/torch_wrapper/test_adamw.py 以
+    hipdnn.TorchAdamW(lr=1e-3, betas=(0.9,0.999), weight_decay=0.01) 训练，
+    即 torch.optim.AdamW 缺省超参族；(b) cpp/adamw/TransformerAdamw.cpp 显式
+    set_correct_bias(false) + set_transformeradamw(true)，即 transformer
+    变体 = AdamW 去.bias correction（Megatron/apex Transformer 训练口径）；
+    (c) cpp/adamw/Adamw.cpp set_transformeradamw(false)（bias correction
+    缺省开启）且 io=half/compute=FLOAT。题目据此定式：两 variant 共享解耦
+    权重衰减 p *= (1-lr*wd) 与矩更新，唯一差异为 bias correction 开关；
+    eps 加在 sqrt 之外（与 torch.optim.AdamW / apex 同式）；超参缺省值取
+    (a)（lr=1e-3, beta1=0.9, beta2=0.999, eps=1e-8, weight_decay=0.01），
+    case 可变。对样例的适配（题目契约显式改写，非样例原样）：样例为图执行
+    in-place 更新且不暴露 step，题目改为 functional（out-of-place）单步、
+    step 作为 0 维 float32 张量输入、超参上提为构造常量；样例中的
+    max_exp_avg_sqs（AMSGrad 可选输出，仅 cpp 标准样例传入）不进入本题
+    I/O 契约，与 bias correction 组合的 AMSGrad 变体留作后续独立题。
+    打包协议：forward 返回单张量=更新后参数（同 params 形与 dtype），
+    无拼接分段；不返回更新后状态，状态正确性经 step/矩输入间接进入参数
+    更新被隐藏 case 覆盖。dtype 域：float32 为主（两 python 样例口径），
+    float16 为 io cast 档（cpp 样例 io=half/compute=FLOAT 依据，内部必须
+    fp32 计算，容差按 ULP 口径放宽并在 task.yaml 说明）；bf16 无样例证据，
+    不入域。shape 域：样例为 4-D NCHW（python 1x2x3x4 / cpp 2x3x4x5，
+    算子本质逐元素），放宽为 ndim 1-4 任意形状（含非 2 的幂与边界规模）。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成
+    （torch.Generator(seed)，消费顺序 params -> grads -> exp_avg ->
+    exp_avg_sq，step 不消费 RNG）；Model 构造超参由
+    audit_model_class.resolve_init_args 按 task.yaml io.init_inputs 字段名
+    从 case 取（variant/lr/beta1/beta2/eps/weight_decay 均在 case 内）。
+    禁项设计：torch.optim 全族与 apex/deepspeed/bitsandbytes/fused_adam/
+    hipdnn/miopen（闭源与 fused 优化器捷径），加 ATen 组合捷径
+    addcdiv/addcmul（含方法与原地形式）及 _foreach_addcdiv/_foreach_addcmul
+    多张量原语（裸子串条目，含原地 _ 形式与 torch.ops.aten/from-import
+    调用形态；单调用即可完成核心更新步，复核整改项）；纯运算符表达式不受
+    子串匹配约束，由题面"核心计算必须自写 Triton kernel"条款兜底。留作
+    后续变体：
+    AMSGrad（max_exp_avg_sq + bias correction 组合）、多 step 循环训练段、
+    bf16 档（待有样例证据）、hipdnn.TorchAdamW torch 封装层出题。

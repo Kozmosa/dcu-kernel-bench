@@ -1,0 +1,120 @@
+id: "5006_spconv_bwd"
+name: spconv_bwd
+family: conv
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  稀疏卷积（gathered 形式 spconv）反向家族：对同族前向
+  y = spconv_fprop(features, filters, indice_pairs, indice_num_per_loc)
+  （先置全零、按索引对 gather-GEMM-scatter 累加的稀疏活跃点卷积）做精确
+  反传。给定上游梯度 out_bp = dL/dy (num_act_out, c_out)，variant="dgrad"
+  时返回对输入特征的梯度 dx (n, c_in)，variant="wgrad" 时返回对权值缓冲的
+  梯度 dF (c_out, c_in, kv)（按 filters 的同一布局映射解释）。两方向均天然
+  单张量输出（无拼接打包）。前向语义（本题口径的唯一权威）：
+      对每个 kernel 偏移 k ∈ [0, kv)：
+          n_k = indice_num_per_loc[k]
+          对每个 j ∈ [0, n_k)：
+              in_idx  = indice_pairs[0, k, j]      # 输入行号 ∈ [0, n)
+              out_idx = indice_pairs[1, k, j]      # 输出行号 ∈ [0, num_act_out)
+              out[out_idx, :] += features[in_idx, :] @ W[:, :, k].T
+  其中数学权重 W 与 contiguous filters 张量 F 满足布局映射
+  W[o, i, k] = F.reshape(c_out, kv, c_in)[o, k, i]。反向即该前向对
+  features / filters 的伴随，dx / dF 的数值分别与 filters / features 的数值
+  无关（未消费张量仅提供形状约定）。float32 为主 dtype，补充 fp16/bf16
+  （fp32 累加、单次 cast）；n/c_in/c_out/kv/num_act_out 允许非 2 的幂与边界
+  值。本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像
+  到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat --level 3
+  --problem-id 5006 --backend triton），无需任何框架改动。starter 由框架
+  loader 从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: features,           dtype: [float32, float16, bfloat16], layout: contiguous, ndim: 2, shape: [n, c_in]}
+    - {name: filters,            dtype: same_as_features,            layout: contiguous, ndim: 3, shape: [c_out, c_in, kv]}
+    - {name: out_bp,             dtype: same_as_features,            layout: contiguous, ndim: 2, shape: [num_act_out, c_out]}
+    - {name: indice_pairs,       dtype: int32,  layout: contiguous, ndim: 3, shape: [2, kv, n]}
+    - {name: indice_num_per_loc, dtype: int32,  layout: contiguous, ndim: 1, shape: [kv]}
+  outputs:
+    - {name: out, dtype: same_as_features, layout: contiguous,
+       shape: "dgrad 时 [n, c_in]；wgrad 时 [c_out, c_in, kv]（两方向均天然单张量，无打包拼接）"}
+  init_inputs:
+    - {name: variant, dtype: str, layout: scalar}   # "dgrad" | "wgrad"
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {n: 1024, c_in: 16, c_out: 32, kv: 9, num_act_out: 768, variant: "dgrad", dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "n, c_in, c_out, kv, num_act_out 均 >= 1（允许非 2 的幂、非 16 对齐、kv=1；num_act_out 与 n 相互独立）"
+    - "行号域：indice_pairs[0] ∈ [0, n)、indice_pairs[1] ∈ [0, num_act_out)，且全部下标 <= 2^24（在线评测把输入张量统一 cast 成 fp32，整型下标需精确可恢复）"
+    - "indice_num_per_loc[k] ∈ [0, n]；j >= indice_num_per_loc[k] 的索引对表项是填充垃圾（可重复、可任意），必须依据 counts 屏蔽、不得读入参与计算（含越界读）"
+    - "dgrad 时 dx 数值与 features 无关、wgrad 时 dF 数值与 filters 无关——未消费张量的数值不得影响输出，其形状须与 io.inputs 一致"
+    - "同一输入/输出行可被任意多个索引对命中（同一 k 内亦可重复），全部按 += 累加；n_k = 0 的偏移整个跳过，全部 n_k = 0 时输出为全零"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；累加全程 float32（fp16/bf16 先无损 cast），最终 cast 回 features 的 dtype"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "输出为单张量，dgrad (n, c_in) / wgrad (c_out, c_in, kv) 均全量直接比较（无分段协议），判据 |out-ref| <= atol + rtol*|ref|；reference 在 float32 中对同族 spconv_fprop 前向做 autograd 精确反传，生成实现以 float32 累加，二者仅差累加顺序；wgrad 输出按 filters 布局映射检验（dF.reshape(c_out, kv, c_in)[o, k, i] = dW_math[o, i, k]）"
+  note: >
+    容差依据（构建自检 tmp/build_check/5006_spconv_bwd.py 实测，CPU float64
+    朴素 oracle——按 (k, j) 标量索引双循环散射/外积累加——基准）：float32
+    全部隐藏 case + 公开固定族 + 3 个 perf case 的最坏判据占用 0.060
+    （wgrad n=8192、c_in=128->c_out=256 的大归约 case，绝对偏差 1.2e-4），
+    公开固定族占用 0.004；float16 最坏占用 0.024；bfloat16 最坏占用 0.189
+    （n=1237 非对称 c_in=13->c_out=29，bf16 尾数舍入主导），均 >=5x 裕量。
+    全零索引对 case（counts_max=0）输出逐位为零实测通过。语义性错误（索引
+    行 0/1 互换、布局映射转置错、未按 counts 屏蔽填充）产生 O(1) 级或行级
+    偏差，远超容差，可被可靠捕获。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为 fp32、
+    allclose(atol=rtol=1e-4)，作用于 get_inputs 固定族（n=1024、kv=9，归约
+    深度 <= n=1024 项，实测 fp32 噪声 ~1e-5）——在线口径更紧但可行，在线
+    结论仍不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）；全局黑名单
+# （rocblas/hipblas*/miopen/hipdnn/cublas/cudnn/cutlass）由 static_audit.py
+# 自动取并集，此处列本题语义捷径（与同族 5005 的 scatter/gather 禁用对齐，
+# 另加反向专属的 autograd/反传捷径）
+forbidden:
+  - aiter
+  - torch.sparse
+  - torch.sparse_coo_tensor
+  - torch.sparse_csr_tensor
+  - torch.sparse_csc_tensor
+  - torch.sparse_mm
+  - torch.matmul
+  - .matmul(
+  - torch.mm
+  - torch.bmm
+  - torch.addmm
+  - torch.baddbmm
+  - torch.einsum
+  - torch.tensordot
+  - torch.nn.functional.linear
+  - torch.nn.Linear
+  - index_add
+  - index_put
+  - torch.index_put
+  - scatter_add
+  - .scatter_(
+  - torch.scatter
+  - scatter_reduce
+  - segment_reduce
+  - torch.gather
+  - index_select
+  - torch.take
+  - torch.sum
+  - torch.ops.aten
+  - torch.autograd
+  - .backward(
+  - as_strided
+  - miopen
+  - hipdnn
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/5006_spconv_bwd.yaml，题面元数据不重复携带库源标识

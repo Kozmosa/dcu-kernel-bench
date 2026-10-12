@@ -1,0 +1,13 @@
+{
+  "task_id": "5006_spconv_bwd",
+  "cases": [
+    {"name": "hidden_sample_dims_f32",   "n": 4,    "c_in": 2,   "c_out": 2,   "kv": 3,  "num_act_out": 3,    "variant": "dgrad", "dtype": "float32",  "seed": 25061},
+    {"name": "hidden_min_f16",           "n": 1,    "c_in": 1,   "c_out": 1,   "kv": 1,  "num_act_out": 1,    "variant": "wgrad", "dtype": "float16",  "seed": 25062},
+    {"name": "hidden_nonpow2_bf16",      "n": 1237, "c_in": 13,  "c_out": 29,  "kv": 7,  "num_act_out": 933,  "variant": "wgrad", "dtype": "bfloat16", "seed": 25063},
+    {"name": "hidden_zeropairs_f32",     "n": 64,   "c_in": 8,   "c_out": 8,   "kv": 4,  "num_act_out": 32,   "variant": "dgrad", "dtype": "float32",  "counts_max": 0, "seed": 25064},
+    {"name": "hidden_sparse_f16",        "n": 512,  "c_in": 32,  "c_out": 64,  "kv": 9,  "num_act_out": 400,  "variant": "wgrad", "dtype": "float16",  "counts_max": 2, "seed": 25065},
+    {"name": "hidden_dense_bf16",        "n": 2048, "c_in": 16,  "c_out": 16,  "kv": 5,  "num_act_out": 1777, "variant": "dgrad", "dtype": "bfloat16", "seed": 25066},
+    {"name": "hidden_tall_f32",          "n": 4096, "c_in": 64,  "c_out": 128, "kv": 27, "num_act_out": 4096, "variant": "wgrad", "dtype": "float32",  "seed": 25067},
+    {"name": "hidden_kv1_odd_f32",       "n": 997,  "c_in": 5,   "c_out": 3,   "kv": 1,  "num_act_out": 501,  "variant": "dgrad", "dtype": "float32",  "seed": 25068}
+  ]
+}

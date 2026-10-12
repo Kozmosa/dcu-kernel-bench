@@ -1,0 +1,92 @@
+id: "7001_ctc_loss"
+name: ctc_loss
+family: loss
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  CTC（Connectionist Temporal Classification）前向损失家族（单一契约，
+  reduction='none'）：输入 probs 为概率张量 (T, N, C)（time-major，输入
+  已是概率而非 logits，等价于题源样例 apply_softmax=False 的调用口径——
+  直接对 probs 取 log、不做 softmax），blank 类别 id 由超参给出（生成域
+  恒为 0）；labels / label_lengths / input_lengths 为整型张量契约（扁平
+  拼接标签、逐序列目标长度、逐序列有效帧数）。reference 以手写 alpha/beta
+  前向-后向动态规划逐序列计算：losses[n] = -log Z_n（合法对齐路径概率和
+  的负对数，逐序列 reduction='none'），gradients[n,t,k] = d losses[n] /
+  d probs[n,t,k]（对概率输入的真实梯度，t 超出该序列有效帧数处为 0）。
+  forward 返回单个一维张量 out（dtype 同 probs，长度 N + N*T*C）：前 N 项
+  为 losses，其余为 gradients 按 (N, T, C) 行主序平铺（单张量打包协议，
+  评测器按单输出比较）。fp32 为主，另含 fp16/bf16（中间计算一律
+  float32）。本题为自包含 KernelBench 题目文件（reference.py 即题目文件，
+  同时镜像到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel
+  的原生 model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 7001），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: probs,         dtype: [float32, float16, bfloat16], layout: contiguous, ndim: 3, shape: [T, N, C]}   # 概率张量（沿类别维严格为正、和为 1）；T=max_time、N=batch、C=num_classes
+    - {name: labels,        dtype: int64, layout: contiguous, ndim: 1, shape: [sum(label_lengths)]}
+    - {name: label_lengths, dtype: int64, layout: contiguous, ndim: 1, shape: [N]}
+    - {name: input_lengths, dtype: int64, layout: contiguous, ndim: 1, shape: [N]}
+  outputs:
+    - {name: out, dtype: same_as_probs, layout: contiguous, ndim: 1, shape: "[N + N*T*C]；out[0:N]=losses，out[N:]=gradients 按 (N,T,C) 行主序平铺"}
+  init_inputs:
+    - {name: blank, dtype: int, layout: scalar}   # 缺省 0（blank_label_id=0），生成域恒为 0
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family:
+    max_time: 500
+    batch: 4
+    num_classes: 5
+    input_lengths: [4, 100, 100, 200]
+    label_lengths: [1, 2, 1, 3]
+    labels: [1, 2, 3, 4, 2, 3, 2]
+    blank: 0
+    dtype: "float32"
+  dynamic: true
+  invariants:
+    - "max_time >= 1、batch >= 1、num_classes >= 2（blank 之外至少 1 个非空类别）；生成域保证 1 <= input_lengths[n] <= max_time、1 <= label_lengths[n] <= input_lengths[n]"
+    - "标签取值 [1, C-1]、不等于 blank 且无连续重复（扩展状态序列可行，Z 有限，无 inf/NaN）；reference 的扩展序列构造对连续重复标签同样正确，但生成域不产生"
+    - "probs 为概率张量：沿类别维每帧严格为正、和为 1（softmax 生成口径）；reference 直接取 log，不做归一化，logits 输入不在本题范围"
+    - "gradients 在 t >= input_lengths[n] 处恒为 0（逐位零，不仅是容差意义）"
+    - "losses 量级 <= max_time*ln(C)（声明域内 < 2e4，fp16 可表示）；整型张量在线评测被统一 cast 为 fp32，整数值可无损恢复"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  float16:  {atol: 5.0e-3, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "单张量打包输出整段一次比较（losses 段与 gradients 段同容差）；reference 在 float32 中做前向-后向再 cast 到 probs dtype。losses 段量级 O(max_time*ln C)，由 rtol 主导；gradients 段元素绝对值 <= 1（概率输入的梯度），由 atol 主导"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与本表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - aiter
+  - torch.nn.functional.ctc_loss
+  - F.ctc_loss
+  - functional.ctc_loss
+  - torch.ctc_loss
+  - torch.nn.CTCLoss
+  - nn.CTCLoss
+  - torch.ops.aten.ctc_loss
+  - torch.ops.aten._ctc_loss
+  - aten.ctc_loss
+  - aten._ctc_loss
+  - .ctc_loss(
+  - warpctc
+  - warp_ctc
+  # 梯度输出题：禁止借 autograd 反传求梯度（torch.autograd / autograd.grad /
+  # tensor.backward）
+  #（注释须独立成行：static_audit.py 的 forbidden 解析器不识别行尾注释）
+  - torch.autograd
+  - autograd
+  - .backward(
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/7001_ctc_loss.yaml，题面元数据不重复携带库源标识

@@ -1,0 +1,12 @@
+{
+  "task_id": "5009_conv_depthtospace",
+  "cases": [
+    {"name": "hidden_dts_crd_min_f16",        "n": 1, "c_in": 0, "k": 8,  "h": 1,   "w": 1,   "variant": "dts",           "mode": "CRD", "block_size": 2, "dtype": "float16",  "seed": 5109},
+    {"name": "hidden_dts_dcr_bs3_nonpow2_f16", "n": 2, "c_in": 0, "k": 18, "h": 61,  "w": 37,  "variant": "dts",           "mode": "DCR", "block_size": 3, "dtype": "float16",  "seed": 5110},
+    {"name": "hidden_cbdts_crd_orig_f16",      "n": 1, "c_in": 8, "k": 16, "h": 128, "w": 128, "variant": "conv_bias_dts", "mode": "CRD", "block_size": 2, "dtype": "float16",  "seed": 5111},
+    {"name": "hidden_cbdts_dcr_nonpow2_bf16",  "n": 3, "c_in": 7, "k": 12, "h": 33,  "w": 45,  "variant": "conv_bias_dts", "mode": "DCR", "block_size": 2, "dtype": "bfloat16", "seed": 5112},
+    {"name": "hidden_cbdts_crd_c1_f32",        "n": 1, "c_in": 4, "k": 4,  "h": 8,   "w": 8,   "variant": "conv_bias_dts", "mode": "CRD", "block_size": 2, "dtype": "float32",  "seed": 5113},
+    {"name": "hidden_cbdts_dcr_bs3_f16",       "n": 2, "c_in": 5, "k": 36, "h": 16,  "w": 17,  "variant": "conv_bias_dts", "mode": "DCR", "block_size": 3, "dtype": "float16",  "seed": 5114},
+    {"name": "hidden_dts_crd_bs4_bf16",        "n": 1, "c_in": 0, "k": 32, "h": 7,   "w": 9,   "variant": "dts",           "mode": "CRD", "block_size": 4, "dtype": "bfloat16", "seed": 5115}
+  ]
+}

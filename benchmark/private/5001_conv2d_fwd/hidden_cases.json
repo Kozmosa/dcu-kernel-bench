@@ -1,0 +1,15 @@
+{
+  "task_id": "5001_conv2d_fwd",
+  "cases": [
+    {"name": "hidden_sample1_r1s1_std",   "n": 4, "c": 16, "h": 56,  "w": 56,  "k": 4,  "r": 1, "s": 1, "variant": "standard",   "dtype": "float32", "seed": 5101},
+    {"name": "hidden_sample2_r1s1_asym",  "n": 4, "c": 16, "h": 56,  "w": 56,  "k": 4,  "r": 1, "s": 1, "variant": "asymmetric", "dtype": "float32", "seed": 5102},
+    {"name": "hidden_canonical_3x3_std",  "n": 2, "c": 16, "h": 56,  "w": 56,  "k": 4,  "r": 3, "s": 3, "variant": "standard",   "dtype": "float32", "seed": 5103},
+    {"name": "hidden_nonpow2_asym_r3s5",  "n": 3, "c": 17, "h": 59,  "w": 47,  "k": 7,  "r": 3, "s": 5, "variant": "asymmetric", "dtype": "float32", "seed": 5104},
+    {"name": "hidden_min_all1_std",       "n": 1, "c": 1,  "h": 1,   "w": 1,   "k": 1,  "r": 1, "s": 1, "variant": "standard",   "dtype": "float32", "seed": 5105},
+    {"name": "hidden_min_all1_asym",      "n": 1, "c": 1,  "h": 1,   "w": 1,   "k": 1,  "r": 1, "s": 1, "variant": "asymmetric", "dtype": "float32", "seed": 5106},
+    {"name": "hidden_r5s5_std_nonpow2",   "n": 5, "c": 8,  "h": 33,  "w": 29,  "k": 6,  "r": 5, "s": 5, "variant": "standard",   "dtype": "float32", "seed": 5107},
+    {"name": "hidden_edge_hout1_std",     "n": 2, "c": 3,  "h": 3,   "w": 4,   "k": 2,  "r": 5, "s": 2, "variant": "standard",   "dtype": "float32", "seed": 5108},
+    {"name": "hidden_edge_hout1_asym",    "n": 1, "c": 2,  "h": 2,   "w": 3,   "k": 3,  "r": 5, "s": 5, "variant": "asymmetric", "dtype": "float32", "seed": 5109},
+    {"name": "hidden_edge_prime_std",     "n": 2, "c": 5,  "h": 13,  "w": 11,  "k": 3,  "r": 3, "s": 7, "variant": "standard",   "dtype": "float32", "seed": 5110}
+  ]
+}

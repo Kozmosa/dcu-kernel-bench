@@ -1,0 +1,64 @@
+task_id: "5009_conv_depthtospace"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/conv_depthtospace_fusion/conv_dts.py
+      sha256: 9a211065d209d163f6ffe243aacae1e3477d4bba52f7458cb97fe5bf6886497d
+      role: semantic_spec   # conv+D2S 样例：conv_fprop → reshape→transpose→reshape 六维重排（DCR demo），outH/outW 公式与 CRD/DCR 排列定义的权威来源
+    - path: python/conv_depthtospace_fusion/conv_bias_dts.py
+      sha256: 5445896e81f916fbd0738a8a087237663eac5e1b84d64b254bc529e13cb83520
+      role: semantic_spec   # variant="conv_bias_dts" 同名词源：conv_fprop → add(bias (1,K,1,1)) → D2S（DCR demo），三算子融合全图
+    - path: python/conv_depthtospace_fusion/conv_bias_dts_add.py
+      sha256: 8e761d291c4083f99c2560658b3a50861174fafeac6ebd06233250777c241100
+      role: semantic_spec   # 指定语义源之一：conv_fprop → add(bias) → D2S（CRD demo）→ 尾部 graph.add(第二输入)；本题取其 conv→bias→dts 前缀，尾部 add 留作后续
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（F.conv2d fp32 中间 + bias 广播 + reshape/permute/reshape 六维重排的 ATen 组合，即语义金标本体，不依赖任何闭源库）；生成侧核心计算要求在提交文件内以 Triton kernel 融合完成（task.yaml forbidden 强制）
+  calls_closed_libs: false        # 题目本体不调用 hipDNN/MIOpen；样例的 hipDNN graph 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 miopen/hipdnn
+  builds_standalone: true
+  has_reference: true             # 语义金标内联于题目文件 Model（fp32 eager ATen 组合，reference 不受 forbidden 约束）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipDNN 样例集 python/conv_depthtospace_fusion 融合族，取
+    conv_dts.py / conv_bias_dts.py / conv_bias_dts_add.py 三例。variant
+    划分：dts（纯 DepthToSpace 数据重排，超分/像素重排场景——三样例共享
+    的 reshape→transpose→reshape 尾段独立成变体，输入直接取 (N,K,H,W)
+    特征图，无卷积）与 conv_bias_dts（conv_fprop → add(bias) → D2S 三算
+    子融合，即 conv_bias_dts.py 全图、conv_bias_dts_add.py 的前缀；指定
+    语义源 conv_bias_dts_add.py 的 main 以 CRD 跑通，是 CRD 口径来源之一，
+    conv_dts.py 的 main 以 DCR 跑通）。语义口径与冲突处理：两指定样例的
+    D2S 尾段逐行同构——卷积输出 (N,K,outH,outW) 先按 mode 重解为六维
+    （CRD: (N,C,bs,bs,outH,outW) / DCR: (N,bs,bs,C,outH,outW)）、经
+    graph.transpose(permutation)（CRD [0,1,4,2,5,3] / DCR [0,3,4,1,5,2]，
+    按 torch.permute 的 gather 语义理解）再 reshape 为
+    (N, K//bs^2, bs*outH, bs*outW)；交叉验证：CRD 与
+    torch.nn.functional.pixel_shuffle 逐位等价，DCR 等价于先按
+    idx=(r*bs+d)*C+c 重排通道再 pixel_shuffle（构建自检
+    tmp/build_check/5009_conv_depthtospace.py 对两条独立推导逐位对拍
+    通过）；outH/outW 按样例公式
+    floor((H+2p-(d*(r-1)+1))/s)+1，conv 超参固定
+    stride/padding/dilation=(1,1)/(1,1)/(1,1)（与 5008 同口径）故
+    outH=H、outW=W；bias 以 (1,K,1,1) 经 graph.add 广播（与 5008 布局
+    约定一致）；精度口径 io HALF（fp16 为主）/intermediate+compute FLOAT
+    → 题目全程 float32 中间、输出单次 cast 回输入 dtype，补充
+    bfloat16/float32 档（数值安全性在 task.yaml tolerance note 说明）。
+    与样例的三处有意偏差：其一，样例输入 torch.rand [0,1) 均匀分布，题目
+    改用 randn（值分布不属图语义，超分场景负值获得覆盖）；其二，样例
+    I/O 为 channels_last 内存布局（graph set_stride 的性能布局，非值
+    语义），题目统一 contiguous NCHW；其三，纯 dts 变体把样例中位于
+    conv 输出位置的重排输入直接作为 forward 输入，使重排可脱离卷积独立
+    评测（纯索引搬运、逐位无损，hidden case 同时要求逐位一致）。留作
+    后续题：conv_bias_dts_add 的尾部 elementwise add（第二分支输入，
+    D2S 后逐位相加）、conv_bias_add_dts（add 在 D2S 前）、
+    conv_bias_dts_leakyrelu / conv_bias_dts_leakyrelu_add（激活族，与
+    5008 的 conv_fusion 激活族不重叠）。case 文件为 {name + 语义字段}
+    字典，消费者剥离 name 元数据键后调题目文件内 make_inputs(**fields)
+    确定性生成（torch.Generator(seed)，消费顺序 x -> weight -> bias，
+    dts 变体仅消费 x）；Model 构造超参由
+    audit_model_class.resolve_init_args 按 task.yaml io.init_inputs
+    字段名从 case 取（variant / mode / block_size）。

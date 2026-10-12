@@ -1,0 +1,81 @@
+id: "2010_batchnorm_fwd"
+name: batchnorm_fwd
+family: norm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  BatchNorm 前向家族（inference / training）：输入 x (N, C, H, W) NCHW，
+  scale / bias / mean / variance 为 (1, C, 1, 1) 沿通道广播，统计维度
+  per-channel——对每个通道在 (N, H, W) 上求统计，每通道元素数 m = N*H*W。
+  variant="inference" 时 mean/variance 作为输入给定，y = scale·(x−mean) /
+  sqrt(variance+eps) + bias，输出 y 本体 (N, C, H, W)（同 x dtype）；
+  variant="training" 时以批统计归一化并更新 running 统计：y 用有偏批
+  mean/var 归一化（saved_inv_variance = 1/sqrt(var+eps)），next_running_mean
+  / next_running_var 以 momentum 凸组合更新（running 方差用无偏批方差
+  m/(m−1) 修正，PyTorch/cuDNN/MIOpen 训练 BN 标准约定，要求 m >= 2）。
+  training 的五个逻辑输出（y、saved_mean、saved_inv_variance、
+  next_running_mean、next_running_var）按一维拼接打包为单个 float32 张量
+  （长度 N*C*H*W + 4*C，分段协议见 io.outputs 与题面），适配 model_class
+  单张量输出硬约束。统计、归一化与 running 更新全程 float32 中间计算；
+  fp16/bf16 仅对 inference 声明（cast 回 x dtype），training 恒 fp32。
+  N/C/H/W 任意（含 1、非 2 的幂、非对齐）。本题为自包含 KernelBench 题目
+  文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 2010），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,        dtype: [float32, float16, bfloat16], layout: contiguous, ndim: 4, shape: [N, C, H, W]}
+    - {name: scale,    dtype: same_as_x, layout: contiguous, ndim: 4, shape: [1, C, 1, 1]}
+    - {name: bias,     dtype: same_as_x, layout: contiguous, ndim: 4, shape: [1, C, 1, 1]}
+    - {name: mean,     dtype: same_as_x, layout: contiguous, ndim: 4, shape: [1, C, 1, 1]}   # inference: 给定均值（任意实值）；training: prev_running_mean
+    - {name: variance, dtype: same_as_x, layout: contiguous, ndim: 4, shape: [1, C, 1, 1]}   # inference: 给定方差；training: prev_running_var；恒为正
+  outputs:
+    - {name: out, dtype: "inference: same_as_x；training: float32", layout: contiguous,
+       shape: "inference: [N, C, H, W]；training: 一维 [N*C*H*W + 4*C]，五段拼接：y (N*C*H*W) | saved_mean (C) | saved_inv_variance (C) | next_running_mean (C) | next_running_var (C)，按序紧排"}
+  init_inputs:
+    - {name: variant,  dtype: str,   layout: scalar}   # "inference" | "training"
+    - {name: eps,      dtype: float, layout: scalar}   # 缺省 1e-5
+    - {name: momentum, dtype: float, layout: scalar}   # 缺省 0.1，仅 training 使用
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {N: 4, C: 16, H: 56, W: 56, variant: "training", dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "N/C/H/W 均 >= 1（允许 1、非 2 的幂、非对齐边界值）；x 为 NCHW contiguous；m = N*H*W 为每通道统计元素数"
+    - "variant=training 时 dtype 恒为 float32 且 m >= 2（running 方差的无偏修正因子 m/(m-1) 需 m >= 2）"
+    - "variance / prev_running_var 恒为正（生成域 [0.25, 1.25)）；mean / prev_running_mean 任意实值；输入值域为常规 randn/rand 量级（无 inf/NaN）"
+    - "统计、归一化与 running 更新全程 float32 中间计算；inference 输出 cast 回 x dtype，training 五段均 float32"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "终审按输出 dtype 取档：training 输出为一维 float32 打包张量（y 段与四段统计），整体用 float32 档；inference 输出同 x dtype，按 float32/float16/bfloat16 档。打包张量不分段收紧或放宽——两实现均以 float32 中间计算，段间偏差同量级"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。fp32 档 1e-3 相对 float32 BN
+    实现间偏差（不同归约树序，量级 1e-6~1e-5）有约两个数量级裕量；
+    fp16/bf16 档沿用 norm 家族（2006/2007）的 2e-2。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - torch.nn.BatchNorm1d
+  - torch.nn.BatchNorm2d
+  - torch.nn.BatchNorm3d
+  - torch.nn.SyncBatchNorm
+  - torch.nn.functional.batch_norm
+  - torch.batch_norm
+  - torch.native_batch_norm
+  - miopen
+  - hipdnn
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/2010_batchnorm_fwd.yaml，题面元数据不重复携带库源标识

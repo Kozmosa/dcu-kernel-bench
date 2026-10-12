@@ -1,0 +1,59 @@
+task_id: "1031_deform_attention_fwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/deformattention/deform_attention.py
+      sha256: 61cb3998b45be5816cb40dab50ddfcce6a31c5de115ce238fba854723643b99e
+      role: semantic_source   # deform_attn_fprop 图构建：value(N,n_keys,heads,D)/spatial_shapes(L,2)~randint[1,16)/level_start_index(L,)=前缀和/sampling_locations(N,Q,heads,L,P,2)~rand/attention_weights(N,Q,heads,L,P)~rand 张量 shape 与 fp32 口径即语义口径唯一权威
+    - path: python/deformattention/deform_attention_bwd.py
+      sha256: 298c1ffd470addfa5c1b9bb5ec1f2ddda57c1be246a21c9acaf4a4e837d01b0b
+      role: sibling_variant   # dgrad 反向样例：输入布局与 fprop 逐维一致，且其 grad_output 取 (N, Q, heads*D)——直接旁证前向输出布局；反向题留作后续
+    # 哈希均为 commit b67a3f9 版本（LF 行尾）内容；本地检出工作区为 CRLF
+    # 行尾（git diff --ignore-cr-at-eol 为空，逐行内容一致），溯源以 commit 为准
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（softmax 权重归一化 + 手写四角点双线性插值 + 跨采样点加权归约），无任何闭源库依赖
+  calls_closed_libs: false        # 样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作 core_compute 证据；题目本体不调用闭源库，生成侧 forbidden 明确禁用 hipdnn/miopen
+  builds_standalone: true
+  has_reference: true             # 语义金标为题目文件内手写的多尺度可变形注意力实现（CPU 可跑，构建自检含独立逐元素 python oracle 与单像素闭式对照）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集与 variant 划分：多尺度可变形注意力前向单 variant（value 采样点 +
+    双线性插值 + 采样权重归一化），无并列子 variant。语义口径依据：fprop 样例
+    只给出 hipdnn 图调用与张量布局、无内联数学——value (N, n_keys, heads, D)、
+    spatial_shapes (L,2) 每行 (H_l,W_l) 取 randint[1,16)、level_start_index
+    (L,) 为各层 H_l*W_l 前缀和（样例内 torch.cumsum 构造）、
+    sampling_locations (N,Q,heads,L,P,2) 与 attention_weights
+    (N,Q,heads,L,P) 均为 torch.rand 未归一化非负分数、io/intermediate/
+    compute data type 均 FLOAT——布局与生成域据此唯一确定；数学口径取通行
+    多尺度可变形注意力（Deformable DETR 系）前向，权重归一化按题面规格
+    “采样权重归一化”定为沿 (levels×points) 展平一维的数值稳定 softmax
+    （生产 MSDeformAttn 中该权重即 softmax 产物，且 softmax 对全零分数仍
+    良定义），坐标通道约定第 0 通道 = x 沿 W、第 1 通道 = y 沿 H、
+    loc = 归一化坐标 × 层尺寸的直接乘法、四角点 floor 双线性、越界角点记 0
+    的零填充语义（无 clamp/回拉）均按通行实现写入题面；输出布局 (N, Q,
+    heads*D) 由 bwd 样例 grad_output 的 shape 直接旁证（fprop 样例自身仅
+    torch.empty(get_dim())）。打包协议：输出天然单张量，无多输出拼接。dtype
+    域按手册约束仅 fp32/fp16（不含 bf16/fp64）：样例 fp32 为主档，fp16 档
+    为低精度补充（float32 中间计算，输出 cast 回输入 dtype）。shape 域在
+    样例口径上放宽：非 2 的幂 / 非 16 对齐维度、单层单像素 (1,1)、1×N /
+    N×1 细条层、Q=1、P=1、L=1 边界；容差 float32 档 atol=rtol=1e-3、fp16
+    档 2e-2——构建自检 tmp/build_check/1031_deform_attention_fwd.py 逐 case
+    实测 reference vs 独立逐元素 python oracle：float32 档最大绝对偏差
+    2.384e-07 / 最大相对偏差 1.035e-06（累加次序主导），fp16 档最大绝对
+    偏差 2.437e-04 / 最大相对偏差 4.839e-04（输出 cast 量化主导），均远低
+    于对应容差。留作后续变体：
+    deform_attn_dgrad 训练反向（deform_attention_bwd 样例，三输出需按
+    一维拼接打包协议另立题）、bf16 档、采样坐标越界 [0,1) 域的系统性压测。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调题目
+    文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，消费
+    顺序 spatial_shapes（未显式给出时 randint[1,max_size]，缺省 15 与样例
+    域一致）-> value -> sampling_locations -> attention_weights；
+    level_start_index 由 spatial_shapes 推导，不消费 RNG）；本题无构造超参，
+    Model 无参构造（audit_model_class.resolve_init_args 空 init_inputs
+    => {}）。

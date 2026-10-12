@@ -1,0 +1,60 @@
+task_id: "8002_gather"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/gather/gather.py
+      sha256: 6f697ced937677a41d284e419ff9e0439407d2cbf5419311156f9d719522205f
+      role: official_sample   # hipDNN graph.gather(data, indices, axis=1) 调用为 variant="gather" 的语义唯一权威（样例仅执行不校验输出，未附 torch 参考）
+    - path: python/gather_elements/gather_elements.py
+      sha256: 4279fe44679f9f3c74432e80381840c274fd4741ad5c60468164a885dc10fcb7
+      role: official_sample   # hipDNN graph.gather_elements(data, indices, axis) 调用为 variant="gather_elements" 的语义唯一权威（同上）
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（torch.gather 两分支语义金标：一维索引广播展开 / 同形索引），不依赖任何外部源码
+  calls_closed_libs: false        # 题目本体不调用闭源库；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 已显式禁用 hipdnn
+  builds_standalone: true
+  has_reference: true             # reference.Model 内联 gather / gather_elements 语义；构建自检另用独立 meshgrid 高级索引 oracle 验证（与 torch.gather 不同代码路径）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集与 variant：hipDNN 样例集的 gather 与 gather_elements 两个官方
+    样例合并为一题的两个 variant——python/gather/gather.py 口径为 3-D
+    (2,3,4) float32 data + 一维 int64 索引 [0,2]、graph.gather(data,
+    indices, axis=1)；python/gather_elements/gather_elements.py 口径为
+    2-D (2,3) float32 data + 与 data 同形 int32 索引
+    [[0,2,1],[2,0,1]]、graph.gather_elements(data, indices, axis=1)。
+    两样例的调用口径均为 axis=1，题面把 axis 提升为 Model 构造超参
+    （torch 惯例，含负数），固定 shape 族取 gather 样例原形
+    （(2,3,4) / 一维索引 K=2 / axis=1 / float32）。索引 dtype 与布局以
+    样例为准：gather 一维 int64、gather_elements 同维数 int32（在线评测
+    统一 cast fp32，<2^24 小整数无损恢复）。
+    语义依据与冲突处理：两样例均只构建并执行 graph、不校验输出，也无
+    torch 参考可对照，语义由算子通名的统一定义确定——即 ONNX Gather /
+    GatherElements（hipDNN 图算子与之一一对应），题目 reference 以
+    torch.gather（一维索引 view+expand 广播 / 同形索引两分支）内联，
+    构建自检用独立 meshgrid 高级索引 oracle 实测逐位一致（无源码-测试
+    冲突问题）。输出契约：本算子天然单输出（gather 输出形状 = data 形状
+    换 axis 维为 K、gather_elements 输出形状 = indices 形状，与 data 同
+    dtype），forward 返回单张量，无需多输出打包。容差：三档 dtype 全部
+    atol=rtol=0——纯索引搬移无算术，正确实现逐位一致（构建自检实测
+    reference vs oracle 最大绝对偏差 0、torch.equal 全真）。
+    dtype 域：样例为 FLOAT，按纯搬移语义补充 float16/bfloat16（数值安全，
+    逐位一致契约已在 task.yaml tolerance 说明）。
+    与 FlagGems 补齐路线的重叠：gather 属 FlagGems 已覆盖的通用 Triton
+    算子（FlagGems 补齐路线可作交叉验证口径）；本题考察生成侧手写索引
+    寻址能力，生成侧禁用 torch.gather / index_select / take_along_dim /
+    tl.gather / embedding 查表等全部库级原语与等价绕过。
+    留作后续变体：任意形状 indices 的广义 Gather（输出形状 = data 形状
+    切片 + indices 形状拼接）、gatherND（批维 + 索引张量）、scatter /
+    scatterND 写路径（样例集另有 scatterND 样例，独立成题）、训练反向
+    （gather 的 scatter-add 累积）。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，
+    消费顺序 data -> indices；variant/axis 同时经 task.yaml io.init_inputs
+    解析为 Model 构造参数）。溯源补记：本地快照经 developer.sourcefind.cn
+    镜像克隆（origin remote 为该镜像），HEAD 即上述 commit，sha256 在该
+    commit 下用 sha256sum 计算。

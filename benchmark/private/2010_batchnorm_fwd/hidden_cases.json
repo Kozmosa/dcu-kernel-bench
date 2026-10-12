@@ -1,0 +1,12 @@
+{
+  "task_id": "2010_batchnorm_fwd",
+  "cases": [
+    {"name": "hidden_training_sample_nchw_f32",  "n": 4, "c": 16, "h": 56, "w": 56, "variant": "training",  "dtype": "float32",  "seed": 2110},
+    {"name": "hidden_training_min_c1_f32",       "n": 1, "c": 1,  "h": 3,  "w": 5,  "variant": "training",  "dtype": "float32",  "seed": 2111},
+    {"name": "hidden_training_nonpow2_f32",      "n": 3, "c": 7,  "h": 13, "w": 17, "variant": "training",  "dtype": "float32",  "seed": 2112},
+    {"name": "hidden_training_epsmom_f32",       "n": 2, "c": 4,  "h": 6,  "w": 6,  "variant": "training",  "dtype": "float32",  "seed": 2113, "eps": 0.001, "momentum": 0.25},
+    {"name": "hidden_inference_sample_f32",      "n": 4, "c": 16, "h": 56, "w": 56, "variant": "inference", "dtype": "float32",  "seed": 2114},
+    {"name": "hidden_inference_nonpow2_f16",     "n": 5, "c": 3,  "h": 28, "w": 29, "variant": "inference", "dtype": "float16",  "seed": 2115},
+    {"name": "hidden_inference_nonpow2_bf16",    "n": 2, "c": 8,  "h": 33, "w": 37, "variant": "inference", "dtype": "bfloat16", "seed": 2116}
+  ]
+}

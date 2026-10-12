@@ -1,0 +1,102 @@
+id: "5005_spconv_fprop"
+name: spconv_fprop
+family: conv
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  稀疏卷积前向（gathered 形式 spconv_fprop，spconv 风格索引对表）：对
+  features (n, c_in) 的 n 个活跃输入点，按索引对表逐 kernel 偏移做
+  gather-GEMM-scatter——对每个 k ∈ [0, kv) 取前 n_k = indice_num_per_loc[k]
+  个索引对，in_idx = indice_pairs[0, k, :n_k]（输入行号）、out_idx =
+  indice_pairs[1, k, :n_k]（输出行号），累加
+  out[out_idx] += features[in_idx] @ W[:, :, k].T，out 先置全零、形状
+  (num_act_out, c_out)。j >= n_k 的表项为填充垃圾（任意值，含重复有效行号），
+  必须按 indice_num_per_loc 屏蔽。filters (c_out, c_in, kv) 携带样例的
+  as_strided 布局重排：数学权重 W[o, i, k] = F.reshape(c_out, kv, c_in)[o,
+  k, i]，即 W = F.reshape(c_out, kv, c_in).permute(0, 2, 1)。累加全程
+  float32（fp16/bf16 输入先无损 cast），输出 cast 回 features dtype。
+  forward 返回单张量 out (num_act_out, c_out)——本算子天然单输出，无多输出
+  打包分段。整型输入（indice_pairs / indice_num_per_loc / num_act_out）在
+  在线评测被 cast 成 fp32，下标 <= 2^24 精确，题面要求 int()/.to(long) 恢复。
+  本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 5005），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: features,           dtype: [float32, float16, bfloat16], layout: contiguous, ndim: 2, shape: [n, c_in]}
+    - {name: filters,            dtype: same_as_features,             layout: contiguous, ndim: 3, shape: [c_out, c_in, kv]}
+    - {name: indice_pairs,       dtype: int32,                        layout: contiguous, ndim: 3, shape: [2, kv, n]}
+    - {name: indice_num_per_loc, dtype: int32,                        layout: contiguous, ndim: 1, shape: [kv]}
+    - {name: num_act_out,        dtype: int64（0 维张量；在线评测 cast 成 fp32，int() 恢复）, layout: scalar}
+  outputs:
+    - {name: out, dtype: same_as_features, layout: contiguous, ndim: 2, shape: "[num_act_out, c_out]；单张量输出，无多输出打包分段"}
+  # 本题无构造超参（io.init_inputs 为空 => Model 无参构造）；公开/隐藏 case
+  # 的字段名即 make_inputs 形参：n / c_in / c_out / kv / num_act_out / dtype /
+  # counts_max（可省略，缺省 n；0 => 全零索引对边界）/ seed
+  init_inputs: []
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {n: 1024, c_in: 16, c_out: 32, kv: 9, num_act_out: 768, dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "n, c_in, c_out, kv, num_act_out >= 1（允许非 2 的幂）；num_act_out 与 n 相互独立；n <= 2^24 且 num_act_out <= 2^24（整型下标须被 fp32 精确表示）"
+    - "indice_num_per_loc[k] ∈ [0, n]；j >= indice_num_per_loc[k] 的索引对表项为填充垃圾（可为任意值，含重复有效行号），不得参与计算；有效项 in_idx ∈ [0, n)、out_idx ∈ [0, num_act_out)"
+    - "同一输出行可被任意多个索引对命中（同一 k 内亦可重复），按 += 累加；n_k = 0 的偏移整个跳过，全部 n_k = 0 时 out 为全零"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；累加全程 float32，输出 cast 回 features dtype；下标索引张量为 int32（在线评测 cast 成 fp32 后由实现恢复）"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  float16:  {atol: 1.0e-2, rtol: 1.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 以 float32 累加后 cast 到 features dtype 再比较；单张量输出 (num_act_out, c_out) 整体比较，无分段打包；scatter 累加顺序允许不同（index_add 原子序 / kernel 内任意序），偏差由上表容差吸收"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。fp32 主 dtype（样例唯一 dtype）：
+    输出元素为若干 c_in 维点积的累加，隐藏 case 内单元素乘加项 <= ~4e4，
+    fp32 不同累加顺序的单点偏差 <= ~2e-4（构建自检
+    tmp/build_check/5005_spconv_fprop.py 逐 case 实测），atol=rtol=1e-3 留
+    有余量。fp16/bf16 变体：fp32 累加后单次 cast 回低精度，误差以输出舍入
+    为主（fp16 eps ~1e-3、bf16 eps ~8e-3），取 atol=rtol=1e-2 / 2e-2。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：输入与模型统一
+    cast 为 fp32、allclose(atol=rtol=1e-4)，固定族点积项少、量级 ~个位数，
+    fp32 单点偏差 ~7e-6（自检实测），与上表相容。在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+# gather / index_select 类纯数据搬运未列入禁用（允许作为非核心整理）；
+# scatter 累加与矩阵乘必须进 Triton kernel
+forbidden:
+  - aiter
+  - torch.sparse
+  - torch.sparse_coo_tensor
+  - torch.sparse_csr_tensor
+  - torch.sparse_csc_tensor
+  - torch.sparse_mm
+  - torch.matmul
+  - .matmul(
+  - torch.mm
+  - torch.bmm
+  - torch.addmm
+  - torch.baddbmm
+  - torch.einsum
+  - torch.tensordot
+  - torch.nn.functional.linear
+  - torch.nn.Linear
+  - index_add_
+  - torch.index_add
+  - index_put
+  - torch.index_put
+  - scatter_add_
+  - .scatter_(
+  - torch.scatter
+  - segment_reduce
+  - miopen
+  - hipdnn
+
+# 溯源（repo/commit/sha256/官方样例路径）完整记录见
+# benchmark/sources/5005_spconv_fprop.yaml，题面元数据不重复携带库源标识

@@ -1,0 +1,9 @@
+{
+  "task_id": "5005_spconv_fprop",
+  "cases": [
+    {"name": "perf_dense_f32",       "n": 16384,  "c_in": 64,   "c_out": 128, "kv": 9, "num_act_out": 12288, "dtype": "float32",  "seed": 25061},
+    {"name": "perf_wide_bf16",       "n": 8192,   "c_in": 256,  "c_out": 256, "kv": 5, "num_act_out": 6144,  "dtype": "bfloat16", "seed": 25062},
+    {"name": "perf_submanifold_f16", "n": 32768,  "c_in": 128,  "c_out": 128, "kv": 1, "num_act_out": 32768, "dtype": "float16",  "counts_max": 1, "seed": 25063}
+  ],
+  "timing": {"warmup_iters": 5, "repeat_iters": 20, "reduction": "median"}
+}

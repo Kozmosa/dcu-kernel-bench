@@ -1,0 +1,111 @@
+id: "6001_fused_adamw"
+name: fused_adamw
+family: optimizer
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  融合 AdamW 优化器家族（标准 AdamW / Transformer 调度 AdamW）：对一组优化器
+  状态做单步 functional（out-of-place）参数更新。设超参 lr、beta1、beta2、
+  eps、weight_decay 为构造常量，step 为 0 维 float32 标量张量，四张状态
+  params / grads / exp_avg / exp_avg_sq 同形逐元素对齐。单步更新式（全程
+  float32 中间计算，输出 cast 回 params 的 dtype）：
+    1) 解耦权重衰减：p = params * (1 - lr * weight_decay)（AdamW 式 decoupled
+       weight decay，两种 variant 都做，非 L2 正则）；
+    2) 一阶矩：m = beta1 * exp_avg + (1 - beta1) * grads；
+    3) 二阶矩：v = beta2 * exp_avg_sq + (1 - beta2) * grads^2；
+    4) variant="adamw"（标准 AdamW，bias correction 开启）：
+         bc1 = 1 - beta1^step；bc2 = 1 - beta2^step
+         out = p - lr * (m / bc1) / (sqrt(v / bc2) + eps)
+       variant="transformer_adamw"（Transformer 调度口径，bias correction
+       关闭）：
+         out = p - lr * m / (sqrt(v) + eps)
+    两 variant 除 bias correction 外逐行同式；eps 加在 sqrt 之外。
+  forward 返回单张量 out——更新后参数，与 params 同形同 dtype（本任务只校验
+  更新后参数，不返回优化器状态，无拼接分段）。四张量 shape 任意（ndim 1–4，
+  含非 2 的幂与边界规模），逐元素映射无需归约。本题为自包含 KernelBench 题
+  目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 6001），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: params,     dtype: [float32, float16], layout: contiguous, ndim: "1-4", shape: [P0, ..., Pk]}
+    - {name: grads,      dtype: same_as_params, layout: contiguous, ndim: "1-4", shape: same_as_params}
+    - {name: exp_avg,    dtype: same_as_params, layout: contiguous, ndim: "1-4", shape: same_as_params}
+    - {name: exp_avg_sq, dtype: same_as_params, layout: contiguous, ndim: "1-4", shape: same_as_params}
+    - {name: step,       dtype: float32, layout: scalar, shape: "0 维标量张量（numel==1）"}
+  outputs:
+    - {name: out, dtype: same_as_params, layout: contiguous, ndim: same_as_params, shape: same_as_params}   # 更新后参数，单张量
+  init_inputs:
+    - {name: variant,      dtype: str,   layout: scalar}   # "adamw" | "transformer_adamw"
+    - {name: lr,           dtype: float, layout: scalar}   # 缺省 1e-3
+    - {name: beta1,        dtype: float, layout: scalar}   # 缺省 0.9
+    - {name: beta2,        dtype: float, layout: scalar}   # 缺省 0.999
+    - {name: eps,          dtype: float, layout: scalar}   # 缺省 1e-8
+    - {name: weight_decay, dtype: float, layout: scalar}   # 缺省 0.01
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family:
+    shape: [8, 3, 224, 224]
+    dtype: "float32"
+    variant: "adamw"
+    step: 10.0
+  dynamic: true
+  invariants:
+    - "params / grads / exp_avg / exp_avg_sq 四张量 shape 全同（逐元素对齐），numel >= 1，contiguous，ndim 1–4（允许非 2 的幂、素数与边界规模，如 [1]、[257, 33]、[401]）"
+    - "step 为 0 维 float32 标量张量，数值为正整数语义的步数（>= 1，如 1、2、5、10、100、1000）；beta1^step / beta2^step 按 float32 幂运算"
+    - "exp_avg_sq 恒非负（二阶矩物理约束，生成域 [0, 0.5)）；params / exp_avg 生成域 [0, 1) / [0, 0.5)，grads 为 randn 量级；无 inf/NaN"
+    - "dtype 域：float32（主口径）与 float16（io cast：内部 float32 计算、输出 cast 回 float16）；四张量同 dtype；不含 bfloat16（样例无该口径证据）"
+
+tolerance:
+  float32:  {atol: 1.0e-6, rtol: 1.0e-5}
+  float16:  {atol: 1.0e-3, rtol: 5.0e-3}
+  compare: "reference 以 float32 计算后 cast 回 params.dtype 再比较；输出单张量，与 params 同形同 dtype"
+  note: >
+    float32 档 1e-6/1e-5：单步逐元素映射、float32 中间计算，正确实现间仅存
+    运算结合次序与 pow/开方近似误差（相对 ~1e-7），裕量约 100 倍；同时足以
+    检出遗漏解耦权重衰减（weight_decay >= 0.05 的 case 中该项对 lr*wd*p 贡献
+    >= 2.5e-5，超出容差上界）与 bias correction 开关错误（step=1 时 m/bc1
+    相差 10 倍量级）。float16 档 1e-3/5e-3：fp16 表示间距在 |p|~1 处约
+    9.8e-4，正确实现（内部 fp32 后一次 cast）间差异 <= 1–2 ULP；该档用于
+    检出 dtype 处理与粗粒度语义错误，微观语义（如小 weight_decay 差异）由
+    float32 档覆盖——fp16 档容差按此定位属宽松口径，已在题面写明内部必须
+    float32 计算。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
+    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上
+    表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）。
+# 本题禁项三组：torch.optim 全族与第三方 fused 优化器库（apex / deepspeed /
+# bitsandbytes 等，含各库 fused_adam 入口）；闭源库入口（hipdnn / miopen，
+# 按仓库铁律核心计算不得调闭源库）；ATen 优化器组合捷径（addcdiv / addcmul
+# 一次调用即完成参数更新或动量更新，含张量方法与原地形式；及
+# _foreach_addcdiv / _foreach_addcmul 多张量原语——单调用即可完成核心更新
+# 步，裸子串条目同时覆盖 torch._foreach_* 限定调用、torch.ops.aten.* 与
+# from-import 形式及原地 _ 形式）。已知机制缝隙：
+# 纯运算符表达式（m / (v.sqrt() + eps) 等）不受子串约束，由题面"核心计算
+# 必须自写 Triton kernel"条款兜底——static_audit 为字面子串匹配，无法表达
+# 该约束。来源信息（repo/commit/path/sha256）只记录在
+# benchmark/sources/6001_fused_adamw.yaml。
+forbidden:
+  - aiter
+  - torch.optim
+  - fused_adam
+  - apex
+  - deepspeed
+  - bitsandbytes
+  - hipdnn
+  - miopen
+  - torch.addcdiv
+  - torch.addcmul
+  - .addcdiv(
+  - .addcdiv_(
+  - .addcmul(
+  - .addcmul_(
+  - _foreach_addcdiv
+  - _foreach_addcmul

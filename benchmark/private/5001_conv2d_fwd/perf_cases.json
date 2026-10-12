@@ -1,0 +1,9 @@
+{
+  "task_id": "5001_conv2d_fwd",
+  "cases": [
+    {"name": "perf_resnet_stem_std",   "n": 16, "c": 64,  "h": 112, "w": 112, "k": 128, "r": 3, "s": 3, "variant": "standard",   "dtype": "float32", "seed": 5201},
+    {"name": "perf_big_r5_std",        "n": 4,  "c": 128, "h": 224, "w": 224, "k": 64,  "r": 5, "s": 5, "variant": "standard",   "dtype": "float32", "seed": 5202},
+    {"name": "perf_asym_nonpow2",      "n": 12, "c": 48,  "h": 131, "w": 89,  "k": 96,  "r": 3, "s": 3, "variant": "asymmetric", "dtype": "float32", "seed": 5203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

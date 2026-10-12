@@ -1,0 +1,17 @@
+{
+  "task_id": "7001_ctc_loss",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用），probs 为 randn 经 softmax 的合法概率。本文件记录 get_inputs 固定的 shape 族与确定性的长度/标签契约，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成。",
+  "shape_family": {
+    "max_time": 500,
+    "batch": 4,
+    "num_classes": 5,
+    "input_lengths": [4, 100, 100, 200],
+    "label_lengths": [1, 2, 1, 3],
+    "labels": [1, 2, 3, 4, 2, 3, 2],
+    "blank": 0,
+    "dtype": "float32",
+    "out_ndim": 1,
+    "out_shape": [10004],
+    "out_layout": "单张量一维打包：out[0:batch]=losses（逐序列，reduction='none'）；out[batch : batch+batch*max_time*num_classes]=gradients，按 (batch, max_time, num_classes) 行主序平铺；dtype 同 probs"
+  }
+}

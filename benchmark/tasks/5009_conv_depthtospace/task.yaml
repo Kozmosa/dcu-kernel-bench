@@ -1,0 +1,125 @@
+id: "5009_conv_depthtospace"
+name: conv_depthtospace_fused
+family: conv
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  Conv+Bias+DepthToSpace 融合前向家族（conv_bias_dts / dts 双 variant）。
+  DepthToSpace（D2S）把 (N, K, H, W) 特征图的通道维重排进空间维：K 须被
+  block_size^2 整除，记 C = K // block_size^2，输出 (N, C, H*bs, W*bs)。
+  重排模式由 __init__ 参数 mode 二选一，按六维 view + 转置 + reshape 定义：
+  "CRD" 为 v.view(N,C,bs,bs,H,W).permute(0,1,4,2,5,3).reshape(N,C,H*bs,
+  W*bs)，与 torch.nn.functional.pixel_shuffle(v, bs) 逐位等价（该 ATen
+  原语禁用，题面仅注明等价关系）；"DCR" 为 v.view(N,bs,bs,C,H,W).permute(
+  0,3,4,1,5,2).reshape(N,C,H*bs,W*bs)。两模式输出同形，仅通道到空间块
+  位置的映射不同。variant="conv_bias_dts" 时先对 x (N,C_in,H,W) 与
+  weight (K,C_in,3,3) 做 2D cross-correlation 前向（深度学习库 conv_fprop
+  惯例语义，非数学卷积的核翻转），加逐通道偏置 bias (1,K,1,1)（沿 batch
+  与空间维广播），再对卷积结果施加上述 D2S；卷积超参固定 stride=(1,1)、
+  对称零 padding=(1,1)、dilation=(1,1)，故卷积输出空间维恒为 (H, W)。
+  variant="dts" 时无卷积，x 本身即 (N,K,H,W) 的待重排特征图（超分/像素
+  重排场景），forward 单参调用。卷积点积累加、bias 加法与重排全程
+  float32 中间计算，输出单次 cast 回输入 dtype；输出单张量 (N, K//bs^2,
+  H*bs, W*bs)（卷积与 D2S 均天然单输出，无多输出打包分段）。N/H/W 任意
+  （含 1、非 2 的幂、素数与边界值），padding 必须在 kernel 内以掩码/边界
+  索引处理。本题为自包含 KernelBench 题目文件（reference.py 即题目文件，
+  同时镜像到 benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel
+  的原生 model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 5009），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,      dtype: [float16, bfloat16, float32], layout: contiguous, ndim: 4,
+       shape: "conv_bias_dts: [N, C_in, H, W]；dts: [N, K, H, W]（K % block_size^2 == 0）"}
+    - {name: weight, dtype: same_as_x, layout: contiguous, ndim: 4, shape: [K, C_in, 3, 3]}   # 仅 conv_bias_dts 提供
+    - {name: bias,   dtype: same_as_x, layout: contiguous, ndim: 4, shape: [1, K, 1, 1]}      # 仅 conv_bias_dts 提供
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: 4,
+       shape: "[N, K//block_size^2, H*block_size, W*block_size]；卷积与 D2S 均天然单输出，无打包分段"}
+  init_inputs:
+    - {name: variant,    dtype: str,  layout: scalar}   # "conv_bias_dts" | "dts"
+    - {name: mode,       dtype: str,  layout: scalar}   # "CRD" | "DCR"
+    - {name: block_size, dtype: int,  layout: scalar}   # ∈ {2, 3, 4}
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {variant: "conv_bias_dts", mode: "CRD", block_size: 2, n: 2, c_in: 8, k: 16, h: 64, w: 64, dtype: "float16"}
+  dynamic: true
+  invariants:
+    - "N/K/H/W 均 >= 1（允许非 2 的幂、素数与非对齐值，含 N=1、H=W=1 边界与原版维度 N=1/C_in=8/H=W=128/K=16）；K % block_size^2 == 0（即 C = K//block_size^2 >= 1）；block_size ∈ {2, 3, 4}；mode ∈ {CRD, DCR}"
+    - "卷积超参固定：kernel 3×3、stride=(1,1)、对称零 padding=(1,1)、dilation=(1,1)，卷积输出空间维恒为 (H, W)；weight 输入通道维必须等于 C_in"
+    - "variant=dts 时无卷积：forward 只消费 x=(N, K, H, W)，weight/bias 不传（forward 可选参数缺省 None，传入亦不得影响输出）；case 的 c_in 字段不参与、约定填 0"
+    - "variant=conv_bias_dts 时 bias 形状恒为 (1, K, 1, 1)，沿 batch 与空间维广播"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；卷积累加/bias 加法/重排全程 float32 中间计算，输出单次 cast 回输入 dtype；dts 分支为纯索引重排、逐位无损；语义与 memory format 无关，评测传 contiguous NCHW"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  compare: "reference 与生成实现各自以 float32 完成 conv 累加、bias 加法与 D2S 重排后单次 cast 回输入 dtype 再比较；单张量输出 (N, K//bs^2, H*bs, W*bs) 整体比较，无分段打包；dts 变体语义为纯重排、应逐位一致（容差仅约束 conv_bias_dts 的卷积累加顺序差异）"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。样例的精度口径为 io dtype
+    （fp16 为主）+ float32 中间与计算精度、输出单次 cast：固定族单点
+    卷积和为 C_in*R*S=72 项、输出量级 ~sqrt(72)≈8.5，fp32 不同累加顺序
+    的单点偏差 ~1e-5 量级，叠加 fp16/bf16 单次 cast 的半 ulp 相对误差
+    （~|z|*2^-11 / |z|*2^-9），全部低于 atol+rtol*|expected|；bf16 档
+    即因此数值语义安全才纳入声明域。float32 档沿用 5001/5008 的 1e-3；
+    dts 变体无数值运算，任意声明 dtype 下均应额外满足逐位一致。在线
+    （搜索循环内）由 KernelBenchPaperEvaluator 判定：输入与模型统一
+    cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能
+    替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+# conv/GEMM 侧沿用 5001/5008 清单（覆盖 conv3d/conv_transpose2d 一步等价
+# 路由与 ATen GEMM 方法形式）；D2S 侧新增可直接完成重排的 ATen 原语——
+# pixel_shuffle 系（CRD 模式的一步等价）与 fold/Fold（kernel=stride=bs 的
+# col2im 恰为 CRD 一重排，unfold 的逆），
+# 大小写敏感地同时列蛇形/驼峰与裸词兜底
+forbidden:
+  - torch.nn.Conv2d
+  - torch.nn.functional.conv2d
+  - F.conv2d
+  - torch.conv2d
+  - aten.conv2d
+  - aten.convolution
+  - torch.nn.functional.conv3d
+  - torch.conv3d
+  - torch.nn.Conv3d
+  - torch.nn.functional.conv_transpose2d
+  - torch.conv_transpose2d
+  - torch.nn.ConvTranspose2d
+  - torch.nn.functional.unfold
+  - torch.nn.Unfold
+  - .unfold(
+  - torch.nn.functional.fold
+  - torch.nn.Fold
+  - .fold(
+  - torch.nn.functional.pixel_shuffle
+  - torch.pixel_shuffle
+  - pixel_shuffle
+  - torch.nn.PixelShuffle
+  - PixelShuffle
+  - torch.nn.functional.pixel_unshuffle
+  - torch.pixel_unshuffle
+  - pixel_unshuffle
+  - torch.nn.PixelUnshuffle
+  - PixelUnshuffle
+  - torch.matmul
+  - .matmul(
+  - torch.mm
+  - torch.bmm
+  - torch.addmm
+  - torch.baddbmm
+  - torch.einsum
+  - torch.tensordot
+  - torch.nn.functional.linear
+  - torch.nn.Linear
+  - miopen
+  - hipdnn
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/5009_conv_depthtospace.yaml，题面元数据不重复携带库源标识

@@ -1,0 +1,12 @@
+{
+  "task_id": "5005_spconv_fprop",
+  "cases": [
+    {"name": "hidden_sample_dims_f32",     "n": 4,     "c_in": 2,   "c_out": 2,   "kv": 3,  "num_act_out": 3,     "dtype": "float32",  "seed": 25051},
+    {"name": "hidden_min_f16",             "n": 1,     "c_in": 1,   "c_out": 1,   "kv": 1,  "num_act_out": 1,     "dtype": "float16",  "seed": 25052},
+    {"name": "hidden_nonpow2_bf16",        "n": 1237,  "c_in": 13,  "c_out": 29,  "kv": 7,  "num_act_out": 933,   "dtype": "bfloat16", "seed": 25053},
+    {"name": "hidden_zeropairs_f32",       "n": 64,    "c_in": 8,   "c_out": 8,   "kv": 4,  "num_act_out": 32,    "dtype": "float32",  "counts_max": 0, "seed": 25054},
+    {"name": "hidden_sparse_f16",          "n": 512,   "c_in": 32,  "c_out": 64,  "kv": 9,  "num_act_out": 400,   "dtype": "float16",  "counts_max": 2, "seed": 25055},
+    {"name": "hidden_dense_bf16",          "n": 2048,  "c_in": 16,  "c_out": 16,  "kv": 5,  "num_act_out": 1777,  "dtype": "bfloat16", "seed": 25056},
+    {"name": "hidden_tall_f32",            "n": 4096,  "c_in": 64,  "c_out": 128, "kv": 27, "num_act_out": 4096,  "dtype": "float32",  "seed": 25057}
+  ]
+}

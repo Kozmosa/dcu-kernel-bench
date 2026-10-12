@@ -732,3 +732,319 @@ operators:
     status: admitted
     difficulty: hard
     note: "2026-10-02 批量准入（工作流构建+独立校验）。题面变体子集：官方 test_quant.py 覆盖的全部三个公开 API（static 透传 / dynamic_per_tensor 全张量 absmax / dynamic_per_token 逐行 absmax+clamp(1e-10)，全零行码字全 0）× int8 与 fp8 e4m3 两条 dtype 线，输入 fp16/bf16 含非 2 次幂与零行边界，输出按单张量协议打包一维 float32；mxfp4 留 4005、组量化归 4017。审核记录见 benchmark/sources/4018_quant.yaml"
+
+  # ---- 2026-10-12 批量准入：hipDNN 样例批次（21 题，工作流构建+独立校验） ----
+  - id: "5003_deform_conv2d_fwd"
+    name: deform_conv2d_fwd
+    family: conv
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/deformconvolution/deform_convolution.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标（采样网格构建 + 手写四角点双线性插值·越界零填充 + float32 加权归约），样例口径为 hipDNN deform_conv_fprop 的张量 shape/参数：offset (N,2RS,H_out,W_out)、mask (N,RS,H_out,W_out)、weight (K,C,R,S)、bias (K)、fp32、含调制掩码；hipDNN 设备路径仅作语义口径与性能基线方向，不作 core_compute 证据"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（构建自检 tmp/build_check/5003_deform_conv2d_fwd.py 五件事全绿）。题面子集：可变形 2D 卷积前向家族——variant=modulated（缺省，调制型 DCNv2）与样例口径一致，variant=plain（无掩码 DCNv1，mask 不参与计算）为衍生子集，两 variant 布局一致；offset 偶通道=y 偏移/奇通道=x 偏移（p=i*S+j 行主序）按 DCNv2 通行约定写入题面（样例只固定 shape，bwd 样例同布局旁证；本机无 torchvision 未做第三方对照，自检以独立朴素 oracle + 零偏移/dy/dx 方向标定三组 F.conv2d 闭式对照替代）。闭源库边界：题目本体不调用闭源库，生成侧 forbidden 禁 hipdnn/miopen/torchvision/F.conv2d/F.grid_sample/F.unfold/matmul 系。输出天然单张量 (N,K,H_out,W_out) 无打包；dgrad/wgrad 反向与 offset_groups>1 留作后续题。审核记录见 benchmark/sources/5003_deform_conv2d_fwd.yaml"
+
+  - id: "5004_deform_conv2d_bwd"
+    name: deform_conv2d_bwd
+    family: conv
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/deformconvolution/deform_convolution_bwd.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标：手写 DCNv2 前向（零填充双线性采样 + mask 调制）autograd 反传，输出契约对齐样例 deform_conv_dgrad（dx/doffset/dmask 一维拼接打包）与 deform_conv_wgrad（dw，天然单输出）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（构建自检五件事全过 + 全仓 205 测试绿）。题面子集：hipdnn_samples deformconvolution 反向两方向（variant=dgrad/wrw，命名与样例图名对齐）；语义按 DCNv2 通行定义移植（offset 通道行主序 2m=H 偏移/2m+1=W 偏移、整数坐标即像素中心的零填充双线性采样、mask 逐点调制），样例仅给图算子与张量维度、无内核实现。bias 不入题（样例两方向反向图均不消费 bias，且 bias 平移不影响任何反向输出）；dtype 域 fp32 单档（样例 compute dtype 即 FLOAT，反向散射/归约累加在半精度下数值语义不安全，fp16/bf16 不入题）。审核记录见 benchmark/sources/5004_deform_conv2d_bwd.yaml"
+
+  - id: "5005_spconv_fprop"
+    name: spconv_fprop
+    family: conv
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/spconv_fprop/spconv_fprop.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（gather + index_add 逐 kernel 偏移累加，无 torch.sparse）；样例 hipDNN spconv_fprop 仅作语义口径（filters as_strided(c_in*kv,1,c_in) 布局映射 => W[o,i,k] = F.reshape(c_out,kv,c_in)[o,k,i]）与性能基线方向"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入。hipdnn_samples spconv 家族 8 样例中的 gathered 形式 fprop 单题（igemm 变体 / dgrad / wgrad / indice_pairs 生成留作后续变体）。语义口径：indice_pairs[0]=输入行号(gather)、[1]=输出行号(scatter)，j >= indice_num_per_loc[k] 为填充垃圾须按计数屏蔽，out 先置零再累加——样例数据全零且不校验输出，仅钉死 shape/dtype/契约，方向与垃圾填充按 spconv 生态标准约定在题面固定并如实记录；C++ 样例 filters 用 contiguous strides 与 Python 样例 as_strided 冲突，以 Python 样例为准。闭源库边界：题目本体零 hipDNN 依赖，forbidden 禁 hipdnn/miopen，样例设备路径仅作语义口径与基线方向。dtype：fp32 主（样例唯一 dtype）+ fp16/bf16 变体（fp32 累加后 cast，容差分档 1e-3 / 1e-2 / 2e-2）。forward 返回单张量 (num_act_out, c_out)，天然单输出无打包分段，满足 model_class 单张量硬约束；整型输入在在线评测被 cast fp32，题面写明 int()/.to(long) 恢复。镜像 benchmark/kernelbench_compat/level3/，make_inputs 消费顺序 features->filters->counts->in_tab->out_tab（torch.Generator(seed) 确定性）。审核记录见 benchmark/sources/5005_spconv_fprop.yaml"
+
+  - id: "5006_spconv_bwd"
+    name: spconv_bwd
+    family: conv
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/spconv_dgrad/spconv_dgrad.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标：对同族 spconv_fprop 前向（gather-GEMM-scatter，W[o,i,k]=F.reshape(c_out,kv,c_in)[o,k,i]）构图后 autograd 精确反传给出 dgrad/wgrad；样例口径为 hipdnn_samples spconv_dgrad/spconv_wgrad 两图的 I/O 契约与 filters as_strided 布局重排"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（批量工作流构建+独立自检）。题面子集：hipdnn_samples spconv 家族两个反向样例（spconv_dgrad/spconv_wgrad，gathered 形式），init 超参 variant 选择方向，两方向均天然单张量输出（dgrad (n,c_in) / wgrad (c_out,c_in,kv)），无打包拼接；wgrad 输出按 filters 同一布局映射解释（dF.reshape(c_out,kv,c_in)[o,k,i]=dW_math[o,i,k]，Python 样例 as_strided 口径为准，C++ 样例 contiguous strides 冲突已记录于 sources）；样例数据全零且不校验输出，数值语义以同族前向（5005 口径）的精确伴随唯一固定，reference 对前向构图 autograd 反传。闭源库边界：题目本体不调用 hipdnn/miopen，样例的 hipDNN 设备路径仅作语义口径与性能基线方向，生成侧 forbidden 明确禁用；igemm 系三样例与 indice_pairs 生成留作后续题。审核记录见 benchmark/sources/5006_spconv_bwd.yaml"
+
+  - id: "5007_spconv_indice_pairs"
+    name: spconv_indice_pairs
+    family: conv
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/spconv_indice_pairs/spconv_indice_pairs.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（每维整除/范围判定 + 输出点首次出现序去重编号 + out_indices/indice_pairs/indice_num_per_loc 三表填充）；样例口径：hipdnn_samples spconv_indice_pairs 图节点的索引表生成契约（indices int32 (n, ndim+1) + 6 几何超参 → 三个 int32 表），数值生成规则按 spconv 上游 generate_conv_inds CPU 实现逐行移植"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-12 准入（批量工作流构建+独立自检）。题面子集：hipdnn_samples spconv 家族 8 样例中的 spconv_indice_pairs 单题（Native 非 subm 索引对表生成）；spconv_igemm_indice_pairs 仅作对照不入题面（与 subm 留作后续变体），与 5005_spconv_fprop 构成生成/消费两端（行 0=输入 gather、行 1=输出 scatter、密集前缀槽位，口径衔接）。主样例仅含 hipDNN 图 API 调用（无数值输出），生成规则按 spconv 上游 v2.3（263d6b47）移植并全部写入题面：output_dims 公式、外层 k 内层 i 枚举序、首次出现序去重、平面方向、-1 填充。out_indices 容量取上界 cap=min(kv*n, B*prod(output_dims))（自检实测 m=703>n=53，按主样例取容量 n 必越界，上界为唯一自洽口径）。三逻辑输出按 cap*(ndim+1)+2*kv*n+kv 一维打包为单 int32 张量（model_class 单输出硬约束），索引语义零容差逐位一致。闭源库边界：题目本体纯 PyTorch 自包含不调用 hipDNN/MIOpen，样例的 hipDNN 设备路径仅作语义口径与性能基线方向，生成侧 forbidden 禁用 hipdnn/miopen 及 unique/sort/scatter/index_put 等去重捷径。审核记录见 benchmark/sources/5007_spconv_indice_pairs.yaml"
+
+  - id: "5008_conv_bias_act"
+    name: conv_bias_act_fused
+    family: conv
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/conv_fusion/conv_bias_relu.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标（F.conv2d fp32 中间累加 + bias (1,K,1,1) 广播 + relu/swish/prelu 逐元素激活，输出单次 cast 回输入 dtype）；样例口径：hipDNN conv_fprop+bias+pointwise 激活融合图（io fp16、intermediate/compute fp32，stride/pad/dil 恒 (1,1)/(1,1)/(1,1)）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（工作流构建+独立自检，build_check 五件事全过）。题面变体子集：conv+bias+{relu,swish,prelu} 三样例同构图，prelu 斜率按题目约束为 0 维标量张量 forward 输入（样例为图级标量参数 0.01，relu/swish 下垃圾输入不得影响输出）；dtype 域 fp16（主，样例口径）+bf16/fp32，shape 全域各维 >=1（含全 1 边界、H_out=1、样例原版维度），H_out=H-R+3/W_out=W-S+3；融合族其余组合（add/mul/int8/clipped/pad/avgpool/resize）与 per-channel PReLU 留作后续。闭源库边界：题目本体不调用 hipDNN/MIOpen（calls_closed_libs: false），样例仅作语义口径与性能基线方向，生成侧 forbidden 同 5001 禁用 miopen/hipdnn。审核记录见 benchmark/sources/5008_conv_bias_act.yaml"
+
+  - id: "5009_conv_depthtospace"
+    name: conv_depthtospace_fused
+    family: conv
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/conv_depthtospace_fusion/conv_bias_dts_add.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标（F.conv2d fp32 累加 + bias (1,K,1,1) 广播 + reshape/permute/reshape 六维重排的 ATen 组合）；样例口径：conv_depthtospace_fusion 融合族 conv_fprop→add(bias)→D2S 图，CRD 排列 ≡ pixel_shuffle、DCR 为通道重排变体，fp32 中间单次 cast 回 io dtype"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-12 准入（构建 agent 五件事自检全过：ast/镜像字节一致/四 json/容差与 forbidden/7 隐藏 case 独立 oracle 实测）。题面变体子集：dts（纯 D2S 重排，无卷积）与 conv_bias_dts（conv+bias+D2S 三算子融合）；闭源库边界：样例的 hipDNN graph 设备路径仅作语义口径与性能基线方向，题目本体不调用闭源库，生成侧 forbidden 禁 miopen/hipdnn 与 pixel_shuffle/fold 系一步等价原语。审核记录见 benchmark/sources/5009_conv_depthtospace.yaml"
+
+  - id: "2010_batchnorm_fwd"
+    name: batchnorm_fwd
+    family: norm
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/batchnorm/batchnorm_training.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标（inference 给定 mean/variance 的 per-channel 仿射 + training 有偏批统计归一化与 running 统计更新，口径取自 hipDNN 官方样例 python/batchnorm/batchnorm_inference.py 与 batchnorm_training.py 的算子契约，公式经 PyTorch F.batch_norm CPU 逐位核对）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-12 准入（工作流构建+独立自检）。题面变体子集：BatchNorm 前向家族——inference（mean/variance 入参的仿射，输出 y 本体 (N,C,H,W) 同 x dtype，fp32/fp16/bf16）与 training（有偏批统计归一化 + running 更新，天然五输出按一维拼接打包为单个 float32 [y|saved_mean|saved_inv_variance|next_running_mean|next_running_var]，恒 fp32，m=N*H*W>=2）；样例只给算子接口不展开数学式，统计与更新公式按行业标准约定裁定并在题面逐式写明（running 方差用无偏批方差 m/(m-1) 修正，PyTorch/cuDNN/MIOpen 约定一致）。闭源库边界：题目本体不调用 hipDNN/MIOpen，样例的 hipDNN graph 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据；生成侧 forbidden 明确禁用 torch.nn.BatchNorm1d/2d/3d、SyncBatchNorm、F.batch_norm、torch.batch_norm、native_batch_norm 与 miopen/hipdnn。BN+激活融合（python/batchnorm_fusion、cpp/batchnorm_fusion）与训练反向（batchnorm_backward*）留作后续题。审核记录见 benchmark/sources/2010_batchnorm_fwd.yaml"
+
+  - id: "2011_batchnorm_bwd"
+    name: batchnorm_bwd
+    family: norm
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/batchnorm/batchnorm_backward.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标：BatchNorm 训练反向闭式解（xhat=(x-saved_mean)*saved_inv_variance 重构 + dgamma/dbeta 两路通道归约 + dx 链式乘加，ATen 组合，float32 中间计算）；样例 hipDNN graph 仅提供 I/O 契约与性能基线方向，题目本体不调用闭源库"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（构建工作流，构建自检 25/25 绿 + 全仓 pytest 205 绿）。题面变体子集：BatchNorm 训练反向 dx（(N,C,H,W) 单张量）与 dgamma_dbeta（两梯度段拼 (2*C,) 一维单张量，前 C 个 dgamma、后 C 个 dbeta），forward(dy, x, scale, saved_mean, saved_inv_variance) 与样例实参顺序一致；fp32 为主档另设 fp16/bf16（统计量恒 float32），N/C/H/W 任意（含 1/非 2 幂），统计量按给定值消费不得由 x 重算（random-stats 隐藏 case 钉死）。闭源库边界声明：样例 hipDNN graph 冒烟仅作语义口径与性能基线方向、不作为 core_compute 证据，生成侧 forbidden 禁 batch_norm 原语族（API 全限定形式，避免裸子串误杀合法 kernel 名）与 autograd/.backward(，miopen/hipdnn 等由全局黑名单覆盖。溯源要点：opendtk/hipdnn_samples commit b67a3f9，样例仓库未随附 LICENSE；两样例文件 sha256 记录于 benchmark/sources/2011_batchnorm_bwd.yaml，dbn_weight 的 eq_scale_dy/eq_scale_x/eq_bias 推理融合副产物与 channels_last 布局留作后续变体。审核记录见 benchmark/sources/2011_batchnorm_bwd.yaml"
+
+  - id: "2013_groupnorm_bwd"
+    name: groupnorm_bwd
+    family: norm
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/groupnorm/groupnorm_bwd.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch：2012 同口径 GroupNorm 前向（组内有偏统计→rsqrt(有偏方差+eps)→通道广播→逐通道仿射）的 autograd 反传求 dx/dgamma/dbeta 全梯度，保存统计量经恒等拼接按给定值消费；样例口径为 hipDNN graph.groupnorm_backward（x/dy/scale/mean/inv_var -> dx/dbias/dscale，统计量入参声明 (groups*batch,) float32）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（工作流构建+双 oracle 自检）。题面：GroupNorm 训练反向全梯度——dx/dgamma/dbeta 三逻辑输出按 [dx|dgamma|dbeta] 段序打包为一维 float32 单张量（长度 N*C*H*W+2C），4-D NCHW、G 整除 C（1<=G<=C）、各维>=1（含 1/非 2 幂/非对齐）、fp32 主档 + fp16/bf16 输入量化档（输出恒 fp32 不回 cast）、统计量按给定值消费禁止由 x 重算；闭源库边界：题目本体不调用 hipDNN/MIOpen，样例仅作语义口径与性能基线方向，生成侧 forbidden 禁用 group_norm 原语族/autograd/.backward(/miopen/hipdnn。审核记录见 benchmark/sources/2013_groupnorm_bwd.yaml"
+
+  - id: "1031_deform_attention_fwd"
+    name: deform_attention_fwd
+    family: attention
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/deformattention/deform_attention.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（attention_weights 沿 (levels×points) softmax 归一化 + 手写四角点双线性插值（越界角点记 0 零填充）+ 跨采样点加权归约，float32 中间计算）；样例 hipdnn 图调用仅提供张量布局与 fp32 口径（value(N,n_keys,heads,D)/spatial_shapes(L,2)~randint[1,16)/level_start_index 前缀和/sampling_locations(N,Q,heads,L,P,2)/attention_weights(N,Q,heads,L,P)），数学口径为通行多尺度可变形注意力前向"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（构建自检五件事全过：独立逐元素 python oracle 最大偏差 fp32 2.384e-07 / fp16 2.437e-04，均在容差内；单像素闭式对照逐位一致）。题面单 variant：value 采样点 + 四角点双线性插值 + 采样权重 softmax 归一化，输出天然单张量 (N,Q,heads*D)，无打包；dtype 域按手册约束仅 fp32/fp16（不含 bf16/fp64）；闭源库边界：样例的 hipDNN 设备路径仅作语义口径与性能基线方向，题目本体不调用闭源库，生成侧 forbidden 禁用 hipdnn/miopen/torchvision（含 ms_deform_attn）/mmcv/grid_sample/matmul 族/softmax；输出布局 (N,Q,heads*D) 由 deform_attention_bwd 样例 grad_output shape 旁证；留作后续：deform_attn_dgrad 训练反向（三输出需一维拼接打包另立题）、bf16 档。审核记录见 benchmark/sources/1031_deform_attention_fwd.yaml"
+
+  - id: "1032_deform_attention_bwd"
+    name: deform_attention_bwd
+    family: attention
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/deformattention/deform_attention_bwd.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标（1031 同口径手写可导前向 + torch.autograd.grad 反传得 value/sampling_locations/attention_weights 三梯度，一维拼接单输出）；样例仅给出 deform_attn_dgrad 图调用与张量布局口径"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（批量准入工作流，构建/复核独立 agent）。样例源 opendtk/hipdnn_samples @ b67a3f9（仓库未随附 LICENSE，溯源以 commit 为准，sha256 经 WSL sha256sum LF 口径复核与 1031 记录一致）。闭源库边界：样例的 hipDNN 设备路径仅作语义口径与性能基线方向、不作 core_compute 证据；题目本体零闭源依赖，生成侧 forbidden 明确禁用 hipdnn/miopen 与 torch.autograd/.backward（梯度须按题面解析式手写 Triton）。输出契约为三梯度按固定段序 grad_value | grad_sampling_locations | grad_attention_weights 一维拼接单张量（适配 KernelBench 单输出 .shape/allclose 假设）；dtype 域仅 fp32/fp16（容差 1e-3 / 2e-2），shape 域放宽含 (1,1) 单像素层、1×N/N×1 细条层、Q=1、P=1、L=1 边界；admission.derived_from 1031_deform_attention_fwd（前向语义与准入证据继承母题）。审核记录见 benchmark/sources/1032_deform_attention_bwd.yaml"
+
+  - id: "8001_cumsum"
+    name: cumsum
+    family: scan
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/cumsum/cumsum.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标（fp32 中累加的 inclusive 前缀和 + cast 回输入 dtype，torch.cumsum 内联）；样例口径为 hipdnn_samples 官方样例的 cumsum 调用（4D、axis=2、io/intermediate/compute 均 FLOAT）"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-12 准入（构建自检 tmp/build_check/8001_cumsum.py 五件事全过：9 个隐藏 case 对 fp64 循环 oracle 偏差为 0，fp32 累加顺序差异——分块并行 scan 块 64/128/1024、L 至 65536——最大 allclose 裕度 0.076，容差据此放宽为 fp32 1e-4/1e-3、fp16/bf16 2e-2/2e-2）。题面变体子集：沿 dim 维 inclusive 前缀和，dim 为构造超参（torch 惯例含负数），ndim 1–4、scan 长 L∈[1,65536]、numel≤2^25、dtype fp32 主 + fp16/bf16（fp32 累加契约）；天然单输出（同形同 dtype），无需打包。forbidden 除 torch.cumsum/cumulative_sum 系外显式禁用 tl.cumsum/tl.associative_scan 与 FFT/matmul/conv1d/numpy 数学等价绕过——scan 为 DCU 短板（rocPRIM DeviceScan 兜底），出题动机即生成侧手写 scan。闭源边界：样例的 hipDNN 设备路径仅作语义口径与性能基线方向，题目本体不调用闭源库（static_audit 实测：调 torch.cumsum 的假候选被拦 2 hits，手写 Triton 骨架 0 hits）。exclusive scan/多维 scan/训练反向留作后续题。审核记录见 benchmark/sources/8001_cumsum.yaml"
+
+  - id: "5001_conv2d_fwd"
+    name: conv2d_fwd
+    family: conv
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/convolution/convolution_fwd.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标（torch.nn.functional.pad + conv2d 的 ATen 组合，reference 不受 forbidden 约束）；样例口径：hipDNN conv_fprop NCHW/fp32 无 bias 标准 2D 卷积前向（stride/padding/dilation=(1,1)/(1,1)/(1,1)）与非对称 padding（pre (2,2) / post (1,1)）两 variant，cross-correlation 语义"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（hipdnn_samples 首题；样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit b67a3f9 为准）。题面子集：python 卷积前向两样例——standard（对称 padding (1,1)）与 asymmetric（pre_padding (2,2)/post_padding (1,1)），stride/dilation 恒 (1,1)/(1,1)，NCHW fp32 无 bias，与 torch F.conv2d / F.pad+F.conv2d(padding=0) 逐一同构；公开固定族放宽为规范 3x3 卷积核（56x56 尺寸保持），样例原版 1x1 与全 1 边界保留在 shape 域内由隐藏 case 覆盖；forward 天然单输出 (N,K,H_out,W_out)，无打包分段。forbidden 禁 torch 卷积全路由与 ATen GEMM 替代（matmul/mm/bmm/einsum/tensordot/unfold）及 miopen/hipdnn——样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据。fp16/bf16、conv bwd/wrw、conv 融合留作后续题。审核记录见 benchmark/sources/5001_conv2d_fwd.yaml"
+
+  - id: "5002_conv2d_bwd"
+    name: conv2d_bwd
+    family: conv
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/convolution/convolution_bwd.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch（F.conv2d 前向构图 + autograd 反传为语义金标，dx/dw 与前向严格一致）；样例以 hipDNN conv_dgrad/conv_wgrad 图定义标准 2D 卷积反向的 dgrad/wgrad 语义口径（NCHW、无 bias、groups=1）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入（构建/自检独立 agent）。题面变体子集：init 超参 variant 选 dgrad/wgrad 两方向，forward(dy,weight,x) 天然单张量输出、无打包拼接；dtype 域仅 float32（三样例全部 fp32，fp16/bf16 autograd 路径未经真机验证留作后续）；shape 域含 1x1 卷积/奇数非 2 幂/无 padding/dilation>1/stride>1/逐轴属性；样例的 pre/post 非对称 padding 变体留作后续题。样例的 hipDNN 设备路径仅作语义口径与性能基线方向、不作 core_compute 证据，生成侧 forbidden 禁 torch 卷积/autograd/im2col 族与全部闭源库。容差按实测定标 fp32 atol=rtol=1e-3（构建自检 60 检查全绿，deepest-reduction 实测最坏占用 0.34）。审核记录见 benchmark/sources/5002_conv2d_bwd.yaml"
+
+  - id: "2012_groupnorm_fwd"
+    name: groupnorm_fwd
+    family: norm
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/groupnorm/groupnorm_fwd.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（(N,G) 组内有偏统计 + rsqrt(var+eps) + 逐通道仿射 + swish 融合的 ATen 组合，不依赖闭源库）；样例口径：hipDNN groupnorm 前向 TRAINING 三输出 y/mean/inv_var，NCHW、scale/bias (C,)、eps=1e-5、groups=2，swish 样例定融合式 y=gn*sigmoid(gn)"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-12 准入（hipdnn_samples 样例集，构建自检五件事全过）。题面变体子集：groupnorm 标准前向与 groupnorm_swish 融合，TRAINING 三输出按一维 float32 打包 [y | mean | inv_var]（长度 batch*channels*height*width + 2*batch*groups，统计段 (N,G) 行主序，形状依据 groupnorm_bwd 样例的 groups*batch 入参声明）；NCHW 各维 >=1 任意（含全 1/非 2 幂/超长 W），G 整除 C 的任意 1<=G<=C（1 与 C 边界在隐藏 case），eps 可调缺省 1e-5；fp16/bf16 为输入量化档（输出恒 float32 不回 cast）；groupnorm_bwd 反向 dx/dscale/dbias 留作后续题。审核记录见 benchmark/sources/2012_groupnorm_fwd.yaml"
+
+  - id: "2014_instancenorm_fwd"
+    name: instancenorm_fwd
+    family: norm
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/instancenorm/instancenorm.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标：per-(N,C) 平面在 (H,W) 有偏统计、rsqrt(var+eps)、(1,C,1,1) 逐通道仿射，float32 中间计算 cast 回输入 dtype；样例口径 hipDNN graph.instancenorm(INFERENCE) 仅 y set_output(True)，eps=1e-5 graph 标量"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-12 准入（构建自检 tmp/build_check/2014_instancenorm_fwd.py 五件事+附加全过）。单 variant InstanceNorm 前向：样例仅一组参数（affine 恒开）且 instance norm 无 train/infer 语义差；语义按行业标准裁定为有偏方差 + eps 在 rsqrt 内，与 PyTorch 原生 op CPU 行为核对一致（fp64 有偏差 8.9e-16 / 无偏差 3.5e-2）；输出 y 本体 (N,C,H,W) 同 x dtype 无打包，天然单输出满足单张量硬约束；闭源库边界：题目本体不调用 hipDNN/MIOpen，样例设备路径仅作语义口径与性能基线方向，生成侧 forbidden 禁用 miopen/hipdnn；fp16/bf16 为输入量化档，shape 放宽为各维 >=1（HW=1 边界 y=bias、W=1 单列在隐藏 case）；instancenorm 反向留作后续题。审核记录见 benchmark/sources/2014_instancenorm_fwd.yaml"
+
+  - id: "6001_fused_adamw"
+    name: fused_adamw
+    family: optimizer
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/adamw/adamw.py"   # transformer 变体同源 python/adamw/transformer_adamw.py
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标（解耦权重衰减 + 一二阶矩更新 + bias correction 幂 + sqrt 逐元素式）；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作 core_compute 证据，生成侧 forbidden 明确禁用"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-12 准入。样例子集：python/adamw/{adamw,transformer_adamw}.py 双 variant（标准 AdamW / Transformer 调度 AdamW）。语义口径：graph 样例不暴露超参与更新式，以同仓库 python/torch_wrapper/test_adamw.py 的 hipdnn.TorchAdamW(lr=1e-3, betas=(0.9,0.999), weight_decay=0.01) 定超参缺省族（=torch.optim.AdamW 缺省），以 cpp/adamw/TransformerAdamw.cpp 的 set_correct_bias(false) 定 transformer 变体为无 bias correction、其余逐行同式，eps 在 sqrt 外（与 torch/apex 同式）。对样例的契约适配：in-place 图执行改 functional 单步、step 上提为 0 维 float32 张量输入、超参上提为构造常量；样例 max_exp_avg_sqs（AMSGrad）不入 I/O 契约，AMSGrad 变体留作后续题。输出契约：forward 单张量=更新后参数（同 params 形与 dtype，无拼接分段）。dtype 域 fp32 主 + fp16 io cast（cpp 样例 io=half/compute=FLOAT 依据），bf16 无样例证据不入域；shape 域 ndim 1-4 任意（含非 2 的幂/边界）。forbidden 含 torch.optim 全族 / apex / deepspeed / bitsandbytes / fused_adam / hipdnn / miopen 与 addcdiv/addcmul ATen 捷径。审核记录见 benchmark/sources/6001_fused_adamw.yaml"
+
+  - id: "7001_ctc_loss"
+    name: ctc_loss
+    family: loss
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/ctc_loss/ctc_loss.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "reference.py 自包含纯 PyTorch 语义金标：log 空间 alpha/beta 前向-后向动态规划手写实现（Graves 扩展序列构造，损失=-log Z、梯度=对概率输入的真实梯度）；样例口径：probs (T,N,C) 输入已是概率（apply_softmax=False）、blank_label_id=0、algo=0、reduction='none'（逐序列 losses (N,) + 梯度 (N,T,C) 一并打包）"
+    external_calls: []
+    status: admitted
+    difficulty: hard
+    note: "2026-10-12 准入。hipDNN 官方样例集 opendtk/hipdnn_samples（本机 clone 远程为 developer.sourcefind.cn/codes/opendtk/hipdnn_samples 镜像）python/ctc_loss 的 model_class 出题。样例为 smoke 代码（无数值断言）：布局契约（输入 probs (T,N,C) time-major、losses (N,)、gradients (N,T,C) batch-major）以 python 样例为唯一权威，损失/梯度数值按标准 CTC 定义（梯度含 1/p 链式因子），构建自检以暴力路径枚举+torch.autograd（fp64）独立 oracle 实证（dloss<=3e-7、dgrad<=1.4e-6，且借此发现并修复 beta 双计发射的梯度 bug）。样例调用 hipDNN 闭源库仅作语义口径与性能基线方向，题目本体不调用闭源库，生成侧 forbidden 禁用 ctc_loss 库调用；cpp 同名样例 apply_softmax=true 且 input_lengths 与 batch 不符，不入题，logits 路径与 reduction sum/mean 留作后续变体。单张量打包协议：out[0:N]=losses、其余 gradients 按 (N,T,C) 行主序平铺，dtype 同 probs。审核记录见 benchmark/sources/7001_ctc_loss.yaml"
+
+  - id: "8002_gather"
+    name: gather
+    family: index
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/gather/gather.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（torch.gather 两分支：一维索引 view+expand 广播 / 同形索引）；样例口径为 hipDNN graph.gather / graph.gather_elements 的 ONNX Gather / GatherElements 语义"
+    external_calls: []
+    status: admitted
+    difficulty: basic
+    note: "2026-10-12 准入（工作流构建+自检）。hipDNN 官方样例 gather 与 gather_elements 合并为一题两 variant，索引 dtype/布局以样例为准（gather 一维 int64 / gather_elements 同维数 int32，在线统一 fp32 cast、<2^24 小整数无损恢复），axis 提升为构造超参缺省 1；纯搬移语义，三档 dtype 容差全 0（逐位一致，构建自检实测偏差 0）。gather 属 FlagGems 补齐路线已覆盖的通用算子，存在重叠（可作交叉验证口径），本题考察生成侧手写索引寻址，生成侧禁用 torch.gather / index_select / take_along_dim / tl.gather / embedding 查表等库级原语与等价绕过。审核记录见 benchmark/sources/8002_gather.yaml"
+
+  - id: "8003_scatter_nd"
+    name: scatter_nd
+    family: index
+    source:
+      repo: opendtk/hipdnn_samples
+      commit: b67a3f96f4f11c34829929387e73739d2853b76c
+      path: "python/scatterND/scatterND.py"
+    impl_lang: triton
+    entry: model_class
+    core_compute: "scatterND.py: graph.scatter_nd(data, indices, updates, reduction=NONE)——int64 (K,r) 全索引坐标元组把一维 updates 覆盖写进 data 拷贝、未命中位置原值保留；题目 reference.py 自包含纯 PyTorch 语义金标（clone + 高级索引 setitem），样例口径为覆盖写、坐标互异"
+    external_calls: []
+    status: admitted
+    difficulty: medium
+    note: "2026-10-12 批量准入（工作流构建+独立校验）。题面子集：ScatterND 全索引覆盖写——indices int64 (K,r)（r=data 维数，坐标两两互异，randperm 无放回保证）、updates 同 dtype (K,)、out=data 拷贝命中位置覆盖，data ndim 1–6/各维>=1/numel<=2^23、K∈[1,numel]（含 K=1 与全量打散），dtype fp32 主（样例口径）+fp16/bf16（纯搬移逐位一致，容差 0）；重复坐标元组行为未定义排除出输入域，累加写（reduction 归约模式）与部分索引形式留作后续题。与 FlagGems 补齐路线重叠（scatter_nd 属其通用 Triton 算子集，可作交叉验证口径），生成侧禁用 torch.scatter/scatter_add/scatter_reduce/index_put/torch_scatter 等库级写原语，考察手写坐标->线性偏移寻址；hipDNN 闭源库仅作语义口径与性能基线方向，题目本体纯 PyTorch 无闭源调用（静态审计剥 docstring 实测 0 违规）。审核记录见 benchmark/sources/8003_scatter_nd.yaml"

@@ -1,0 +1,77 @@
+id: "2012_groupnorm_fwd"
+name: groupnorm_fwd
+family: norm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  GroupNorm 前向家族（标准 / Swish 融合）：输入 x (batch, channels, height,
+  width) NCHW，scale / bias 为 (channels,) 逐通道仿射参数，groups G 整除
+  channels（1 <= G <= channels），通道 c 属于组 c // (channels//G)。归一化
+  对每个 (n, g) 组在组内 D = (channels//G)*height*width 个元素上以 float32
+  求 mean 与有偏方差，inv_var = 1/sqrt(var + eps)，
+  gn = (x - mean_ng) * inv_var_ng * scale[c] + bias[c]；
+  variant="groupnorm_swish" 时再对 gn 施加 Swish：y = gn * sigmoid(gn)。
+  两 variant 均同时输出逐组统计 mean / inv_var（每个 (n, g) 一组，(N, G)
+  布局，float32）。forward 返回单个一维 float32 张量（长度
+  N*C*H*W + 2*N*G）：y 段 | mean 段 | inv_var 段一维拼接（分段协议见
+  io.outputs 与题面），适配 model_class 单张量输出硬约束；输出恒 float32，
+  fp16/bf16 仅作为输入量化档。N/C/H/W 任意（含 1、非 2 的幂、非对齐）。
+  本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 2012），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,     dtype: [float32, float16, bfloat16], layout: contiguous, ndim: 4, shape: [batch, channels, height, width]}
+    - {name: scale, dtype: same_as_x, layout: contiguous, ndim: 1, shape: [channels]}
+    - {name: bias,  dtype: same_as_x, layout: contiguous, ndim: 1, shape: [channels]}
+  outputs:
+    - {name: out, dtype: float32, layout: contiguous, ndim: 1,
+       shape: "[batch*channels*height*width + 2*batch*groups]，三段一维拼接：y (batch*channels*height*width) | mean (batch*groups) | inv_var (batch*groups)，按序紧排；mean/inv_var 按 (batch, groups) 行主序展平"}
+  init_inputs:
+    - {name: variant, dtype: str,   layout: scalar}   # "groupnorm" | "groupnorm_swish"
+    - {name: groups,  dtype: int,   layout: scalar}   # G 整除 channels，1 <= G <= channels
+    - {name: eps,     dtype: float, layout: scalar}   # 缺省 1e-5
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {batch: 2, channels: 16, height: 512, width: 512, groups: 2, variant: "groupnorm", dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "batch/channels/height/width 均 >= 1（允许 1、非 2 的幂、非对齐边界值）；x 为 NCHW contiguous"
+    - "groups G 整除 channels 且 1 <= G <= channels；组内元素数 D = (channels//G)*height*width >= 1；通道 c 属于组 c // (channels//G)；G=1 退化为全通道归一化、G=channels 退化为逐通道归一化，均合法"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；组内统计（mean/有偏 var）、rsqrt、仿射与 Swish 全程 float32 中间计算"
+    - "输出恒为一维 float32 打包张量，y 段不做低精度量化（fp16/bf16 仅作为输入量化档，cast fp32 后全程 float32 计算）"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "终审按输出 dtype 取档：两 variant 的输出都是一维 float32 打包张量（y 段 + mean 段 + inv_var 段），整体用 float32 档 1e-3/1e-3，不分段收紧或放宽——参考与候选均以 float32 中间计算，段间偏差同量级；float16/bfloat16 行仅声明输入量化档，输出恒 float32，不会被终审选中"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。fp32 档 1e-3 相对 GroupNorm
+    实现间偏差（大组归约树序不同，量级 1e-6~1e-5）有约两个数量级裕量。
+    fp16/bf16 为输入量化档：输入按该 dtype 生成后 cast fp32 参与全程
+    计算，输出不做低精度量化（避免量化边界噪声污染统一 fp32 档），故
+    这两档仅约束输入生成域。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+forbidden:
+  - torch.nn.GroupNorm
+  - nn.GroupNorm
+  - torch.nn.functional.group_norm
+  - F.group_norm
+  - torch.group_norm
+  - native_group_norm
+  - miopen
+  - hipdnn
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/2012_groupnorm_fwd.yaml，题面元数据不重复携带库源标识

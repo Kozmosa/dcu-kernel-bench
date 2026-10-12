@@ -1,0 +1,58 @@
+task_id: "2014_instancenorm_fwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/instancenorm/instancenorm.py
+      sha256: e5d69b392478fc716159fd3f62cc8e81aacdb84e1b7b8192cfd390401556a485
+      role: semantic_spec   # 主样例（唯一语义口径）：graph.instancenorm(INFERENCE) 三返回张量中仅 y set_output(True)，x (16,32,64,64) NCHW、scale/bias (1,C,1,1)、eps=1e-5 graph 标量（(1,1,1,1) CPU 张量 set_value）、io FLOAT / intermediate FLOAT / compute FLOAT
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（per-(N,C) 空间有偏统计、rsqrt(var+eps)、逐通道仿射的 ATen 组合即语义金标本体，不依赖任何闭源库）；生成侧核心计算要求在提交文件内以 Triton kernel 完成（task.yaml forbidden 强制）
+  calls_closed_libs: false        # 题目本体不调用 hipDNN/MIOpen；样例的 hipDNN graph 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 miopen/hipdnn
+  builds_standalone: true
+  has_reference: true             # 语义金标内联于题目文件 Model（ATen 逐式实现，reference 不受 forbidden 约束）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipDNN 样例集 instancenorm 家族的推理前向样例
+    （instancenorm/instancenorm.py，mode=INFERENCE）——单 variant：样例仅
+    一组参数（scale/bias 恒给定，affine 恒开），instance norm 无
+    train/infer 语义差，故不设 variant 维度，构造超参仅 eps（缺省 1e-5，
+    与样例 eps 一致）。语义口径与冲突处理：样例为 4-D NCHW、参数
+    (1,C,1,1) 通道广播、eps=1e-5 作 graph 标量值、精度口径为 io 同输入
+    dtype、intermediate/compute FLOAT；样例只给出算子接口不展开数学式，
+    归一化公式按行业标准 InstanceNorm 约定裁定并在题面逐式写明——
+    per-(N,C) 平面在 (H,W) 上的有偏均值/有偏方差、inv_std =
+    1/sqrt(var+eps)，与 PyTorch 原生 op 的 CPU 行为核对一致（构建自检
+    tmp/build_check/2014_instancenorm_fwd.py 经 torch.instance_norm 原生
+    绑定 fp64 实测：与有偏方差公式最大差 8.9e-16、与无偏方差公式差
+    3.5e-2，有偏口径实锤；注：F.instance_norm 函数式包装对 HW==1 的合法
+    边界有 _verify_spatial_size 误杀守卫（ValueError），交叉核对走原生
+    绑定）。等价原语边界：F.group_norm(x, num_groups=C,
+    weight=scale.view(C), bias=bias.view(C), eps) 与本题核心计算数学等价
+    （构建自检实测与 fp64 公式差 8.9e-16），BatchNorm 经 (1, N*C, H, W)
+    重排同样一步完成核心计算（实测差 1.8e-15，PyTorch 内部即如此实现
+    instance_norm），故 forbidden 除 instance_norm 族外一并禁用
+    group_norm 族与 batch_norm 族（与 2010/2012 题面禁用口径对齐）。输出契
+    约：样例 graph.instancenorm 虽返回 y/mean/inv_var 三张量，但仅 y
+    set_output(True)（INFERENCE 模式下统计量即弃），故题目天然单输出——
+    forward 返回 y 本体 (N,C,H,W) 同 x dtype，无打包，直接满足
+    model_class 单张量硬约束。dtype/shape 域：样例 dtype 仅 float32
+    （fixed_family 保留主样例口径 N=16/C=32/H=64/W=64）；fp16/bf16 为输
+    入量化档（输入按该 dtype 生成后 cast fp32 全程 float32 计算，输出
+    cast 回 x dtype，容差按输出 dtype 分档）；shape 放宽为各维 >= 1 的任
+    意组合（含全 1、非 2 幂、非对齐，HW=1 边界 y=bias 与 W=1 单列在隐藏
+    case 覆盖）。留作后续题：instancenorm 反向
+    （instancenorm/instancenorm_backward.py，sha256
+    e2d4d4f03e517b07d9f624417e7a70cc01c6fe2403729f6f1346520c25e283c3，
+    dx/dscale/dbias 三输出，可参照 2011 打包协议独立成题）。case 文件为
+    {name + 语义字段} 字典，消费者剥离 name 元数据键后调题目文件内
+    make_inputs(**fields) 确定性生成（torch.Generator(seed)，消费顺序
+    x -> scale -> bias）；Model 构造超参由
+    audit_model_class.resolve_init_args 按 task.yaml io.init_inputs 字段
+    名从 case 取（eps 为唯一构造超参，各 case 显式携带，缺省口径 1e-5，
+    hidden case hidden_eps_custom_f32 携带 0.001 覆盖自定义路径）。

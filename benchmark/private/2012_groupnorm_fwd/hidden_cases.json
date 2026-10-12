@@ -1,0 +1,12 @@
+{
+  "task_id": "2012_groupnorm_fwd",
+  "cases": [
+    {"name": "hidden_min_groupsize1_geq_c_f32", "batch": 1, "channels": 4,  "height": 1,    "width": 1,     "groups": 4,  "variant": "groupnorm",       "dtype": "float32",  "seed": 2412},
+    {"name": "hidden_swish_g1_nonpow2_bf16",    "batch": 1, "channels": 7,  "height": 5,    "width": 9,     "groups": 1,  "variant": "groupnorm_swish", "dtype": "bfloat16", "seed": 2413},
+    {"name": "hidden_fwd_instyle_nonpow2_f16",  "batch": 3, "channels": 16, "height": 33,   "width": 17,    "groups": 16, "variant": "groupnorm",       "dtype": "float16",  "seed": 2414},
+    {"name": "hidden_swish_sample_shape_f32",   "batch": 2, "channels": 16, "height": 512,  "width": 512,   "groups": 2,  "variant": "groupnorm_swish", "dtype": "float32",  "seed": 2415},
+    {"name": "hidden_swish_eps_custom_f32",     "batch": 4, "channels": 10, "height": 23,   "width": 31,    "groups": 5,  "variant": "groupnorm_swish", "dtype": "float32",  "seed": 2416, "eps": 0.001},
+    {"name": "hidden_fwd_wide_w16384_f16",      "batch": 2, "channels": 8,  "height": 16,   "width": 16384, "groups": 2,  "variant": "groupnorm",       "dtype": "float16",  "seed": 2417},
+    {"name": "hidden_swish_nonpow2_midg_bf16",  "batch": 5, "channels": 64, "height": 35,   "width": 44,    "groups": 8,  "variant": "groupnorm_swish", "dtype": "bfloat16", "seed": 2418}
+  ]
+}

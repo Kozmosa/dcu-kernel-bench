@@ -1,0 +1,9 @@
+{
+  "task_id": "5007_spconv_indice_pairs",
+  "cases": [
+    {"name": "perf_3d_n4096_kv27",  "n": 4096,  "batch_size": 4, "input_dims": [6, 64, 64],  "ksize": [3, 3, 3], "stride": [1, 1, 1], "padding": [1, 1, 1], "dilation": [1, 1, 1], "seed": 5407},
+    {"name": "perf_2d_n8192_kv9",   "n": 8192,  "batch_size": 2, "input_dims": [128, 128],   "ksize": [3, 3],    "stride": [1, 1],    "padding": [1, 1],    "dilation": [1, 1],    "seed": 5408},
+    {"name": "perf_1d_n16384_kv3",  "n": 16384, "batch_size": 1, "input_dims": [32749],      "ksize": [3],       "stride": [1],       "padding": [1],       "dilation": [1],       "seed": 5409}
+  ],
+  "timing": {"warmup_iters": 5, "repeat_iters": 20, "reduction": "median"}
+}

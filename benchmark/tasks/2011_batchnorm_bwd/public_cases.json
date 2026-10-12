@@ -1,0 +1,16 @@
+{
+  "task_id": "2011_batchnorm_bwd",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用，随机部分消费顺序 dy -> x -> scale，saved 统计量按训练快照口径由 x 确定性导出、不消费 RNG）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成。",
+  "shape_family": {
+    "N": 4,
+    "C": 16,
+    "H": 56,
+    "W": 56,
+    "variant": "dx",
+    "dtype": "float32",
+    "stats": "derived",
+    "out_ndim": 4,
+    "out_shape": [4, 16, 56, 56],
+    "out_layout": "dx：(N, C, H, W) 单张量；dgamma_dbeta：(2*C,) 一维打包——前 C 个元素 dgamma、后 C 个元素 dbeta（各按行主序平铺，float32 计算后 cast 回输入 dtype）"
+  }
+}

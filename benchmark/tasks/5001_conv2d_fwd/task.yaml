@@ -1,0 +1,90 @@
+id: "5001_conv2d_fwd"
+name: conv2d_fwd
+family: conv
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  标准 NCHW 2D 卷积前向家族（对称 padding / 非对称 padding）：对输入
+  x (N, C, H, W) 与卷积核 weight (K, C, R, S) 做 cross-correlation 前向
+  （深度学习库 conv_fprop 惯例语义，非数学卷积的核翻转；无 bias，零
+  padding，stride 与 dilation 恒为 (1,1)）。variant="standard" 时对称
+  padding (1,1)；variant="asymmetric" 时 pre_padding (2,2)（高的上侧、
+  宽的左侧）、post_padding (1,1)（高的下侧、宽的右侧）。输出单张量
+  out (N, K, H_out, W_out)，H_out/W_out 由标准公式给出（standard 为
+  H-R+3 / W-S+3，asymmetric 为 H-R+4 / W-S+4）；卷积天然单输出，无
+  多输出打包分段，float32 全程。H/W 任意（含 1、非 2 的幂、非对齐），
+  卷积核尺寸也任意（含样例原版 1x1），padding 必须在 kernel 内以掩码/
+  边界索引处理。本题为自包含 KernelBench 题目文件（reference.py 即
+  题目文件，同时镜像到 benchmark/kernelbench_compat/level3/），可直接走
+  PyramidKernel 的原生 model_class 路径（--kernelbench-root
+  benchmark/kernelbench_compat --level 3 --problem-id 5001），无需任何
+  框架改动。starter 由框架 loader 从 Model 自动生成 ModelNew scaffold
+  （锚点：helpers / init_body / forward_stmt_N），本任务包不单独提供
+  starter。
+
+io:
+  inputs:
+    - {name: x,      dtype: [float32], layout: contiguous, ndim: 4, shape: [N, C, H, W]}
+    - {name: weight, dtype: same_as_x, layout: contiguous, ndim: 4, shape: [K, C, R, S]}
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: 4, shape: "[N, K, H_out, W_out]；卷积天然单输出，无打包分段"}
+  init_inputs:
+    - {name: variant, dtype: str, layout: scalar}   # "standard" | "asymmetric"
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {N: 4, C: 16, H: 56, W: 56, K: 4, R: 3, S: 3, variant: "standard", dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "N/C/H/W/K/R/S 均 >= 1（允许非 2 的幂、非 16 对齐与边界值，含 H=1/W=1、C=1/K=1、R=S=1）；weight 输入通道维必须等于 C"
+    - "输出维按公式计算且 >= 1：standard 时 R <= H+2 且 S <= W+2，asymmetric 时 R <= H+3 且 S <= W+3（case 保证，越界即非法 case）"
+    - "stride 与 dilation 恒为 (1,1)（两 variant 共享）；padding 集 per variant：standard 对称 (1,1)，asymmetric pre (2,2) / post (1,1)，padding 值恒为零"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；无 bias；全程 float32 计算，输出 dtype 与输入一致"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  compare: "reference 与生成实现各自以 float32 计算（累加顺序可不同，单点偏差远低于容差）；单张量输出 (N, K, H_out, W_out) 整体比较，无分段打包"
+  note: >
+    本题输入与输出均为 float32（样例唯一 dtype，fp16/bf16 变体留作后续）。
+    以上为本评测集的验收容差，用于离线终审；在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：输入与模型统一 cast 为 fp32（本题本就
+    是 fp32，无 cast）、allclose(atol=rtol=1e-4)——固定族点积为
+    C*R*S=144 项、输出量级 ~sqrt(144)=12，fp32 不同累加顺序的单点偏差
+    ~1e-5，远低于该容差，与上表相容。在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+# 覆盖复核 canary 证实的一步绕行：conv3d（深度维 unsqueeze）/ conv_transpose2d
+# （翻转核+通道转置）均能精确复现 conv2d 语义，ATen GEMM 路由含方法形式
+forbidden:
+  - torch.nn.Conv2d
+  - torch.nn.functional.conv2d
+  - F.conv2d
+  - torch.conv2d
+  - aten.conv2d
+  - aten.convolution
+  - torch.nn.functional.conv3d
+  - torch.conv3d
+  - torch.nn.Conv3d
+  - torch.nn.functional.conv_transpose2d
+  - torch.conv_transpose2d
+  - torch.nn.ConvTranspose2d
+  - torch.nn.functional.unfold
+  - torch.nn.Unfold
+  - .unfold(
+  - torch.matmul
+  - .matmul(
+  - torch.mm
+  - torch.bmm
+  - torch.addmm
+  - torch.baddbmm
+  - torch.einsum
+  - torch.tensordot
+  - torch.nn.functional.linear
+  - torch.nn.Linear
+  - miopen
+  - hipdnn
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/5001_conv2d_fwd.yaml，题面元数据不重复携带库源标识

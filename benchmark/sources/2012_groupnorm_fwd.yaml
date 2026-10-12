@@ -1,0 +1,67 @@
+task_id: "2012_groupnorm_fwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/groupnorm/groupnorm_fwd.py
+      sha256: 41b64f1d111ad5140de23f7d3fcb99e8ab531877d1b0833579b31ec900d4dd37
+      role: semantic_spec   # 主样例（标准前向口径）：graph.groupnorm(TRAINING) 三输出 y/mean/inv_var，x (2,16,512,512) NCHW、scale/bias (C,) 一维、eps=1e-5 graph 标量（(1,1,1,1) CPU 张量 set_value）、groups=2、io FLOAT / intermediate FLOAT / compute FLOAT
+    - path: python/fusion/groupnorm_swish.py
+      sha256: 2a3645b75d08b8c2acbec4620e49580bfa4a753f5a8f10f02e5683ae7f6ef550
+      role: semantic_spec   # swish 融合口径：graph.groupnorm 后接 graph.swish（gn_out 非输出，y=swish(gn_out) 为输出，mean/inv_var 仍为输出），mode=TRAINING、eps=1e-5、groups=2、io FLOAT
+    - path: python/groupnorm/groupnorm_bwd.py
+      sha256: 9c8d94000e3e7dbf91c56b04eecfa0ac5ba3a043a47c33ff191350792852d99b
+      role: stats_shape_reference   # 统计形状佐证：反向样例以入参形式声明 mean/inv_var 为 (groups*batch,) float32——固定前向统计段的 (N, G) 布局与长度
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（(N,G) 组内有偏统计、rsqrt(var+eps)、逐通道仿射、Swish 的 ATen 组合即语义金标本体，不依赖任何闭源库）；生成侧核心计算要求在提交文件内以 Triton kernel 完成（task.yaml forbidden 强制）
+  calls_closed_libs: false        # 题目本体不调用 hipDNN/MIOpen；样例的 hipDNN graph 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 miopen/hipdnn
+  builds_standalone: true
+  has_reference: true             # 语义金标内联于题目文件 Model（ATen 逐式实现，reference 不受 forbidden 约束）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipDNN 样例集 groupnorm 家族的 python 样例——标准前向
+    （groupnorm/groupnorm_fwd.py，variant="groupnorm"：graph.groupnorm
+    TRAINING，天然三输出 y/mean/inv_var）与归一化+Swish 融合
+    （fusion/groupnorm_swish.py，variant="groupnorm_swish"：groupnorm 后
+    接 graph.swish，gn_out 本身非输出，y=swish(gn_out) 与 mean/inv_var
+    为输出）。语义口径与冲突处理：两样例均为 4-D NCHW、scale/bias 为
+    (C,) 一维逐通道参数、eps=1e-5 作 graph 标量值、样例口径 groups=2、
+    精度口径为 io 同输入 dtype、intermediate/compute FLOAT；样例只给出
+    算子接口不展开数学式，归一化公式按行业标准 GroupNorm 约定裁定并在
+    题面逐式写明——组内有偏均值/有偏方差、inv_var = 1/sqrt(var+eps)
+    （eps 唯一用途即 rsqrt 保护）、通道 c 属于组 c//(C//G)，与 PyTorch
+    原生 GN kernel 的 CPU 行为核对一致（构建自检
+    tmp/build_check/2012_groupnorm_fwd.py 经 aten.native_group_norm 实测：
+    y 段 max|Δ|<=1.1e-5、mean 段 <=2.4e-8、inv_var 段 <=3.1e-5——最大者
+    为组内单元素边界 case 的 inv_var=316 的 fp32 舍入，其余 case
+    y<=1.9e-6，均 float32 舍入量级；另 float64 朴素 oracle 全 case
+    max_abs<=1.8e-5，远低于容差 1e-3/1e-3。注：F.group_norm 函数式包装
+    对 n*c//G==1 的合法边界有 training 误杀守卫，交叉核对走原生 op）；
+    swish 按 SiLU 标准式 y = gn*sigmoid(gn) 裁定。
+    统计段形状依据：前向样例的 mean/inv_var 由 graph 返回 dim 无法静态
+    读出，以反向样例 groupnorm_bwd.py 的入参声明
+    （torch.rand(groups*batch) float32）为准——统计为每 (N, G) 一组、
+    行主序展平长 batch*groups。输出契约：两 variant 天然三输出，按
+    model_class 单张量硬约束打包为一维 float32 [y | mean | inv_var]
+    （长度 batch*channels*height*width + 2*batch*groups，分段协议写入
+    题面与 task.yaml，按样例输出顺序 y/mean/inv_var 紧排）。dtype/shape
+    域：样例 dtype 仅 float32（fixed_family 保留主样例口径
+    batch=2/channels=16/height=512/width=512/groups=2）；fp16/bf16 为
+    输入量化档（输入按该 dtype 生成后 cast fp32 全程 float32 计算，
+    输出恒 float32 不回 cast——两实现量化口径不一致会污染统一容差档，
+    容差 compare/note 已说明）；shape 放宽为各维 >= 1 任意组合（含全 1、
+    非 2 幂、非对齐），G 域放宽为整除 C 的任意 1<=G<=C（G=1 全通道、
+    G=C 逐通道边界在隐藏 case 覆盖）。留作后续题：groupnorm 反向
+    （groupnorm_bwd.py 的 dx/dscale/dbias 三输出，可参照 1018/2011 打包
+    协议独立成题）、GN+其他激活融合系、推理 phase 变体。case 文件为
+    {name + 语义字段} 字典，消费者剥离 name 元数据键后调题目文件内
+    make_inputs(**fields) 确定性生成（torch.Generator(seed)，消费顺序
+    x -> scale -> bias）；Model 构造超参由
+    audit_model_class.resolve_init_args 按 task.yaml io.init_inputs 字段
+    名从 case 取（variant/groups 必带，eps 缺省 1e-5，hidden case
+    hidden_swish_eps_custom_f32 显式携带自定义 eps 以覆盖该路径）。

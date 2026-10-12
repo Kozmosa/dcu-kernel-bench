@@ -1,0 +1,55 @@
+task_id: "5005_spconv_fprop"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/spconv_fprop/spconv_fprop.py
+      sha256: 76bf8b6eac7a3222eafc9625f3084a2a43986e28099dbd495f86b7e2100a7a62
+      role: official_sample   # 主样例：spconv_fprop 图构建与 I/O 契约（features/filters/indice_pairs/indice_num_per_loc/num_act_out），filters 的 as_strided(c_in*kv, 1, c_in) 布局重排为题目语义口径的一部分
+    - path: cpp/spconv_fprop/SpconvFprop.cpp
+      sha256: e87557d7cba56b5142bf052fa4c61b00b34f945ff76600453901eb9dadcd7183
+      role: official_sample   # 同算子 C++ 样例：注意其 filters 声明为 contiguous strides (kv*cIn, kv, 1)，与 Python 样例的 as_strided 不同；本题语义口径以 Python 样例为准（差异记录于 note）
+    - path: python/spconv_indice_pairs/spconv_indice_pairs.py
+      sha256: b848ffc516e1eccfeda9f19f6adad1330067320a9d8c569349436bf83d48caad
+      role: official_sample   # 佐证样例：indice pair 表 (2, kv, n) + indice_num_per_loc (kv,) 的结构出处（stride (kv*n, n, 1)）
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（gather + index_add 语义金标），核心计算不依赖任何外部库
+  calls_closed_libs: false        # 题目本体不调用 hipDNN/MIOpen；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 hipdnn/miopen
+  builds_standalone: true
+  has_reference: true             # 样例口径（gather-GEMM-scatter + filters 布局映射）移植进题目文件 Model（fp32 gather + index_add eager）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipdnn_samples 的 spconv 家族 8 个样例（fprop / dgrad / wgrad /
+    indice_pairs 及各自 igemm 变体）中的 spconv_fprop 单题，gathered 形式
+    （非 igemm 隐式 GEMM 形式，igemm_fprop / indice_pairs 生成等留作后续变
+    体，与本题不重叠；dgrad / wgrad 反向亦留作后续题）。输入输出契约逐行取
+    自 Python 样例：features (n, c_in)、filters (c_out, c_in, kv)、
+    indice_pairs (2, kv, n) int32、indice_num_per_loc (kv,) int32、
+    num_act_out（样例为 python int，题目改为 0 维整数张量以适配评测器输入管
+    道），输出 (num_act_out, c_out)。样例 dtype 为 FLOAT，题目以 fp32 为主
+    dtype，补充 fp16/bf16 变体（fp32 累加后单次 cast，容差按 dtype 分档）。
+    语义口径依据与冲突处理：(1) Python 样例以
+    as_strided(shape, [c_in*kv, 1, c_in]) 声明 filters 布局——库端按该步长
+    解释缓冲区，故数学权重 W[o, i, k] = F.reshape(c_out, kv, c_in)[o, k, i]
+    （F 为 contiguous 输入），该映射逐行读出并写入题面 docstring，自检脚本
+    以 torch.as_strided 复算等价性验证通过；(2) C++ 样例的 filters 用
+    contiguous strides (kv*cIn, kv, 1)，与 Python 样例冲突——按题面指定以
+    Python 样例为准，差异如实记录；(3) 样例数据全零（num_act_out=3、
+    counts 全 0）且不校验输出，索引对方向（行 0 = 输入 gather、行 1 = 输出
+    scatter）、"j >= indice_num_per_loc[k] 为填充垃圾须屏蔽" 系 spconv 生态
+    标准约定（与 spconv_indice_pairs 样例的表结构一致），题目据此固定口径并
+    写入题面，输入生成使填充与有效项同分布（屏蔽计数是唯一正确实现）；
+    (4) out 先置全零再累加、同一输出行多对命中按 += 累加，为 gathered 形式
+    标准语义。reference 实现为 gather + index_add 纯 ATen 组合（不依赖
+    torch.sparse；reference 不受 forbidden 约束）。forward 返回单张量
+    (num_act_out, c_out)，天然单输出无打包分段，满足 model_class 单张量硬
+    约束。case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，
+    消费顺序 features -> filters -> counts -> in_tab -> out_tab）；本题无
+    构造超参，io.init_inputs 为空，audit_model_class.resolve_init_args 无参
+    构造 Model。

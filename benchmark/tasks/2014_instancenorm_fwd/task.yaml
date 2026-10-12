@@ -1,0 +1,91 @@
+id: "2014_instancenorm_fwd"
+name: instancenorm_fwd
+family: norm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  InstanceNorm 前向（单 variant）：输入 x (N, C, H, W) NCHW，scale / bias
+  为 (1, C, 1, 1) 逐通道仿射参数，沿通道维广播。统计维度 per-(N, C)——
+  对每个 (n, c) 平面在空间维 (H, W) 上求统计（每平面元素数 HW = H*W），
+  float32 中间计算：有偏 mean、有偏 var（除以 HW）、
+  inv_std = 1/sqrt(var + eps)、y = scale·(x−mean)·inv_std + bias。
+  instance norm 无 train/infer 语义差：归一化统计恒取自输入本身；affine
+  恒给定（单 variant，构造超参仅 eps）。输出 y 本体 (N, C, H, W)、同
+  x dtype（统计与仿射全程 float32 后 cast 回 x dtype），无打包——天然单
+  输出，满足 model_class 单张量输出硬约束。fp32 为主档，fp16/bf16 为输入
+  量化档。N/C/H/W 任意（含 1、非 2 的幂、非对齐；HW=1 时 var=0、y=bias）。
+  本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 2014），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,     dtype: [float32, float16, bfloat16], layout: contiguous, ndim: 4, shape: [N, C, H, W]}
+    - {name: scale, dtype: same_as_x, layout: contiguous, ndim: 4, shape: [1, C, 1, 1]}
+    - {name: bias,  dtype: same_as_x, layout: contiguous, ndim: 4, shape: [1, C, 1, 1]}
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: 4,
+       shape: "[N, C, H, W]，y 本体（同 x dtype），无打包"}
+  init_inputs:
+    - {name: eps, dtype: float, layout: scalar}   # 缺省 1e-5；单 variant 无其他构造超参
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {N: 16, C: 32, H: 64, W: 64, dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "N/C/H/W 均 >= 1（允许 1、非 2 的幂、非对齐边界值）；x 为 NCHW contiguous；每 (n,c) 平面统计元素数 HW = H*W >= 1"
+    - "无 train/infer 语义差：归一化统计恒取自输入本身（有偏 mean、有偏 var，除以 HW），eps 仅作 rsqrt 除零保护，不在任何无偏修正中使用"
+    - "输入值域为常规 randn/rand 量级（无 inf/NaN）；scale 生成域 [0.5, 1.5) 恒正；统计、rsqrt 与仿射全程 float32 中间计算，输出 cast 回 x dtype"
+    - "HW = 1（空间单元素）时 var = 0、x - mean = 0，inv_std = 1/sqrt(eps)、y = bias（eps 保证不除零）"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "终审按输出 dtype 取档：输出为 y 本体 (N, C, H, W)、同 x dtype，直接整体比较，无分段；参考与候选均以 float32 中间计算，低精度档仅含输出 cast 的量化噪声"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。fp32 档 1e-3 相对 float32
+    InstanceNorm 实现间偏差（不同归约树序，量级 1e-6~1e-5）有约两个数量
+    级裕量；fp16/bf16 档沿用 norm 家族（2006/2007/2010/2012）的 2e-2。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入
+    与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线
+    结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）。
+# 禁用口径：除 instance_norm 族外，group_norm 族（num_groups=C 即 per-(N,C)
+# 统计 + 逐通道仿射，与本题核心计算等价，实测与 fp64 公式差 ~8.9e-16）与
+# batch_norm 族（x 重排 (1, N*C, H, W) 后即 instance norm，PyTorch 内部即
+# 如此实现）均能一步完成核心计算，一并禁用
+forbidden:
+  - torch.nn.InstanceNorm1d
+  - torch.nn.InstanceNorm2d
+  - torch.nn.InstanceNorm3d
+  - torch.nn.functional.instance_norm
+  - F.instance_norm
+  - torch.instance_norm
+  - native_instance_norm
+  - torch.nn.GroupNorm
+  - nn.GroupNorm
+  - torch.nn.functional.group_norm
+  - F.group_norm
+  - torch.group_norm
+  - native_group_norm
+  - torch.nn.BatchNorm1d
+  - torch.nn.BatchNorm2d
+  - torch.nn.BatchNorm3d
+  - torch.nn.SyncBatchNorm
+  - torch.nn.functional.batch_norm
+  - F.batch_norm
+  - torch.batch_norm
+  - torch.native_batch_norm
+  - miopen
+  - hipdnn
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/2014_instancenorm_fwd.yaml，题面元数据不重复携带库源标识

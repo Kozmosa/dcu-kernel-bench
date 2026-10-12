@@ -1,0 +1,9 @@
+{
+  "task_id": "2014_instancenorm_fwd",
+  "cases": [
+    {"name": "perf_resnet_stem_f32", "n": 32, "c": 64,  "h": 112, "w": 112, "dtype": "float32", "seed": 2214, "eps": 1e-5},
+    {"name": "perf_nonpow2_f32",     "n": 16, "c": 192, "h": 77,  "w": 77,  "dtype": "float32", "seed": 2215, "eps": 1e-5},
+    {"name": "perf_dit_large_f16",   "n": 8,  "c": 96,  "h": 224, "w": 224, "dtype": "float16", "seed": 2216, "eps": 1e-5}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

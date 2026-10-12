@@ -1,0 +1,71 @@
+task_id: "1032_deform_attention_bwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/deformattention/deform_attention_bwd.py
+      sha256: 298c1ffd470addfa5c1b9bb5ec1f2ddda57c1be246a21c9acaf4a4e837d01b0b
+      role: semantic_source   # deform_attn_dgrad 图构建：六输入（value/spatial_shapes/level_start_index/sampling_locations/attention_weights/grad_output）张量布局、grad_output 取 (N, Q, heads*D) 与三输出（grad_value/grad_sampling_loc/grad_attn_weight）输出契约即语义口径唯一权威
+    - path: python/deformattention/deform_attention.py
+      sha256: 61cb3998b45be5816cb40dab50ddfcce6a31c5de115ce238fba854723643b99e
+      role: sibling_variant   # fprop 母样例：本题梯度定义建立在其前向语义上（与 1031 题同口径），样例内 torch.rand 生成域与 fp32 口径同为本题输入域依据
+    # 哈希均为 commit b67a3f9 版本（LF 行尾）内容；本地检出工作区为 CRLF
+    # 行尾（git diff --ignore-cr-at-eol 为空，逐行内容一致），溯源以 commit 为准；
+    # 本题构建时以 WSL sha256sum 对 tr -d '\r' 后内容复核，与 1031 记录一致
+
+admission:
+  derived_from: "1031_deform_attention_fwd"   # 前向语义与样例来源/准入边界完全继承母题，本题为其 deform_attn_dgrad 反向另立题
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（1031 同口径手写可导前向 + torch.autograd.grad 反传），无任何闭源库依赖
+  calls_closed_libs: false        # 样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作 core_compute 证据；题目本体不调用闭源库，生成侧 forbidden 明确禁用 hipdnn/miopen 与 torch.autograd/.backward
+  builds_standalone: true
+  has_reference: true             # 语义金标为题目文件内 1031 同口径手写前向 + autograd 反传（CPU 可跑，构建自检含独立手写解析梯度标量 oracle、零上游梯度与单像素闭式对照）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集与 variant 划分：多尺度可变形注意力反向单 variant（deform_attn_
+    dgrad，一次调用同算 value / sampling_locations / attention_weights 三者
+    梯度），无并列子 variant。语义口径依据：bwd 样例只给出 hipdnn 图调用与
+    张量布局、无内联数学——六输入布局与 fprop 样例逐维一致、grad_output 取
+    (N, Q, heads*D)（直接旁证前向输出布局）、三输出 grad_value /
+    grad_sampling_loc / grad_attn_weight 分别与前向 value /
+    sampling_locations / attention_weights 同形、io/intermediate/compute
+    data type 均 FLOAT——布局、输出契约与 float32 中间口径据此唯一确定；
+    梯度数学口径为前向（1031 同口径：四角点零填充双线性、沿 (levels×points)
+    展平一维数值稳定 softmax）的解析梯度，参考实现以 torch.autograd.grad 对
+    手写可导前向反传得到（输出 cast 回 value dtype 之前的 float32 结果上反
+    传，半精度不可导 cast 不进梯度链），floor / 整数索引路径显式 detach（梯
+    度只经插值分数 fx/fy 回传的双线性标准次梯度），与通行 MSDeformAttn
+    CUDA 反向（仅界内角点累加）一致。打包协议：forward 返回单张量 out，三
+    段按 grad_value | grad_sampling_locations | grad_attention_weights 固定
+    段序一维拼接（各段行主序 reshape(-1)、cast 回 value dtype、torch.cat），
+    段长 = n*n_keys*heads*D、n*Q*heads*L*P*2、n*Q*heads*L*P，适配在线
+    KernelBench 官方 eval_kernel_against_ref 的单输出 .shape/allclose 假设
+    与离线终审 audit_model_class.py 的单输出比较（样板：1018 的 dq/dk/dv 拼接、
+    1031 同仓库 fprop 题的天然单输出）。dtype 域按手册约束仅 fp32/fp16（不
+    含 bf16/fp64）：样例 fp32 为主档，fp16 档为低精度补充（float32 中间计
+    算，梯度 cast 回输入 dtype）。shape 域在样例口径上放宽：非 2 的幂 / 非
+    16 对齐维度、单层单像素 (1,1)、1×N / N×1 细条层、Q=1、P=1、L=1 边界；
+    容差 float32 档 atol=rtol=1e-3、fp16 档 2e-2——构建自检
+    tmp/build_check/1032_deform_attention_bwd.py 逐 case 实测 reference
+    （autograd 反传）vs 独立手写解析梯度标量循环 oracle（无 autograd，与参
+    考向量化路径完全不同）：逐元素 |diff| <= atol + rtol*|ref| 全部满足，
+    float32 档最大绝对偏差 9.060e-06 / 最大相对偏差 8.694e-04（跨 query 散
+    射累加次序主导），fp16 档最大绝对偏差 1.099e-02 / 最大相对偏差 2.350e-02
+    （输出 cast 量化与累加次序主导；相对峰值出现在小模长元素上、由 atol 覆
+    盖），均低于对应容差。一处 dtype 边界口径：fp16 下 sampling_locations
+    的个别元素可因 cast 舍入到恰为 1.0（生成域 [0,1) 的 rand cast 后），
+    此时采样点 loc = 层尺寸完全越界、采样值为 0，按零填充语义处理，题面
+    invariant 与自检均已显式覆盖。生成侧约束：禁止
+    torch.autograd / .backward 反传，梯度须按题面解析式手写 Triton kernel
+    （forbidden 已列，离线 static_audit 剥除 docstring 后扫描）。留作后续
+    变体：bf16 档、weight_grad 拆分单输出变体、采样坐标越界 [0,1) 域的系统
+    性压测。case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，消
+    费顺序 spatial_shapes（未显式给出时 randint[1,max_size]，缺省 15 与样例
+    域一致）-> value -> sampling_locations -> attention_weights ->
+    grad_output；level_start_index 由 spatial_shapes 推导，不消费 RNG）；
+    本题无构造超参，Model 无参构造（audit_model_class.resolve_init_args 空
+    init_inputs => {}）。

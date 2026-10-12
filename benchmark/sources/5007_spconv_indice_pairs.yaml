@@ -1,0 +1,68 @@
+task_id: "5007_spconv_indice_pairs"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/spconv_indice_pairs/spconv_indice_pairs.py
+      sha256: b848ffc516e1eccfeda9f19f6adad1330067320a9d8c569349436bf83d48caad
+      role: official_sample   # 主样例：spconv_indice_pairs 图节点 I/O 契约——indices (n, ndim+1) int32 + batch_size/input_dims/ksize/stride/padding/dilation → out_indices（容量 n）+ indice_pairs (2, kv, n) + indice_num_per_loc (kv,)，stride (kv*n, n, 1)（1D 示例 D=4, K=2, S=2）
+    - path: cpp/spconv_indice_pairs/SpconvIndicePairs.cpp
+      sha256: 40a53a64382db69d0805b64805e06c6a019a1c14621c85c5adfe007082e9e759
+      role: official_sample   # 同算子 C++ 样例：接口与 Python 版一致（D=6, K=2, S=2），outIndices 注释为"distinct output points 的容量式分配"，佐证输出 shape 为容量语义（本题容量取 n，同 Python 主样例）
+    - path: python/spconv_igemm_indice_pairs/spconv_igemm_indice_pairs.py
+      sha256: ceaf86fc05f414797bcdf75f4ccfa575a8570f8e01afee1ae6fc71b89768674f
+      role: official_sample   # igemm 对照样例（MASK_IMPLICIT_GEMM，多输出 pair_fwd/pair_bwd/mask 系）——仅作对照证据，不入题面，留作后续变体
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（整除判定 + 首次出现序去重 + 三表填充的语义金标），核心计算不依赖任何外部库
+  calls_closed_libs: false        # 题目本体不调用 hipDNN/MIOpen；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 hipdnn/miopen
+  builds_standalone: true
+  has_reference: true             # 生成规则移植进题目文件 Model（纯 torch/python 循环确定性金标）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipdnn_samples 的 spconv 家族 8 个样例中的 spconv_indice_pairs
+    单题（Native 算法、非 subm 的索引对表生成节点）；spconv_igemm_indice_pairs
+    （MASK_IMPLICIT_GEMM，额外输出 pair_bwd/mask 系）仅作对照不入题面，与
+    subm 变体一并留作后续题，与 5005_spconv_fprop（消费索引对表做卷积计算）
+    不重叠——本题是该表的生成端，行方向口径与 5005 的消费约定一致（行 0 =
+    输入 gather、行 1 = 输出 scatter，每偏移密集前缀槽位）。
+    输入输出契约逐行取自 Python 主样例：indices (n, ndim+1) int32、超参
+    batch_size/input_dims/ksize/stride/padding/dilation、输出 out_indices
+    （容量 n，样例 set_dim(indices.shape)）+ indice_pairs (2, kv, n) +
+    indice_num_per_loc (kv,)，全部 int32；out_indices 为容量式分配（cpp 样例
+    注释 "runtime-dependent; set them explicitly"，igemm 对照样例注释给出
+    一般上界 min(kv*num_act_in, batch_size*output_spatial_volume)），本题
+    统一取容量 cap = min(kv*n, batch_size*prod(output_dims))、行号 >= 有效
+    数 m 的行填 -1——构建自检实测 m 可达 n 的十余倍（3D dilation case
+    m=703 > n=53），按主样例取容量 n 会越界，上界公式是唯一自洽容量口径。
+    语义口径依据与冲突处理：主样例只含 hipDNN 图 API 调用（无参考数值输出），
+    数值生成规则按 spconv 上游（traveller59/spconv v2.3 master，
+    commit 263d6b47425ef843c82f997b12d8b714013d216c）逐行移植并写入题面：
+    (1) output_dims 公式取 pytorch/ops.py get_conv_output_size
+    （(D+2P-dil*(K-1)-1)//S+1）；(2) 枚举序、首次出现序去重、密集前缀槽位、
+    平面方向取 csrc/sparse/indices.py SparseConvIndicesCPU.generate_conv_inds
+    （外层 filter_offset 内层输入行、unordered_map 首次插入编号、
+    pairs[k*N+cnt]=i 与 pairs[kv*N+k*N+cnt]=hashval）；(3) 坐标映射取
+    ConvOutLocIter.query_npq（val=x+P-o*dil，整除 + 0<=val//S<output_dims，
+    batch 界内），Python 端负数取模与 C++ 截断除在"整除判定"下数学等价；
+    (4) 填充值 -1 取 pytorch/ops.py get_indice_pairs 的
+    torch.full((2, kv, n), -1)；(5) kernel 偏移分解序取 ConvOutLocIter 的
+    operator++/layout_rs.inverse（C-order，末维最快）。构建自检
+    tmp/build_check/5007_spconv_indice_pairs.py 以样例 1D 参数域（D=4, K=2,
+    S=2）的手工推导期望 + 独立正向公式 oracle 双重校验逐位一致。
+    多输出打包协议：三逻辑输出全部 int32，按 out_indices 段
+    （n*(ndim+1)）→ indice_pairs 段（2*kv*n）→ indice_num_per_loc 段（kv）
+    一维拼接为单张量（model_class 单输出硬约束），段长由超参唯一决定。
+    本题为纯索引算子，无浮点 dtype 变体（spconv 生态活跃点表固定 int32，
+    大网格 int64 路径不入题面）；shape 域在样例 1D 基础上放宽至 ndim∈[1,3]、
+    非 2 幂与边界值（n=1、非幂网格、stride>1 整除分支、dilation>1）。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，
+    唯一随机消费 randperm(B*prod(D)) 前 n 个位置解码为行互异活跃点）；
+    Model 构造超参由 audit_model_class.resolve_init_args 按 task.yaml
+    io.init_inputs 字段名从 case 取（batch_size/input_dims/ksize/stride/
+    padding/dilation 六字段在 case 内）。

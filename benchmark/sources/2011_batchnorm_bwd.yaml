@@ -1,0 +1,57 @@
+task_id: "2011_batchnorm_bwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: "样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准"
+  files:
+    - path: python/batchnorm/batchnorm_backward.py
+      sha256: 1a9fc9083691ddea8dcdee418d1f57255a883e36696a86092f8400a05db36aaf
+      role: device_kernel   # batchnorm_backward graph：dy/x/scale/saved_mean/saved_inv_variance -> dx/dscale/dbias，variant="dx" 的 I/O 契约来源（fp32，NCHW contiguous）
+    - path: python/batchnorm/batchnorm_backward_weight.py
+      sha256: 35c8289a3927c4920172d2c212ff1605374e49ebb31ffba0b206e9e257fd8311
+      role: device_kernel   # dbn_weight graph：同输入 -> dscale/dbias（即 dgamma/dbeta）与 eq_scale_dy/eq_scale_x/eq_bias，variant="dgamma_dbeta" 的 I/O 契约来源
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（ATen 组合：逐元素 xhat 重构 + 两路通道归约 + 逐元素链式乘加），不依赖任何外部 kernel 源
+  calls_closed_libs: false        # 题目本体不调用闭源库；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用（全局黑名单 hipdnn/miopen + task.yaml batch_norm 原语族）
+  builds_standalone: true
+  has_reference: true             # reference 为闭式反向公式的纯 PyTorch 实现，语义自检以 autograd（2010 同口径 F.batch_norm 训练前向反传）与逐通道循环 oracle 双路径交叉验证
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集与 variant 划分：BatchNorm 训练反向的两条输出路径——
+    variant="dx"（batchnorm_backward 样例的 dx 输出，(N,C,H,W) 单张量）与
+    variant="dgamma_dbeta"（batchnorm_backward_weight 样例的 dscale/dbias
+    输出，即参数梯度 dgamma/dbeta，两段拼接为 (2*C,) 一维单张量——前 C 个
+    dgamma、后 C 个 dbeta，各 float32 计算后 cast 回输入 dtype、行主序平铺；
+    打包协议沿用 1018 的平铺拼接单输出约定，适配在线单输出 .shape/allclose
+    假设与离线终审 audit_model_class.py）。forward 签名两种 variant 相同：
+    (dy, x, scale, saved_mean, saved_inv_variance)，与样例图构造的实参顺序
+    一致。语义口径依据：两个样例均为 hipDNN graph 构造/执行冒烟、无数值
+    oracle，数值语义取 BatchNorm 训练反向的标准定义（与 MIOpen/cuDNN
+    BatchNormBackward 同构）：xhat=(x-saved_mean)*saved_inv_variance、
+    dgamma=Σdy·xhat、dbeta=Σdy、dx=(scale·inv_var/m)(m·dy−dbeta−xhat·dgamma)
+    （m=N*H*W，逐通道）；构建自检实测该闭式解与 autograd（对 2010 同口径
+    F.batch_norm 训练前向反传，eps=1e-5、有偏方差）偏差 ~1e-6。统计量口径：
+    样例的 saved_mean/saved_inv_variance 为独立随机值（证明按给定值消费）；
+    题目 make_inputs 缺省 stats="derived" 按训练快照口径由 x 确定性导出
+    （与 2010 前向一致：通道均值 + rsqrt(有偏方差+eps)，eps 缺省 1e-5，仅
+    参与统计量生成、反向数学不含 eps），另设 stats="random" 口径忠实样例
+    （独立随机统计量，RNG 顺序 dy->x->scale->saved_mean->saved_inv_variance），
+    该隐藏 case 用于钉死"统计量按给定值消费、不得由 x 重算"。dtype 域：
+    样例为 fp32，故 fp32 为主档（容差 1e-3，为通道归约重结合误差留余量），
+    补充 fp16/bf16（io dtype，中间计算与归约全程 float32、输出 cast 回输入
+    dtype、统计量恒为 float32——样例中统计量张量显式 torch.float32 的口径），
+    容差 2e-2 与家族一致。留作后续变体：dbn_weight 的 eq_scale_dy/
+    eq_scale_x/eq_bias 三推理融合副产物输出（非梯度，未入题面）、
+    channels_last 内存布局（backward_weight 样例使用但未入题面域，题面
+    固定 NCHW contiguous）、5D (N,C,D,H,W) 与 NHWC 布局、running statistics
+    更新路径。构建自检脚本 tmp/build_check/2011_batchnorm_bwd.py（ast.parse、
+    镜像字节一致、json/yaml 可解析、7 隐藏 case 双 oracle 语义对比）。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)）；
+    Model 构造超参由 audit_model_class.resolve_init_args 按 task.yaml
+    io.init_inputs 字段名从 case 取（仅 variant，eps/stats 为生成端口径
+    字段不进 Model 构造）。

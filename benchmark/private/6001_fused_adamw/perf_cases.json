@@ -1,0 +1,9 @@
+{
+  "task_id": "6001_fused_adamw",
+  "cases": [
+    {"name": "perf_adamw_2d_f32",      "variant": "adamw",             "lr": 1e-3, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.05, "shape": [2048, 4096],    "dtype": "float32", "step": 100, "seed": 6201},
+    {"name": "perf_trf_4d_f32",        "variant": "transformer_adamw", "lr": 1e-3, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.01, "shape": [8, 512, 28, 28], "dtype": "float32", "step": 50,  "seed": 6202},
+    {"name": "perf_adamw_wide_f16",    "variant": "adamw",             "lr": 0.01, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.1,  "shape": [4096, 4096],    "dtype": "float16", "step": 200, "seed": 6203}
+  ],
+  "timing": {"warmup_iters": 5, "repeat_iters": 20, "reduction": "median"}
+}

@@ -1,0 +1,17 @@
+{
+  "task_id": "1031_deform_attention_fwd",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；spatial_shapes 每轮由 randint[1,16) 重生成，n_keys 与 value 形状由其推导，out 形状不依赖 spatial_shapes；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成。",
+  "shape_family": {
+    "n": 2,
+    "n_queries": 32,
+    "n_heads": 2,
+    "embed_dims_per_head": 32,
+    "n_levels": 2,
+    "n_points": 2,
+    "spatial_shapes": "randint[1,16) 逐轮随机，每行 (H_l, W_l)；n_keys = Σ H_l*W_l",
+    "dtype": "float32",
+    "out_ndim": 3,
+    "out_shape": [2, 32, 64],
+    "out_layout": "contiguous (N, Q, heads*D)；天然单张量输出，无多输出打包"
+  }
+}

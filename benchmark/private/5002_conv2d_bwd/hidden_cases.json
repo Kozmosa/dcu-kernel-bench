@@ -1,0 +1,12 @@
+{
+  "task_id": "5002_conv2d_bwd",
+  "cases": [
+    {"name": "hidden_dgrad_min_pointwise",    "n": 1, "c": 1,  "h": 1,  "w": 1,  "out_c": 1,  "r": 1, "s": 1, "stride_h": 1, "stride_w": 1, "pad_h": 0, "pad_w": 0, "dil_h": 1, "dil_w": 1, "variant": "dgrad", "dtype": "float32", "seed": 2502},
+    {"name": "hidden_dgrad_odd_nonpow2",      "n": 2, "c": 7,  "h": 19, "w": 13, "out_c": 11, "r": 3, "s": 3, "stride_h": 1, "stride_w": 1, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "dgrad", "dtype": "float32", "seed": 2503},
+    {"name": "hidden_wgrad_stride2",          "n": 3, "c": 16, "h": 18, "w": 18, "out_c": 32, "r": 2, "s": 2, "stride_h": 2, "stride_w": 2, "pad_h": 0, "pad_w": 0, "dil_h": 1, "dil_w": 1, "variant": "wgrad", "dtype": "float32", "seed": 2504},
+    {"name": "hidden_dgrad_dilated_nopad",    "n": 2, "c": 5,  "h": 13, "w": 9,  "out_c": 8,  "r": 3, "s": 3, "stride_h": 1, "stride_w": 1, "pad_h": 0, "pad_w": 0, "dil_h": 2, "dil_w": 2, "variant": "dgrad", "dtype": "float32", "seed": 2505},
+    {"name": "hidden_wgrad_rect_pad_asis",    "n": 4, "c": 12, "h": 15, "w": 11, "out_c": 24, "r": 5, "s": 3, "stride_h": 1, "stride_w": 1, "pad_h": 2, "pad_w": 1, "dil_h": 1, "dil_w": 1, "variant": "wgrad", "dtype": "float32", "seed": 2506},
+    {"name": "hidden_dgrad_pointwise_stride2", "n": 2, "c": 8, "h": 9,  "w": 7,  "out_c": 16, "r": 1, "s": 1, "stride_h": 2, "stride_w": 2, "pad_h": 0, "pad_w": 0, "dil_h": 1, "dil_w": 1, "variant": "dgrad", "dtype": "float32", "seed": 2507},
+    {"name": "hidden_wgrad_uneven_attrs",     "n": 1, "c": 3,  "h": 6,  "w": 4,  "out_c": 5,  "r": 4, "s": 2, "stride_h": 3, "stride_w": 1, "pad_h": 1, "pad_w": 0, "dil_h": 1, "dil_w": 1, "variant": "wgrad", "dtype": "float32", "seed": 2508}
+  ]
+}

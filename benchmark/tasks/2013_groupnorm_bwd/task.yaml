@@ -1,0 +1,97 @@
+id: "2013_groupnorm_bwd"
+name: groupnorm_bwd
+family: norm
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  GroupNorm 训练反向（全梯度）：输入 x (batch, channels, height, width) NCHW、
+  上游梯度 dy 同形、scale 为 (channels,) 逐通道缩放参数，groups G 整除
+  channels（1 <= G <= channels），通道 c 属于组 c // (channels//G)。给定训练
+  前向（同 2012_groupnorm_fwd 口径：逐组有偏统计、inv_var = 1/sqrt(有偏方差
+  + eps)、逐通道仿射）保存的逐组统计量 mean / inv_var（(batch*groups,) 一维
+  float32，(batch, groups) 行主序展平，按给定值原样消费），在 float32 中计算
+  前向 y = xhat * scale + bias 对 x / scale / bias 的完整梯度（数学定义见
+  题面：dgamma/dbeta 为逐通道两路归约，dx 为含组内 S/T 两路归约的完整链式
+  公式）。forward 返回单个一维 float32 张量（长度
+  batch*channels*height*width + 2*channels）：dx 段 | dgamma 段 | dbeta 段
+  一维拼接（分段协议见 io.outputs 与题面），适配 model_class 单张量输出硬
+  约束；输出恒 float32，fp16/bf16 仅作为输入量化档。N/C/H/W 任意（含 1、
+  非 2 的幂、非对齐），组内大 D 归约需掩码 / 分块。本题为自包含 KernelBench
+  题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 2013），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,       dtype: [float32, float16, bfloat16], layout: contiguous, ndim: 4, shape: [batch, channels, height, width]}
+    - {name: dy,      dtype: same_as_x, layout: contiguous, ndim: 4, shape: [batch, channels, height, width]}
+    - {name: scale,   dtype: same_as_x, layout: contiguous, ndim: 1, shape: [channels]}
+    - {name: mean,    dtype: float32,    layout: contiguous, ndim: 1, shape: [batch*groups]}
+    - {name: inv_var, dtype: float32,    layout: contiguous, ndim: 1, shape: [batch*groups]}
+  outputs:
+    - name: out
+      dtype: float32
+      layout: contiguous
+      ndim: 1
+      shape: "[batch*channels*height*width + 2*channels]，三段一维拼接：dx (batch*channels*height*width) | dgamma (channels) | dbeta (channels)，按序紧排"
+      note: "forward 恒返回单张量（评测器按单输出比较）；分段协议见 description 与题面"
+  init_inputs:
+    - {name: groups, dtype: int,   layout: scalar}   # G 整除 channels，1 <= G <= channels
+    - {name: eps,    dtype: float, layout: scalar}   # 缺省 1e-5，仅参与前向统计量口径，反向数学不含 eps
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {batch: 2, channels: 16, height: 512, width: 512, groups: 2, dtype: "float32", eps: 1.0e-5}
+  dynamic: true
+  invariants:
+    - "batch/channels/height/width 均 >= 1（允许 1、非 2 的幂、非对齐边界值）；x/dy 为 NCHW contiguous"
+    - "groups G 整除 channels 且 1 <= G <= channels；组内元素数 D = (channels//G)*height*width >= 1；通道 c 属于组 c // (channels//G)；G=1 全通道归一化反向、G=channels 逐通道归一化反向均合法"
+    - "mean/inv_var 恒为一维 float32、长度 batch*groups（(batch, groups) 行主序展平），inv_var 元素恒为正；两者为训练前向保存统计量（inv_var = 1/sqrt(有偏方差+eps)，反向数学本身不含 eps），按给定值原样消费，禁止由 x 重算"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；归约与中间计算全程 float32；输出恒为一维 float32 打包张量，梯度不做低精度量化（fp16/bf16 仅作为输入量化档，cast fp32 后全程 float32 计算）"
+
+tolerance:
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "终审按输出 dtype 取档：全部 case 的输出都是一维 float32 打包张量（dx 段 + dgamma 段 + dbeta 段），整体用 float32 档 1e-3/1e-3，不分段收紧或放宽——参考与候选均以 float32 中间计算，段间偏差同量级；float16/bfloat16 行仅声明输入量化档，输出恒 float32，不会被终审选中"
+  note: >
+    float32 档的容差为组内归约不同求和顺序（逐块累加 / 两遍归约）的
+    float32 重结合误差留出余量：dgamma/dbeta 为 N*H*W 量级元素的求和
+    （固定族下 5.2e5 个、量级 ~sqrt(N*H*W)≈7e2），重结合相对偏差
+    ~1e-6~1e-5，1e-3 档约有两个数量级裕量。题目 reference 的语义金标为
+    2012 同口径前向的 autograd 反传，与题面闭式公式（独立循环 oracle）及
+    原生 group_norm 前向 autograd 的交叉一致性由构建自检实测（见
+    benchmark/sources/2013_groupnorm_bwd.yaml 记录的偏差数字）。以上为
+    本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）。
+# 条目按 2011 反向题口径写成 API 全限定形式、不用裸子串
+#（group_norm / groupnorm 裸词会误杀命名如 _groupnorm_bwd_kernel 的
+# 合法 Triton kernel）；miopen/hipdnn 等闭源库另由全局黑名单覆盖。
+forbidden:
+  - aiter
+  - torch.nn.GroupNorm
+  - nn.GroupNorm
+  - torch.nn.functional.group_norm
+  - F.group_norm
+  - torch.group_norm
+  - native_group_norm
+  - torch.ops.aten.native_group_norm
+  - torch.ops.aten.group_norm
+  # 反向题：禁止借 autograd 反传求梯度（torch.autograd / autograd.grad /
+  # tensor.backward）
+  #（注释须独立成行：static_audit.py 的 forbidden 解析器不识别行尾注释）
+  - autograd
+  - .backward(
+  - miopen
+  - hipdnn
+
+# 溯源（repo/commit/path/sha256）统一记录于 benchmark/sources/2013_groupnorm_bwd.yaml；
+# 题面三文件与 compat 镜像内不得重复出现溯源词。

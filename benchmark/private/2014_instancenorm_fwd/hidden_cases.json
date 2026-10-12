@@ -1,0 +1,12 @@
+{
+  "task_id": "2014_instancenorm_fwd",
+  "cases": [
+    {"name": "hidden_sample_nchw_f32",   "n": 16, "c": 32, "h": 64, "w": 64,  "dtype": "float32",  "seed": 2114, "eps": 1e-5},
+    {"name": "hidden_hw1_boundary_f32",  "n": 3,  "c": 5,  "h": 1,  "w": 1,   "dtype": "float32",  "seed": 2115, "eps": 1e-5},
+    {"name": "hidden_nonpow2_f16",       "n": 5,  "c": 3,  "h": 28, "w": 29,  "dtype": "float16",  "seed": 2116, "eps": 1e-5},
+    {"name": "hidden_nonpow2_bf16",      "n": 2,  "c": 8,  "h": 33, "w": 37,  "dtype": "bfloat16", "seed": 2117, "eps": 1e-5},
+    {"name": "hidden_w1_f16",            "n": 4,  "c": 7,  "h": 9,  "w": 1,   "dtype": "float16",  "seed": 2118, "eps": 1e-5},
+    {"name": "hidden_eps_custom_f32",    "n": 2,  "c": 4,  "h": 13, "w": 11,  "dtype": "float32",  "seed": 2119, "eps": 0.001},
+    {"name": "hidden_min_n1c1_f32",      "n": 1,  "c": 1,  "h": 6,  "w": 4,   "dtype": "float32",  "seed": 2120, "eps": 1e-5}
+  ]
+}

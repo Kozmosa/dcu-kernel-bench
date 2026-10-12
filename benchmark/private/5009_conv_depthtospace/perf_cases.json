@@ -1,0 +1,9 @@
+{
+  "task_id": "5009_conv_depthtospace",
+  "cases": [
+    {"name": "perf_cbdts_crd_wide_f16", "n": 8,  "c_in": 32, "k": 64,  "h": 128, "w": 128, "variant": "conv_bias_dts", "mode": "CRD", "block_size": 2, "dtype": "float16",  "seed": 5209},
+    {"name": "perf_cbdts_dcr_tall_f16", "n": 4,  "c_in": 64, "k": 32,  "h": 224, "w": 112, "variant": "conv_bias_dts", "mode": "DCR", "block_size": 2, "dtype": "float16",  "seed": 5210},
+    {"name": "perf_dts_crd_big_bf16",   "n": 4,  "c_in": 0,  "k": 256, "h": 256, "w": 256, "variant": "dts",           "mode": "CRD", "block_size": 2, "dtype": "bfloat16", "seed": 5211}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

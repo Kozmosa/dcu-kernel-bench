@@ -1,0 +1,14 @@
+{
+  "task_id": "8001_cumsum",
+  "cases": [
+    {"name": "hidden_sample_shape_dim2_f32",   "shape": [1, 2, 3, 4],    "dim": 2,  "dtype": "float32",  "seed": 8101},
+    {"name": "hidden_1d_len1_dim0_f32",        "shape": [1],             "dim": 0,  "dtype": "float32",  "seed": 8102},
+    {"name": "hidden_2d_nonpow2_negdim_f32",   "shape": [37, 129],       "dim": -1, "dtype": "float32",  "seed": 8103},
+    {"name": "hidden_4d_nonpow2_dim2_f32",     "shape": [3, 5, 257, 33], "dim": 2,  "dtype": "float32",  "seed": 8104},
+    {"name": "hidden_4d_negdim_f32",           "shape": [2, 3, 7, 1021], "dim": -1, "dtype": "float32",  "seed": 8105},
+    {"name": "hidden_3d_prime_neg2dim_f32",    "shape": [2, 1013, 5],    "dim": -2, "dtype": "float32",  "seed": 8106},
+    {"name": "hidden_4d_dim2_f16",             "shape": [4, 8, 999, 17], "dim": 2,  "dtype": "float16",  "seed": 8107},
+    {"name": "hidden_4d_negdim_bf16",          "shape": [2, 9, 333, 31], "dim": -1, "dtype": "bfloat16", "seed": 8108},
+    {"name": "hidden_3d_maxL_negdim_f32",      "shape": [1, 3, 65536],   "dim": -1, "dtype": "float32",  "seed": 8109}
+  ]
+}

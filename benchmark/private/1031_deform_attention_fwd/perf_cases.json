@@ -1,0 +1,9 @@
+{
+  "task_id": "1031_deform_attention_fwd",
+  "cases": [
+    {"name": "perf_detr_multiscale_f16", "n": 4, "n_heads": 8, "embed_dims_per_head": 32, "n_queries": 8192, "n_levels": 4, "n_points": 4, "spatial_shapes": [[80, 80], [40, 40], [20, 20], [10, 10]], "dtype": "float16", "seed": 10311},
+    {"name": "perf_seg_multiscale_f16",  "n": 2, "n_heads": 4, "embed_dims_per_head": 64, "n_queries": 4096, "n_levels": 5, "n_points": 4, "spatial_shapes": [[96, 96], [48, 48], [24, 24], [12, 12], [6, 6]], "dtype": "float16", "seed": 10312},
+    {"name": "perf_f32_multiscale_f32",  "n": 2, "n_heads": 8, "embed_dims_per_head": 32, "n_queries": 4096, "n_levels": 3, "n_points": 4, "spatial_shapes": [[64, 64], [32, 32], [16, 16]], "dtype": "float32", "seed": 10313}
+  ],
+  "timing": {"warmup_iters": 5, "repeat_iters": 20, "reduction": "median"}
+}

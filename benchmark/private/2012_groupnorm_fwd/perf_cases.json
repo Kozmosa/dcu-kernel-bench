@@ -1,0 +1,9 @@
+{
+  "task_id": "2012_groupnorm_fwd",
+  "cases": [
+    {"name": "perf_fwd_resnet_stem_f32", "batch": 32,  "channels": 256, "height": 56,   "width": 56,   "groups": 8,  "variant": "groupnorm",       "dtype": "float32", "seed": 2212},
+    {"name": "perf_swish_unet_stem_f16", "batch": 128, "channels": 128, "height": 56,   "width": 56,   "groups": 16, "variant": "groupnorm_swish", "dtype": "float16", "seed": 2213},
+    {"name": "perf_fwd_wide_sample_f32", "batch": 2,   "channels": 16,  "height": 1024, "width": 2048, "groups": 2,  "variant": "groupnorm",       "dtype": "float32", "seed": 2214}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

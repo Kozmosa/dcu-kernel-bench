@@ -1,0 +1,55 @@
+task_id: "2010_batchnorm_fwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/batchnorm/batchnorm_inference.py
+      sha256: 51fec6457871394a6b793690fade9817a111cb3a432ed57d6f6e95d8cc9de676
+      role: semantic_spec   # 主样例（inference 口径）：batchnorm_inference_ext——mean/variance 作为输入给定的 per-channel 仿射，参数 (1,C,1,1) 通道广播，eps=1e-5 graph 标量，io FLOAT
+    - path: python/batchnorm/batchnorm_training.py
+      sha256: 0572d03431469072df4aa078e809bdda783bb23174d70cb9cf3987d6fddcf46b
+      role: semantic_spec   # training 口径：batchnorm 训练前向——五输出 y / saved_mean / saved_inv_variance / next_running_mean / next_running_var，prev running 统计入参，momentum=0.1、eps=1e-5 graph 标量
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（per-channel 归约统计、rsqrt、仿射、running 凸组合更新的 ATen 组合即语义金标本体，不依赖任何闭源库）；生成侧核心计算要求在提交文件内以 Triton kernel 完成（task.yaml forbidden 强制）
+  calls_closed_libs: false        # 题目本体不调用 hipDNN/MIOpen；样例的 hipDNN graph 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 miopen/hipdnn
+  builds_standalone: true
+  has_reference: true             # 语义金标内联于题目文件 Model（ATen 逐式实现，reference 不受 forbidden 约束）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipDNN 样例集 batchnorm 前向的两个 python 样例——推理
+    （batchnorm_inference.py，variant="inference"：batchnorm_inference_ext，
+    mean/variance 作为输入给定的 per-channel 仿射）与训练
+    （batchnorm_training.py，variant="training"：batchnorm 训练前向，批统计
+    归一化 + running 统计更新，天然五输出）。语义口径与冲突处理：两样例
+    均为 NCHW、参数 (1,C,1,1) 通道广播、eps=1e-5 与 momentum=0.1 作 graph
+    标量值，精度口径为 io 同输入 dtype、intermediate/compute FLOAT；样例
+    只给出算子接口不展开数学式，training 变体的统计与更新公式按行业标准
+    约定裁定并在题面逐式写明——batch_mean/batch_var 用有偏批统计，
+    saved_inv_variance = 1/sqrt(var+eps)，running 方差更新用无偏批方差
+    （m/(m-1) 修正，要求 m = N*H*W >= 2），running 均值用批均值，与
+    PyTorch F.batch_norm(training=True) 的 CPU 行为逐位核对一致
+    （running_mean 偏差 ~2e-9、running_var 五位小数逐位相等，构建自检
+    tmp/build_check/2010_batchnorm_fwd.py 实测并留痕）。输出契约：
+    inference 天然单输出（y 本体，(N,C,H,W) 同 x dtype）；training 天然
+    五输出，按 model_class 单张量硬约束打包为一维 float32
+    [y | saved_mean | saved_inv_variance | next_running_mean |
+    next_running_var]（长度 N*C*H*W+4*C，分段协议写入题面与 task.yaml；
+    统计段取样例输出顺序，样例第 3 输出为 saved_inv_variance 而非
+    saved_var，题面从样例口径）。shape/dtype 域：样例 dtype 仅 float32、
+    维度 n=4/c=16/h=56/w=56 保留在域内（隐藏与性能 case 覆盖）；fp16/bf16
+    仅对 inference 声明（training 打包口径为 fp32，混合 cast 会污染 fp32
+    容差档，故 training 恒 fp32）；shape 放宽为各维 >= 1 的任意组合（含
+    全 1、非 2 幂、非对齐）。留作后续题：BN+激活融合（python/
+    batchnorm_fusion 与 cpp/batchnorm_fusion 样例系）、训练反向
+    （batchnorm_backward / batchnorm_backward_weight）。case 文件为
+    {name + 语义字段} 字典，消费者剥离 name 元数据键后调题目文件内
+    make_inputs(**fields) 确定性生成（torch.Generator(seed)，消费顺序
+    x -> scale -> bias -> mean -> variance）；Model 构造超参由
+    audit_model_class.resolve_init_args 按 task.yaml io.init_inputs 字段名
+    从 case 取（variant 必带，eps/momentum 缺省 1e-5/0.1，hidden case
+    hidden_training_epsmom_f32 显式携带自定义超参以覆盖该路径）。

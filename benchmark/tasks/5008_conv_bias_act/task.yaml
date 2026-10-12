@@ -1,0 +1,102 @@
+id: "5008_conv_bias_act"
+name: conv_bias_act_fused
+family: conv
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  Conv+Bias+逐元素激活融合前向家族（relu / swish / prelu）：对输入
+  x (N, C, H, W) 与卷积核 weight (K, C, R, S) 做 2D cross-correlation
+  前向（深度学习库 conv_fprop 惯例语义，非数学卷积的核翻转），加逐通道
+  偏置 bias (1, K, 1, 1)（沿 batch 与空间维广播），再施加逐元素激活。
+  激活按 variant 三选一：relu 为 max(z, 0)；swish 为 z*sigmoid(z)；
+  prelu 为 z>0 直通、否则 slope*z（标量斜率，等价 negative_slope=slope
+  的 leaky-ReLU，slope 以 0 维张量作 forward 输入而非模块参数，缺省
+  0.01，relu/swish 下为垃圾输入）。卷积超参三变体共享：stride 与
+  dilation 恒为 (1,1)、对称零 padding 恒为 (1,1)；卷积点积累加、bias
+  加法与激活全程 float32 中间计算，输出单次 cast 回输入 dtype。输出
+  单张量 out (N, K, H_out, W_out)，H_out = H - R + 3、W_out = W - S + 3
+  （卷积天然单输出，无多输出打包分段）。H/W/C/K/R/S 任意（含 1、非 2
+  的幂、素数与边界值），padding 必须在 kernel 内以掩码/边界索引处理。
+  本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像
+  到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的
+  原生 model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 5008），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x,      dtype: [float16, bfloat16, float32], layout: contiguous, ndim: 4, shape: [N, C, H, W]}
+    - {name: weight, dtype: same_as_x, layout: contiguous, ndim: 4, shape: [K, C, R, S]}
+    - {name: bias,   dtype: same_as_x, layout: contiguous, ndim: 4, shape: [1, K, 1, 1]}
+    - {name: slope,  dtype: same_as_x, layout: scalar,     ndim: 0, shape: []}   # 0 维标量张量；仅 prelu 使用
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: 4, shape: "[N, K, H_out, W_out]，H_out = H - R + 3、W_out = W - S + 3；卷积天然单输出，无打包分段"}
+  init_inputs:
+    - {name: variant, dtype: str, layout: scalar}   # "relu" | "swish" | "prelu"
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {N: 2, C: 16, H: 32, W: 32, K: 16, R: 3, S: 3, variant: "relu", slope: 0.01, dtype: "float16"}
+  dynamic: true
+  invariants:
+    - "N/C/H/W/K/R/S 均 >= 1（允许非 2 的幂、非 16 对齐、素数与边界值，含 N=1/H=W=1、C=1/K=1、R=S=1 与样例原版 N=1/C=K=16/H=W=16/R=S=3）；weight 输入通道维必须等于 C"
+    - "输出维按公式计算且 >= 1：H_out = H - R + 3、W_out = W - S + 3，即 R <= H+2 且 S <= W+2（case 保证，越界即非法 case）"
+    - "stride 与 dilation 恒为 (1,1)、对称零 padding 恒为 (1,1)（三 variant 共享），padding 值恒为零"
+    - "bias 形状恒为 (1, K, 1, 1)；slope 为 0 维标量张量、值域 (0, 1]（缺省 0.01），variant=relu/swish 时 slope 为垃圾输入，不得影响输出"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；卷积累加/bias/激活全程 float32 中间计算，输出单次 cast 回输入 dtype；语义与 memory format 无关，评测传 contiguous NCHW"
+
+tolerance:
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  float32:  {atol: 1.0e-3, rtol: 1.0e-3}
+  compare: "reference 与生成实现各自以 float32 完成 conv 累加、bias 加法与激活后单次 cast 回输入 dtype 再比较；单张量输出 (N, K, H_out, W_out) 整体比较，无分段打包"
+  note: >
+    以上为本评测集的验收容差，用于离线终审。样例的精度口径为 io dtype
+    （fp16 为主）+ float32 中间与计算精度、输出单次 cast：固定族单点
+    卷积和为 C*R*S=144 项、输出量级 ~sqrt(144)=12，fp32 不同累加顺序的
+    单点偏差 ~1e-5 量级，叠加 fp16/bf16 单次 cast 的半 ulp 相对误差
+    （~|z|*2^-11 / |z|*2^-9），全部低于 atol+rtol*|expected|；bf16 档
+    即因此数值语义安全才纳入声明域。float32 档沿用 5001 的 1e-3。在线
+    （搜索循环内）由 KernelBenchPaperEvaluator 判定：输入与模型统一
+    cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能
+    替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）
+# 覆盖 5001 复核 canary 证实的一步绕行：conv3d（深度维 unsqueeze）/
+# conv_transpose2d（翻转核+通道转置）均能精确复现 conv2d 语义，ATen
+# GEMM 路由含方法形式；bias 与激活的 ATen 逐元素原语由题面"全融合"
+# 实现约束约束，不单列 forbidden
+forbidden:
+  - torch.nn.Conv2d
+  - torch.nn.functional.conv2d
+  - F.conv2d
+  - torch.conv2d
+  - aten.conv2d
+  - aten.convolution
+  - torch.nn.functional.conv3d
+  - torch.conv3d
+  - torch.nn.Conv3d
+  - torch.nn.functional.conv_transpose2d
+  - torch.conv_transpose2d
+  - torch.nn.ConvTranspose2d
+  - torch.nn.functional.unfold
+  - torch.nn.Unfold
+  - .unfold(
+  - torch.matmul
+  - .matmul(
+  - torch.mm
+  - torch.bmm
+  - torch.addmm
+  - torch.baddbmm
+  - torch.einsum
+  - torch.tensordot
+  - torch.nn.functional.linear
+  - torch.nn.Linear
+  - miopen
+  - hipdnn
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/5008_conv_bias_act.yaml，题面元数据不重复携带库源标识

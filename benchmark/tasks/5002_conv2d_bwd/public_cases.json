@@ -1,0 +1,13 @@
+{
+  "task_id": "5002_conv2d_bwd",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成；dy 的空间尺寸由 make_inputs 按前向公式自动推导，case 不携带 out_h/out_w。",
+  "shape_family": {
+    "n": 4, "c": 32, "h": 16, "w": 16, "out_c": 64, "r": 3, "s": 3,
+    "stride_h": 1, "stride_w": 1, "pad_h": 1, "pad_w": 1, "dil_h": 1, "dil_w": 1,
+    "variant": "dgrad", "dtype": "float32",
+    "out_ndim": 4,
+    "out_shape": [4, 32, 16, 16],
+    "out_shape_wgrad": [64, 32, 3, 3],
+    "out_layout": "两方向均天然单张量输出、无打包拼接：dgrad 返回 dx (N,C,H,W)；wgrad 返回 dw (out_c,C,R,S)"
+  }
+}

@@ -1,0 +1,111 @@
+id: "5004_deform_conv2d_bwd"
+name: deform_conv2d_bwd
+family: conv
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  可变形 2D 卷积反向家族（DCNv2、NCHW、offset group=1、无 bias）：前向
+  y = deform_conv2d(x, offset, weight, mask, stride=(sh,sw), padding=(ph,pw),
+  dilation=(dh,dw))（out = floor((in + 2*pad - dil*(k-1) - 1)/stride) + 1；
+  第 m 个核采样点行主序 m = pm*S + pn，采样坐标
+  Y = i*sh - ph + dh*pm + offset[b,2m,i,j]、
+  X = j*sw - pw + dw_*pn + offset[b,2m+1,i,j]，整数坐标即像素中心的双线性
+  插值、边界外贡献为 0，输出由 mask 逐点调制后按核权值求和），给定上游梯度
+  dy = dL/dy，variant="dgrad" 时返回对输入/offset/mask 的梯度
+  dx (N,C,H,W)、doffset (N,2*R*S,out_h,out_w)、dmask (N,R*S,out_h,out_w)
+  按一维拼接打包的单张量（段序 dx|doffset|dmask，各段 C 序展平），
+  variant="wrw" 时返回对权值的梯度 dw (out_c,C,R,S)（天然单张量，无打包）。
+  forward(dy, weight, x, offset, mask) 为固定五输入签名：dgrad 消费全部五个
+  输入；wrw 的 weight 数值不参与输出（仅形状约定）。float32 输入输出；
+  H/W/R/S 允许 1、奇数、非 2 的幂；stride/dilation >= 1、padding >= 0 且
+  四向对称；offset 通道数 = 2*R*S、mask 通道数 = R*S、空间尺寸与 dy 一致。
+  本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 5004 --backend triton），无需任何框架改动。starter
+  由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：helpers /
+  init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: dy,     dtype: float32, layout: contiguous, ndim: 4, shape: [N, out_c, out_h, out_w]}
+    - {name: weight, dtype: float32, layout: contiguous, ndim: 4, shape: [out_c, C, R, S]}
+    - {name: x,      dtype: float32, layout: contiguous, ndim: 4, shape: [N, C, H, W]}
+    - {name: offset, dtype: float32, layout: contiguous, ndim: 4, shape: [N, 2*R*S, out_h, out_w]}
+    - {name: mask,   dtype: float32, layout: contiguous, ndim: 4, shape: [N, R*S, out_h, out_w]}
+  outputs:
+    - {name: out, dtype: float32, layout: contiguous,
+       shape: "dgrad 时一维 [N*C*H*W + N*2*R*S*out_h*out_w + N*R*S*out_h*out_w]（段序 dx|doffset|dmask，各段为 4-D 张量 C 序展平）；wrw 时 [out_c, C, R, S]（天然单张量，无打包）"}
+  init_inputs:
+    - {name: variant,  dtype: str, layout: scalar}   # "dgrad" | "wrw"
+    - {name: stride_h, dtype: int, layout: scalar}   # 缺省 1
+    - {name: stride_w, dtype: int, layout: scalar}   # 缺省 1
+    - {name: pad_h,    dtype: int, layout: scalar}   # 缺省 1
+    - {name: pad_w,    dtype: int, layout: scalar}   # 缺省 1
+    - {name: dil_h,    dtype: int, layout: scalar}   # 缺省 1
+    - {name: dil_w,    dtype: int, layout: scalar}   # 缺省 1
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {n: 2, c: 16, h: 16, w: 16, out_c: 32, r: 3, s: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dil_h: 1, dil_w: 1, variant: "dgrad", dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "各维 >= 1；R/S 允许 1（1x1 核）；H/W 允许 1、奇数、非 2 的幂、非 16 对齐"
+    - "一致性：dy/offset/mask 空间尺寸必须等于前向公式 out_h=floor((H+2*ph-dh*(R-1)-1)/sh)+1（out_w 同理）；H+2*ph >= dh*(R-1)+1、W+2*pw >= dw_*(S-1)+1；offset 通道数 = 2*R*S、mask 通道数 = R*S、dy 通道数 = out_c = weight.shape[0]"
+    - "stride/dilation >= 1，padding >= 0；padding 为前向的四向对称 (ph,pw) 语义（非对称 pre/post padding 不在本题域内）"
+    - "offset 通道与核采样点行主序一一对应（2*m 为 H 偏移、2*m+1 为 W 偏移，m = pm*S + pn）；offset group = 1；无 bias（样例口径中 bias 不进入两方向反向图）"
+    - "wrw 时 dx/doffset/dmask 不产出、weight 数值不参与输出（仅形状约定）；dgrad 消费全部五个输入的数值"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；float32 全程累加，不做半精度下转"
+
+tolerance:
+  float32: {atol: 1.0e-4, rtol: 1.0e-4}
+  compare: >
+    输出为 float32 单张量：wrw 全量直接比较；dgrad 先按分段协议拆为
+    dx / doffset / dmask 三段，每段分别用上表容差比较（评测器对打包后的
+    一维张量整体 allclose 与分段逐段比较等价，因为容差逐元素施加）。
+    reference 在 float32 中对手写 DCNv2 前向做 autograd 精确反传，生成实现
+    以 float32 累加（反向双线性采样的解析偏导散射 / 采样值相关累加，tl.dot
+    / tl.sum 等树形归约或逐块累加），不同累加顺序的舍入偏差与 reference 同
+    阶：构建自检（tmp/build_check/5004_deform_conv2d_bwd.py，float64 解析
+    oracle）在全部隐藏 case + 公开固定族实测 |ref|>=1 元素最大相对偏差
+    5.3e-5（最坏 dil4x4 的 doffset），均在容差内且留有约 2 倍裕量。
+  note: >
+    以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
+    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    fp32、allclose(atol=rtol=1e-4)，与本表同量级——在线结论仍不能替代
+    终审（终审另有隐藏 case 与静态审计）。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）；全局黑名单
+# （rocblas/hipblas*/miopen/hipdnn/cublas/cudnn/cutlass）由 static_audit.py
+# 自动取并集，此处列本题语义捷径
+forbidden:
+  - aiter
+  - torchvision
+  - torch.nn.functional.conv2d
+  - F.conv2d
+  - torch.conv2d
+  - torch.nn.Conv2d
+  - torch.nn.functional.conv_transpose2d
+  - F.conv_transpose2d
+  - torch.nn.ConvTranspose2d
+  - torch.nn.grad.conv2d_input
+  - torch.nn.grad.conv2d_weight
+  - aten.convolution_backward
+  - deform_conv2d
+  - deform_conv2d_backward
+  - grid_sample
+  - F.grid_sample
+  - torch.nn.functional.grid_sample
+  - torch.autograd
+  - .backward(
+  - unfold
+  - F.fold
+  - torch.nn.functional.fold
+  - im2col
+  - col2im
+  - as_strided
+
+# 溯源（repo/commit/sha256/官方样例路径）完整记录见
+# benchmark/sources/5004_deform_conv2d_bwd.yaml，题面元数据不重复携带库源标识

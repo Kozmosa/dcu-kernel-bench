@@ -1,0 +1,56 @@
+task_id: "5002_conv2d_bwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/convolution/convolution_bwd.py
+      sha256: 3be3355d58f95ed3d162d0143664fbb11a33028d98d73ba8481f74246e553fe8
+      role: semantic_spec   # conv_dgrad 图：dy(N,out_c,out_h,out_w) + w(out_c,c,r,s) + padding/stride/dilation -> dx，dgrad 方向语义口径
+    - path: python/convolution/convolution_wrw.py
+      sha256: 7229c2c988427bb1544694297cf38b96b5c0ab0229a9316a3ca91ea9b2c83d2d
+      role: semantic_spec   # conv_wgrad 图：x + dy -> dw(out_c,c,r,s)，wgrad 方向语义口径
+    - path: python/convolution/convolution_bwd_asymmetric.py
+      sha256: 3e211ac95fa452f8dc158ad2e7cabf8410d97e4aa5367b59bbba0bfe76042625
+      role: semantic_spec_variant   # pre/post 非对称 padding 的 dgrad 口径；其变体留作后续题，不在本题域内
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（F.conv2d 前向构图 + autograd 反传），标准 ATen 组合即可
+  calls_closed_libs: false        # 题目本体不调用闭源库；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作 core_compute 证据，生成侧 forbidden 明确禁用
+  builds_standalone: true
+  has_reference: true             # reference 以 autograd 反传 F.conv2d 前向为语义金标（保证 dgrad/wgrad 与前向一致）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：标准 2D 卷积反向的两个方向，以 init 超参 variant 选择——
+    dgrad（对输入求梯度，convolution_bwd.py 的 conv_dgrad 图口径）与
+    wgrad（对权值求梯度，convolution_wrw.py 的 conv_wgrad 图口径），
+    NCHW、groups=1、无 bias，padding/stride/dilation 为逐轴标量超参
+    （样例的 padding=[ph,pw]/stride=[sh,sw]/dilation=[dh,dw] 图属性）。
+    语义口径与冲突处理：样例注释明言 dgrad 输出 NCHW（output_padding=0 时）
+    与 wgrad 输出 DW 并非在所有情形下唯一，样例仅"计算一个合法 shape"；
+    题目固定以前向 F.conv2d 公式 out=floor((in+2*pad-dil*(k-1)-1)/stride)+1
+    为唯一权威（autograd 反传的 dy shape、dx shape、dw shape 均由该前向
+    唯一确定），并要求 reference 对 F.conv2d 前向用 autograd 反传
+    （x/w requires_grad，backward(dy)），保证两方向与前向严格一致——这与
+    hipDNN 图 io_data_type=FLOAT/compute=FLOAT 的 fp32 口径一致，故 dtype
+    域仅声明 float32（样例三文件全部 torch.float32；fp16/bf16 需真机验证
+    autograd 路径与容差，留作后续变体）。dy 随机输入采用本评测集 randn
+    惯例（样例用 torch.rand，输入分布非语义契约，任意有限值均合法）。
+    输出契约：两方向均天然单张量输出，无 2007 式打包拼接；dgrad 返回
+    (N,C,H,W)、wgrad 返回 (out_c,C,R,S)，未消费张量（dgrad 的 x / wgrad 的
+    weight）数值不参与输出、仅形状约定——与 autograd 数学定义一致。
+    留作后续的变体：convolution_bwd_asymmetric.py 的 pre/post 非对称
+    padding（F.conv2d padding 为四向对称，需 F.pad 组合表达，独立成题）、
+    fp16/bf16、grouped conv 与 bias 路径。样例不含官方测试文件，语义
+    自检以独立朴素 oracle（卷积窗散射/相关求和、float64）对 autograd
+    reference 交叉验证（tmp/build_check/5002_conv2d_bwd.py，最大偏差
+    见该脚本输出）。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成
+    （torch.Generator(seed)，消费顺序 dy -> weight -> x，dy 空间尺寸按
+    前向公式自动推导，case 不携带 out_h/out_w）；Model 构造超参由
+    audit_model_class.resolve_init_args 按 task.yaml io.init_inputs 字段名
+    从 case 取（variant 与六个卷积属性字段都在 case 内）。

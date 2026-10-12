@@ -1,0 +1,9 @@
+{
+  "task_id": "8001_cumsum",
+  "cases": [
+    {"name": "perf_4d_dim2_f32",   "shape": [16, 32, 1024, 64],  "dim": 2,  "dtype": "float32",  "seed": 8201},
+    {"name": "perf_4d_negdim_f32", "shape": [4, 32, 128, 2048],  "dim": -1, "dtype": "float32",  "seed": 8202},
+    {"name": "perf_4d_dim2_bf16",  "shape": [8, 64, 1024, 64],   "dim": 2,  "dtype": "bfloat16", "seed": 8203}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

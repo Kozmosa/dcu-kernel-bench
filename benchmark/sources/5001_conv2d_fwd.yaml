@@ -1,0 +1,56 @@
+task_id: "5001_conv2d_fwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/convolution/convolution_fwd.py
+      sha256: 9eeb69b966f153e687cd5cfd1b9fb678bbdcf6028e56787ca7578c9bc072b7ed
+      role: semantic_spec   # 主样例：conv_fprop 标准 2D 卷积前向——NCHW/fp32 io 口径、stride/padding/dilation=(1,1)/(1,1)/(1,1)、无 bias
+    - path: python/convolution/convolution_fwd_asymmetric.py
+      sha256: bc476c262a42a8d006cd18c659dfc788338f02469d0c442c9c1c7c6301edc3e1
+      role: semantic_spec   # variant=asymmetric 口径：pre_padding (2,2) / post_padding (1,1)，其余参数同主样例
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（torch.nn.functional.pad + conv2d 的 ATen 组合，即语义金标本体，不依赖任何闭源库）；生成侧核心计算要求在提交文件内以 Triton kernel 完成（task.yaml forbidden 强制）
+  calls_closed_libs: false        # 题目本体不调用 hipDNN/MIOpen；样例的 hipDNN graph 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 miopen/hipdnn
+  builds_standalone: true
+  has_reference: true             # 语义金标内联于题目文件 Model（F.pad + F.conv2d，reference 不受 forbidden 约束）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipDNN 样例集卷积前向的两个 python 样例——标准前向
+    （convolution_fwd.py，variant="standard"：stride/padding/dilation 取
+    (1,1)/(1,1)/(1,1)）与非对称 padding 前向（convolution_fwd_asymmetric.py，
+    variant="asymmetric"：pre_padding (2,2) 加在高的上侧/宽的左侧，
+    post_padding (1,1) 加在高的下侧/宽的右侧，stride/dilation 同
+    (1,1)/(1,1)）。语义口径与冲突处理：两样例均为 NCHW、float32、无 bias
+    的 conv_fprop（cross-correlation，零 padding），输出形状由标准公式
+    H_out = floor((H + pre + post - (R-1)*dil - 1)/stride) + 1 给出；与
+    torch 语义逐一同构——standard 等价 F.conv2d(stride=(1,1), padding=
+    (1,1), dilation=(1,1))，asymmetric 等价 F.pad(x, (2, 1, 2, 1)) 后
+    F.conv2d(padding=0)（F.pad 参数顺序为宽左/宽右/高上/高下），以官方
+    conv_fprop 定义为唯一权威，题目 reference 即该 ATen 组合。io 口径：
+    x (N,C,H,W) 与 weight (K,C,R,S) 作为 forward 输入（样例两者均为
+    torch.rand 直接生成的自由张量，非模块参数），输出单张量 (N,K,H_out,
+    W_out)——卷积天然单输出，无多输出打包分段。shape/dtype 域：样例
+    dtype 仅 float32，本题即以 float32 为声明域（fp16/bf16 留作后续
+    变体，届时在 tolerance 分档补充）；样例维度 n=4/c=16/h=56/w=56/k=4/
+    r=s=1 保留在域内（隐藏 case 覆盖），公开固定族放宽为规范 3x3 卷积核
+    （r=s=3，standard，输出 56x56 尺寸保持），全域允许各维 >= 1 的非 2
+    幂/边界值组合（含全 1 边界），仅要求输出维为正。留作后续题：conv
+    反向与权值更新（样例另有 convolution_bwd / convolution_wrw 及其
+    asymmetric 版）、conv+bias/激活融合（cpp/conv_fusion 系）、grouped
+    conv 与 stride/dilation 可变族、fp16/bf16 dtype 族。case 文件为
+    {name + 语义字段} 字典，消费者剥离 name 元数据键后调题目文件内
+    make_inputs(**fields) 确定性生成（torch.Generator(seed)，消费顺序
+    x -> weight）；Model 构造超参由 audit_model_class.resolve_init_args
+    按 task.yaml io.init_inputs 字段名从 case 取（仅 variant）。
+    2026-10-12 复核修订：bypass canary 实证 F.conv3d（深度维 unsqueeze）
+    与 F.conv_transpose2d（翻转核+通道转置）均可一步精确复现 conv2d 语义
+    （maxabs=0 / 3.8e-06），forbidden 随之扩充覆盖 conv3d / conv_transpose2d
+    / Conv3d / ConvTranspose2d / addmm / baddbmm / .matmul( 方法形式 /
+    linear 全部绕行路由，题面禁用列表同步；隐藏 case 增补输出维为 1 的
+    边界（standard r=H+2、asymmetric r=H+3）与素数维组合两条路径。

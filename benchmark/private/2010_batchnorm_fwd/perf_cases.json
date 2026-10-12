@@ -1,0 +1,9 @@
+{
+  "task_id": "2010_batchnorm_fwd",
+  "cases": [
+    {"name": "perf_training_resnet_stem_f32", "n": 32, "c": 256, "h": 56,  "w": 56,  "variant": "training",  "dtype": "float32", "seed": 2210},
+    {"name": "perf_training_nonpow2_f32",     "n": 16, "c": 192, "h": 77,  "w": 77,  "variant": "training",  "dtype": "float32", "seed": 2211},
+    {"name": "perf_inference_stem_f16",       "n": 32, "c": 64,  "h": 224, "w": 224, "variant": "inference", "dtype": "float16", "seed": 2212}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

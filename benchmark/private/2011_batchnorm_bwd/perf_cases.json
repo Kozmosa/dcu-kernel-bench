@@ -1,0 +1,9 @@
+{
+  "task_id": "2011_batchnorm_bwd",
+  "cases": [
+    {"name": "perf_dx_n8c64h56w56_f32",      "n": 8,  "c": 64, "h": 56, "w": 56, "variant": "dx",           "dtype": "float32", "seed": 2211},
+    {"name": "perf_dgamma_n16c64h28w28_f32", "n": 16, "c": 64, "h": 28, "w": 28, "variant": "dgamma_dbeta", "dtype": "float32", "seed": 2212},
+    {"name": "perf_dx_n16c32h64w64_f16",     "n": 16, "c": 32, "h": 64, "w": 64, "variant": "dx",           "dtype": "float16", "seed": 2213}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

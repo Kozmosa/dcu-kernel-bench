@@ -1,0 +1,54 @@
+task_id: "5003_deform_conv2d_fwd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/deformconvolution/deform_convolution.py
+      sha256: 023d5fc1f71e8a03dc928d784a299eda13b7ec9950edfb9bada1f02e319a9411
+      role: semantic_source   # deform_conv_fprop 图构建：x(N,C,H,W)/offset(N,2RS,H_out,W_out)/weight(K,C,R,S)/bias(K)/mask(N,RS,H_out,W_out) 张量 shape、fp32 口径与 conv 参数即语义口径唯一权威
+    - path: python/deformconvolution/deform_convolution_bwd.py
+      sha256: 9e9143cc49b38bb35505138bf4377ecbb6a2af9596c06754a22362edfb529967
+      role: sibling_variant   # dgrad 反向样例：offset/mask 布局与 fprop 逐维一致（旁证）；反向题留作后续
+    - path: python/deformconvolution/deform_convolution_wrw.py
+      sha256: 1833ff119a32f3215d67a91675f99dd13309bd5214e3cb5364626c1ee1d763f6
+      role: sibling_variant   # wgrad 反向样例，留作后续题
+    # 哈希均为 commit b67a3f9 版本（LF 行尾）内容；本地检出工作区为 CRLF
+    # 行尾（git diff --ignore-cr-at-eol 为空，逐行内容一致），溯源以 commit 为准
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（采样网格构建 + 手写四角点双线性插值 + matmul 加权归约），无任何闭源库依赖
+  calls_closed_libs: false        # 样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作 core_compute 证据；题目本体不调用闭源库，生成侧 forbidden 明确禁用 hipdnn/miopen
+  builds_standalone: true
+  has_reference: true             # 语义金标为题目文件内手写的双线性采样实现（CPU 可跑，构建自检含独立朴素 oracle 与零偏移 conv2d 闭式对照）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集与 variant 划分：可变形 2D 卷积前向家族，variant="modulated"
+    （缺省，调制型 DCNv2：采样值乘逐位置 mask）与样例口径完全一致；
+    variant="plain"（无掩码 DCNv1：mask 不参与计算，内容任意）为衍生扩展
+    子集，两 variant 张量布局完全一致。语义口径依据：样例只给出张量
+    shape 与参数——x (N,C,H,W)、offset (N,2*R*S,H_out,W_out)、weight
+    (K,C,R,S)、bias (K)、mask (N,R*S,H_out,W_out)、fp32、io/intermediate/
+    compute data type 均 FLOAT、含 bias——据此唯一确定 per-kernel-position
+    偏移布局与含调制掩码；通道到语义的映射（偶数通道 = y 偏移、奇数通道
+    = x 偏移、p = i*S + j 行主序）与双线性插值的越界零填充语义按 DCNv2
+    通行约定写入题面（bwd 样例同布局旁证；本机无 torchvision，未做第三方
+    实现对照，构建自检以独立朴素 oracle + 零偏移 F.conv2d 闭式对照替代）。
+    样例设备张量的 channels_last 内存布局是 hipDNN 设备路径的布局优化，
+    不入语义，题面统一 contiguous NCHW。打包协议：输出天然单张量
+    (N,K,H_out,W_out)，无多输出拼接。shape 域在样例口径上放宽：非 2 的幂
+    /非 16 对齐/非方形空间尺寸、stride/padding/dilation 可变（含非对称）、
+    H_out=1 边界、fp16/bf16 档（float32 中间计算，输出 cast 回输入
+    dtype）；float32 档容差 atol=rtol=1e-3（自检实测 reference vs 独立
+    oracle 最大绝对偏差见 self_check），fp16/bf16 档 2e-2。留作后续变体：
+    dgrad/wgrad 训练反向（deform_convolution_bwd / _wrw 样例）、
+    offset_groups > 1 的多 deformable group 路径、设备侧 fp16/bf16 原语
+    低精度中间计算。case 文件为 {name + 语义字段} 字典，消费者剥离 name
+    元数据键后调题目文件内 make_inputs(**fields) 确定性生成
+    （torch.Generator(seed)，消费顺序 x -> offset -> weight -> bias ->
+    mask）；Model 构造超参由 audit_model_class.resolve_init_args 按
+    task.yaml io.init_inputs 字段名从 case 取（variant/stride/padding/
+    dilation 均在 case 内，JSON list 传入后构造器内 int() 归一）。

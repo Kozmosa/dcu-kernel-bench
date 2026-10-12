@@ -1,0 +1,12 @@
+{
+  "task_id": "5003_deform_conv2d_fwd",
+  "cases": [
+    {"name": "hidden_min_hout1_f32_mod",      "n": 1, "c": 1,  "h": 3,  "w": 3,  "k": 1, "r": 3, "s": 3, "variant": "modulated", "dtype": "float32",  "seed": 5003, "stride": [1, 1], "padding": [0, 0], "dilation": [1, 1]},
+    {"name": "hidden_nonpow2_stride2_f32_pl", "n": 2, "c": 3,  "h": 23, "w": 17, "k": 4, "r": 3, "s": 3, "variant": "plain",     "dtype": "float32",  "seed": 5004, "stride": [2, 2], "padding": [1, 1], "dilation": [1, 1]},
+    {"name": "hidden_nonpow2_f16_mod",        "n": 2, "c": 8,  "h": 19, "w": 19, "k": 8, "r": 3, "s": 3, "variant": "modulated", "dtype": "float16",  "seed": 5005, "stride": [1, 1], "padding": [1, 1], "dilation": [1, 1]},
+    {"name": "hidden_dil2_bf16_mod",          "n": 1, "c": 5,  "h": 13, "w": 13, "k": 3, "r": 3, "s": 3, "variant": "modulated", "dtype": "bfloat16", "seed": 5006, "stride": [1, 1], "padding": [2, 2], "dilation": [2, 2]},
+    {"name": "hidden_asym_f16_plain",         "n": 3, "c": 4,  "h": 11, "w": 26, "k": 6, "r": 3, "s": 3, "variant": "plain",     "dtype": "float16",  "seed": 5007, "stride": [1, 2], "padding": [0, 1], "dilation": [2, 1]},
+    {"name": "hidden_dil_pad_f32_mod",        "n": 2, "c": 16, "h": 37, "w": 29, "k": 8, "r": 3, "s": 3, "variant": "modulated", "dtype": "float32",  "seed": 5008, "stride": [1, 1], "padding": [2, 2], "dilation": [2, 2]},
+    {"name": "hidden_small_bf16_plain",       "n": 1, "c": 2,  "h": 5,  "w": 7,  "k": 2, "r": 3, "s": 3, "variant": "plain",     "dtype": "bfloat16", "seed": 5009, "stride": [1, 1], "padding": [1, 1], "dilation": [1, 1]}
+  ]
+}

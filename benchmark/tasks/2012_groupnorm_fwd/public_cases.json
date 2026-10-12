@@ -1,0 +1,16 @@
+{
+  "task_id": "2012_groupnorm_fwd",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成。",
+  "shape_family": {
+    "batch": 2,
+    "channels": 16,
+    "height": 512,
+    "width": 512,
+    "groups": 2,
+    "variant": "groupnorm",
+    "dtype": "float32",
+    "out_ndim": 1,
+    "out_shape": [8388616],
+    "out_layout": "三段一维 float32 拼接：y (batch*channels*height*width=8388608) | mean (batch*groups=4) | inv_var (4)；两 variant 输出布局相同，groupnorm_swish 仅 y 段数值不同（y=gn*sigmoid(gn)）；mean/inv_var 按 (batch, groups) 行主序展平"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "task_id": "8002_gather",
+  "cases": [
+    {"name": "perf_gather_3d_wide_f32",    "variant": "gather",          "data_shape": [128, 2048, 8], "index_shape": [4096],      "axis": 1,  "dtype": "float32",  "seed": 8401},
+    {"name": "perf_gelem_2d_f16",          "variant": "gather_elements", "data_shape": [16384, 512],   "index_shape": [16384, 512], "axis": 1,  "dtype": "float16",  "seed": 8402},
+    {"name": "perf_gelem_3d_f32",          "variant": "gather_elements", "data_shape": [16, 4096, 128], "index_shape": [16, 4096, 128], "axis": 1, "dtype": "float32", "seed": 8403}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

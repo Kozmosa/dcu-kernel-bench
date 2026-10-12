@@ -1,0 +1,52 @@
+task_id: "7001_ctc_loss"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准（cpp 样例文件头含 SPDX-License-Identifier: MIT）
+  files:
+    - path: python/ctc_loss/ctc_loss.py
+      sha256: f5d36dbdbc19979902d3d00c643563528b99b8e8f3b733d761be0f4b02ecfd37
+      role: semantic_reference   # 调用契约唯一权威：probs (T,N,C) time-major / blank_label_id=0 / apply_softmax=False（输入已是概率）/ algo=0 / losses (N,) / gradients (N,T,C)
+    - path: cpp/ctc_loss/CtcLoss.cpp
+      sha256: 0954261011ce6af74a1d902eced1d71fdc6a161b6e6bf04a6cbe9fb00a6b01dc
+      role: cross_reference      # C++ 侧同算子样例，仅作旁证不入题：其 apply_softmax=true 与 python 样例相反、input_lengths 仅 3 项与 batch=4 不符（smoke 代码缺陷），两处均不采纳
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（手写 log 空间 alpha/beta 前向-后向动态规划 + 梯度组装）
+  calls_closed_libs: false        # 题目本体不调用 hipDNN；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 ctc_loss 库调用
+  builds_standalone: true
+  has_reference: true             # 标准 CTC 前向-后向算法（Graves 扩展序列构造）移植进题目文件 Model（fp32、log 空间）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：CTC 前向损失的单一契约（无变体划分）——reduction='none'
+    （逐序列 losses + 全量 gradients，样例 graph.ctc_loss 同时返回两者且
+    均 set_output(True)，故一并打包）；blank_label_id=0、apply_softmax=
+    False、algo=0 按 python 样例入题，apply_softmax 的 logits 路径留作后续
+    变体（cpp 样例为 true，但该样例另有 input_lengths 与 batch 不符的
+    smoke 缺陷，不作为语义依据）。语义口径依据：python 样例为唯一权威——
+    输入 probs (T, N, C) time-major、输出 losses (N,) 与 gradients
+    (N, T, C) batch-major（样例 torch.empty(batch, max_time, num_classes)
+    的显式布局）；样例为 smoke 代码（无数值断言），损失与梯度的数值定义
+    按标准 CTC（Graves 前向-后向）入题：losses[n] = -log Z_n，gradients =
+    d losses / d probs（对概率输入的真实梯度，含 1/p 链式因子），构建自检
+    tmp/build_check/7001_ctc_loss.py 用暴力路径枚举 + torch.autograd 双重
+    验证了该梯度约定与 reference 的 DP 逐位一致。打包协议：forward 返回
+    单个一维张量（dtype 同 probs，长度 N + N*T*C），前 N 项 losses、其余
+    gradients 按 (N, T, C) 行主序平铺——适配在线 KernelBench 评测器的单
+    输出 .shape/allclose 假设与离线终审 audit_model_class.py 的单输出比较
+    （1017/1019 多输出误杀教训的沿用）。dtype 域：样例为 fp32，fp32 为
+    主；补充 fp16/bf16（中间计算一律 float32，容差按 dtype 分档），生成域
+    保证 probs 严格为正（softmax 口径）、标签无连续重复且 L <= 有效帧数，
+    故 Z 有限、losses 量级 <= max_time*ln(C) 在 fp16 可表示范围内。与
+    KernelBench/MultiKernelBench 现有 ctc 题不重叠（本题源为 hipDNN 样例
+    集）。case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，
+    随机量仅 probs = softmax(randn)，labels/长度向量为案例确定值）；
+    Model 构造超参由 audit_model_class.resolve_init_args 按 task.yaml
+    io.init_inputs 字段名从 case 取（每条 case 均显式携带 blank=0）。
+    留作后续变体：apply_softmax=True 的 logits 输入路径、reduction
+    sum/mean 聚合、algo 差异（ZERO/DETERMINISTIC 谱系）、空目标序列与
+    连续重复标签域。

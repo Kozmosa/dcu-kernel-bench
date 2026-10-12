@@ -1,0 +1,94 @@
+id: "8003_scatter_nd"
+name: scatter_nd
+family: index
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  ScatterND 索引写入家族（按整型索引元组写入、纯数据搬移、无算术）：
+  data 形状 (S_0, ..., S_{r-1})，indices 为 int64 (K, r)——r = data 维数，
+  每行是一个完整坐标元组、一次唯一指定 data 中一个元素的位置（全索引
+  形式，样例口径）；updates 与 data 同 dtype、形状 (K,)。输出 out 与
+  data 同形状同 dtype：out[indices[k,0], ..., indices[k,r-1]] = updates[k]
+  （命中位置覆盖写，原值被丢弃），其余位置原值逐位保留。写入语义固定
+  为覆盖写（样例口径，非累加）；K 个坐标元组两两互异（生成端 randperm
+  无放回保证），重复元组的写入生效顺序是未定义行为，排除在输入域外，
+  实现无需为其定义行为。dtype 域 float32 为主（样例口径），另含
+  float16/bfloat16——本算子是纯搬移，未命中位置与 data、命中位置与
+  updates 逐位一致，低精度 dtype 数值安全（见 tolerance）。forward 返回
+  单个张量（本算子天然单输出，无需多输出打包）。shape 域在样例口径上
+  放宽：data ndim 1–6、各维 >= 1（含轴长 1、非 2 的幂、素数长度）、
+  元素总数 <= 2^23，K ∈ [1, data 元素总数]（含 K=1 与全量打散）。本题
+  为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 8003），无需任何框架改动。starter 由框架
+  loader 从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: data,    dtype: [float32, float16, bfloat16], layout: contiguous,
+       ndim: "1-6", shape: "各维 >= 1，元素总数 <= 2^23"}
+    - {name: indices, dtype: int64, layout: contiguous, ndim: 2,
+       shape: "(K, r)，r = data 维数；值域 [0, S_d)，K 个坐标元组两两互异"}
+    - {name: updates, dtype: same_as_data, layout: contiguous, ndim: 1, shape: [K]}
+  outputs:
+    - {name: out, dtype: same_as_data, layout: contiguous, ndim: same_as_data,
+       shape: "与 data 同形状：命中位置 = updates 对应元素（覆盖写），未命中位置 = data 原值"}
+  init_inputs: []   # 无构造超参——写入语义固定为覆盖写（样例口径），无 variant/axis 类分支
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {data_shape: [4, 4], num_updates: 2, index_dtype: "int64",
+                 dtype: "float32", out_shape: [4, 4]}
+  dynamic: true
+  invariants:
+    - "data ndim ∈ [1, 6]，各维 >= 1，元素总数 <= 2^23（允许轴长 1、非 2 的幂、素数长度）"
+    - "indices 为 int64 (K, r)，r = data 维数（全索引坐标，一行唯一确定一个元素位置）；1 <= K <= data 元素总数；全部索引值 ∈ [0, S_d)；K 个坐标元组两两互异（生成端 randperm 无放回保证）——重复元组的行为未定义，不在输入域，实现无需处理也不得因去重/排序预处理改变互异元组的覆盖结果"
+    - "updates 与 data 同 dtype、形状 (K,)；写入语义为覆盖写（非累加），未命中位置原值逐位保留"
+    - "out 与 data 同形状、同 dtype、contiguous：未命中位置与 data 逐位一致、命中位置与 updates 逐位一致；forward 不得原地修改任何输入"
+    - "dtype ∈ {float32, float16, bfloat16}，float32 为主（样例口径）；纯搬移无算术，输出与 data/updates 逐位一致，低精度 dtype 数值安全"
+    - "输入值为常规 randn 量级（无 inf/NaN）；data/indices/updates contiguous（在线评测把索引 cast 成 fp32 传入，< 2^24 可精确表示）"
+
+tolerance:
+  float32:  {atol: 0.0, rtol: 0.0}
+  float16:  {atol: 0.0, rtol: 0.0}
+  bfloat16: {atol: 0.0, rtol: 0.0}
+  compare: "本算子为纯索引写入的搬移，无任何算术：out 未命中位置与 data、命中位置与 updates 均逐位一致，故三档 dtype 容差均为 0（allclose 即要求精确相等；输入无 inf/NaN，覆盖写不引入 -0.0/+0.0 差异）"
+  note: >
+    纯搬移语义下不存在累加顺序/舍入差异，任何引入数值变换（如中间经
+    float32 往返后未按原 dtype 位模式写回、读改写时破坏未命中位置原值）
+    的实现都会在容差 0 下判负——这正是本题考察点之一，构建自检
+    （tmp/build_check/8003_scatter_nd.py）对全部隐藏 case 实测 reference
+    与独立 oracle（逐元素 Python 循环 + 标量定位赋值，与 reference 的
+    批量高级索引 setitem 不同代码路径）的最大绝对偏差为 0（torch.equal
+    逐位一致）。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
+    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
+    与上表不同——在线结论不能替代终审。
+
+# 终审静态审计：库级写原语与已知等价绕过路径显式禁用——单步散写族
+# （Tensor.scatter / scatter_add / scatter_reduce、Tensor.index_put、
+# 扁平化 Tensor.put_ / Tensor.index_copy_ 一步完成核心散写）与
+# torch_scatter 扩展包——本题考察手写坐标->线性偏移寻址；hipdnn 已在
+# 全局黑名单，此处显式列出以自文档。审计剥除 docstring 与注释后按字面
+# 子串匹配（模型 docstring 中的禁用列表声明不会被误杀）。
+forbidden:
+  - torch.scatter
+  - .scatter(
+  - .scatter_(
+  - aten.scatter
+  - scatter_add
+  - scatter_reduce
+  - index_put
+  - torch.put(
+  - .put_(
+  - aten.put
+  - index_copy
+  - aten.index_copy
+  - torch_scatter
+  - hipdnn
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/8003_scatter_nd.yaml，题面元数据不重复携带库源标识

@@ -1,0 +1,48 @@
+task_id: "8001_cumsum"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/cumsum/cumsum.py
+      sha256: 5d5bfc9848d1d240225a967dfdddabf00edc515b8a2b3bbd603c6dee964d777b
+      role: official_sample   # hipDNN graph.cumsum(input, axis) 调用为语义唯一权威（样例仅执行不校验输出，未附 torch 参考）
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（fp32 torch.cumsum + cast 回输入 dtype），不依赖任何外部源码
+  calls_closed_libs: false        # 题目本体不调用闭源库；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 已显式禁用 hipdnn
+  builds_standalone: true
+  has_reference: true             # reference.Model 内联 fp32 累加语义；构建自检另用独立 fp64 逐元素循环 oracle 验证（不同代码路径）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集与 variant：hipDNN 样例集 python/cumsum/cumsum.py 的 cumsum
+    算子——沿指定轴 axis 的 inclusive 前缀和，样例口径为 4D NCHW 输入
+    (1,2,3,4)、axis=2、io/intermediate/compute data type 全部 FLOAT；题面
+    把样例的 axis 参数提升为 Model 构造超参 dim（torch 惯例，含负数），
+    固定 shape 族取 (8,16,512,128) / dim=2 / float32，dtype 域以样例的
+    FLOAT 为主、按 compute-in-fp32 契约补充 float16/bfloat16（样例的
+    intermediate/compute FLOAT 即 fp32 累加口径的样例内依据）。
+    语义依据与冲突处理：样例只构建并执行 graph、不校验输出，也无 torch
+    参考可对照，cumsum 的 inclusive 前缀和语义由算子通名的统一定义
+    （torch.cumsum / rocPRIM DeviceScan inclusive 同义）与出题规格确定，
+    题目 reference 以 fp32 torch.cumsum + cast 内联，构建自检用独立 fp64
+    逐元素循环 oracle 实测验证（无源码-测试冲突问题）。输出契约：本算子
+    天然单输出（out 与输入同形同 dtype），forward 返回单张量，无需多输出
+    打包。容差：fp32 按累加顺序差异放宽为 atol=1e-4/rtol=1e-3（分块并行
+    scan 与顺序 cumsum 实测最大偏差 ≈4.2e-5 @ L=65536，allclose 最大裕度
+    0.075），fp16/bf16 沿用 2e-2/2e-2（fp32 累加契约下与 fp64 oracle 逐
+    元素全等）。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，
+    消费顺序仅 x；shape 为列表、dim 同时经 task.yaml io.init_inputs 解析
+    为 Model 构造参数）。留作后续变体：exclusive scan（需引入 init/exclusive
+    语义扩展）、多维并行 scan（沿多轴联合）、训练反向（前缀和的 vjp 即
+    逆向前缀和，可独立成题）、int8/定点点态累加。生成侧 forbidden 除
+    torch.cumsum 系外显式禁用 tl.cumsum / tl.associative_scan 与 FFT /
+    matmul / conv1d / numpy 等数学等价绕过——本题考察手写 scan（scan 为
+    DCU 短板，rocPRIM DeviceScan 为生产兜底，出题动机即生成侧手写能力）。
+    溯源补记：本地快照经 developer.sourcefind.cn 镜像克隆（origin remote），
+    HEAD 即上述 commit，sha256 在该 commit 下用 sha256sum 计算。

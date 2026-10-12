@@ -1,0 +1,17 @@
+{
+  "task_id": "1032_deform_attention_bwd",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；spatial_shapes 每轮由 randint[1,16) 重生成，n_keys 与 value 形状由其推导，out 为一维拼接张量、长度依赖 n_keys（故不记定长 out_shape，公式见 out_length）；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成。",
+  "shape_family": {
+    "n": 2,
+    "n_queries": 32,
+    "n_heads": 2,
+    "embed_dims_per_head": 32,
+    "n_levels": 2,
+    "n_points": 2,
+    "spatial_shapes": "randint[1,16) 逐轮随机，每行 (H_l, W_l)；n_keys = Σ H_l*W_l",
+    "dtype": "float32",
+    "out_ndim": 1,
+    "out_length": "n*n_keys*n_heads*embed_dims_per_head + n*n_queries*n_heads*n_levels*n_points*2 + n*n_queries*n_heads*n_levels*n_points",
+    "out_layout": "一维三段拼接（段序固定）：段 0 grad_value（(N, n_keys, heads, D) 行主序展平）、段 1 grad_sampling_locations（(N, Q, heads, L, P, 2) 行主序展平，末维 (x,y) 顺序保持）、段 2 grad_attention_weights（(N, Q, heads, L, P) 行主序展平）；三段 dtype 均与 value 一致"
+  }
+}

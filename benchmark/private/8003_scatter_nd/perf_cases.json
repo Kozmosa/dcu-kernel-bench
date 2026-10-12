@@ -1,0 +1,9 @@
+{
+  "task_id": "8003_scatter_nd",
+  "cases": [
+    {"name": "perf_nd2_f32_dense",  "data_shape": [4096, 2048],   "num_updates": 1048576, "dtype": "float32",  "seed": 8701},
+    {"name": "perf_nd2_f16_dense",  "data_shape": [16384, 512],   "num_updates": 1048576, "dtype": "float16",  "seed": 8702},
+    {"name": "perf_nd3_bf16",       "data_shape": [8, 4096, 256], "num_updates": 524288,  "dtype": "bfloat16", "seed": 8703}
+  ],
+  "timing": {"warmup_iters": 10, "repeat_iters": 30, "reduction": "median"}
+}

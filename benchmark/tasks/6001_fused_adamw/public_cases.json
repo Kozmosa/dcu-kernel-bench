@@ -1,0 +1,15 @@
+{
+  "task_id": "6001_fused_adamw",
+  "note": "model_class：在线输入由题目文件内的 get_inputs() 以全局 RNG 生成（评测器 set_seed 后调用）。本文件记录 get_inputs 固定的 shape 族，作为题面契约的机器可读版；容差与全域 shape 约束见 task.yaml。隐藏/性能 case 为 {name + 语义字段} 的字典：name 为元数据键，由消费者剥离后以其余语义字段调 reference.py::make_inputs(**fields) 确定性生成；init 超参（variant/lr/beta1/beta2/eps/weight_decay）由 audit_model_class.resolve_init_args 按 task.yaml io.init_inputs 字段名从 case 取。",
+  "shape_family": {
+    "shape": [8, 3, 224, 224],
+    "dtype": "float32",
+    "variant": "adamw",
+    "step": 10.0,
+    "init_hyperparams": {"lr": 1e-3, "beta1": 0.9, "beta2": 0.999, "eps": 1e-8, "weight_decay": 0.01},
+    "out_ndim": 4,
+    "out_shape": [8, 3, 224, 224],
+    "out_layout": "单张量、与 params 同形同 dtype（更新后参数；本任务无拼接分段）",
+    "input_consumption_order": "params -> grads -> exp_avg -> exp_avg_sq（torch.rand/randn，全局 RNG）；step 为确定性标量张量不消费 RNG"
+  }
+}

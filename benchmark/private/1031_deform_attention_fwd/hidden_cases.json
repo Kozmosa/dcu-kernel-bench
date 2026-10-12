@@ -1,0 +1,11 @@
+{
+  "task_id": "1031_deform_attention_fwd",
+  "cases": [
+    {"name": "hidden_min_1px_f32",         "n": 1, "n_heads": 1, "embed_dims_per_head": 1,  "n_queries": 1,   "n_levels": 1, "n_points": 1, "spatial_shapes": [[1, 1]],                     "dtype": "float32", "seed": 3111},
+    {"name": "hidden_nonpow2_l3p3_f16",    "n": 3, "n_heads": 2, "embed_dims_per_head": 5,  "n_queries": 17,  "n_levels": 3, "n_points": 3, "spatial_shapes": [[7, 5], [1, 9], [3, 3]],     "dtype": "float16", "seed": 3112},
+    {"name": "hidden_thin_levels_f32",     "n": 2, "n_heads": 3, "embed_dims_per_head": 4,  "n_queries": 8,   "n_levels": 3, "n_points": 2, "spatial_shapes": [[1, 12], [9, 1], [4, 4]],    "dtype": "float32", "seed": 3113},
+    {"name": "hidden_sample_like_f16",     "n": 2, "n_heads": 2, "embed_dims_per_head": 32, "n_queries": 32,  "n_levels": 2, "n_points": 2, "max_size": 15,                                  "dtype": "float16", "seed": 3114},
+    {"name": "hidden_p1_l2_f32",           "n": 2, "n_heads": 2, "embed_dims_per_head": 8,  "n_queries": 16,  "n_levels": 2, "n_points": 1, "spatial_shapes": [[6, 6], [2, 2]],             "dtype": "float32", "seed": 3115},
+    {"name": "hidden_q1_p4_f16",           "n": 1, "n_heads": 4, "embed_dims_per_head": 3,  "n_queries": 1,   "n_levels": 1, "n_points": 4, "spatial_shapes": [[5, 7]],                     "dtype": "float16", "seed": 3116}
+  ]
+}

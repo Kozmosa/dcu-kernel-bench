@@ -1,0 +1,97 @@
+id: "5002_conv2d_bwd"
+name: conv2d_bwd
+family: conv
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  标准 2D 卷积反向家族（NCHW、groups=1、无 bias）：前向
+  y = conv2d(x, weight, stride=(stride_h,stride_w), padding=(pad_h,pad_w),
+  dilation=(dil_h,dil_w))（out = floor((in + 2*pad - dil*(k-1) - 1)/stride)
+  + 1），给定上游梯度 dy = dL/dy，variant="dgrad" 时返回对输入的梯度
+  dx (N,C,H,W)，variant="wgrad" 时返回对权值的梯度 dw (out_c,C,R,S)。
+  forward(dy, weight, x) 为固定三输入签名，两方向均天然单张量输出（无拼接
+  打包）：dgrad 只消费 dy/weight（x 的数值不参与输出），wgrad 只消费 x/dy
+  （weight 的数值不参与输出），未消费张量仅提供形状约定。float32 输入输出；
+  H/W/R/S 允许 1、奇数、非 2 的幂；stride/dilation >= 1、padding >= 0 且
+  四向对称（前向 conv 的 (pad_h,pad_w) 语义，非对称 pre/post padding 不在
+  域内）。本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时
+  镜像到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的
+  原生 model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 3 --problem-id 5002 --backend triton），无需任何框架改动。starter
+  由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：helpers /
+  init_body / forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: dy,     dtype: float32, layout: contiguous, ndim: 4, shape: [N, out_c, out_h, out_w]}
+    - {name: weight, dtype: float32, layout: contiguous, ndim: 4, shape: [out_c, C, R, S]}
+    - {name: x,      dtype: float32, layout: contiguous, ndim: 4, shape: [N, C, H, W]}
+  outputs:
+    - {name: out, dtype: float32, layout: contiguous, ndim: 4, shape: "dgrad 时 [N, C, H, W]；wgrad 时 [out_c, C, R, S]（两方向均天然单张量，无打包拼接）"}
+  init_inputs:
+    - {name: variant,  dtype: str, layout: scalar}   # "dgrad" | "wgrad"
+    - {name: stride_h, dtype: int, layout: scalar}   # 缺省 1
+    - {name: stride_w, dtype: int, layout: scalar}   # 缺省 1
+    - {name: pad_h,    dtype: int, layout: scalar}   # 缺省 1
+    - {name: pad_w,    dtype: int, layout: scalar}   # 缺省 1
+    - {name: dil_h,    dtype: int, layout: scalar}   # 缺省 1
+    - {name: dil_w,    dtype: int, layout: scalar}   # 缺省 1
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {n: 4, c: 32, h: 16, w: 16, out_c: 64, r: 3, s: 3, stride_h: 1, stride_w: 1, pad_h: 1, pad_w: 1, dil_h: 1, dil_w: 1, variant: "dgrad", dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "各维 >= 1；R/S 允许 1（1x1 卷积）；H/W 允许 1、奇数、非 2 的幂、非 16 对齐"
+    - "一致性：dy 空间尺寸必须等于前向公式 out_h=floor((H+2*pad_h-dil_h*(R-1)-1)/stride_h)+1（out_w 同理）；且 H+2*pad_h >= dil_h*(R-1)+1、W+2*pad_w >= dil_w*(S-1)+1"
+    - "stride/dilation >= 1，padding >= 0；padding 为前向 conv 的四向对称 (pad_h,pad_w) 语义（非对称 pre/post padding 不在本题域内）"
+    - "dgrad 时 dx 数值与 x 无关、wgrad 时 dw 数值与 weight 无关——未消费张量的数值不得影响输出，其形状须与 io.inputs 一致"
+    - "输入值域为常规 randn 量级（无 inf/NaN）；float32 全程累加，不做半精度下转"
+
+tolerance:
+  float32: {atol: 1.0e-3, rtol: 1.0e-3}
+  compare: "输出为单张量 float32，dgrad/wgrad 均全量直接比较（无分段协议），判据 |out-ref| <= atol + rtol*|ref|；reference 在 float32 中对 F.conv2d 前向做 autograd 精确反传，生成实现以 float32 累加，二者仅差累加顺序"
+  note: >
+    容差依据（构建自检 tmp/build_check/5002_conv2d_bwd.py 实测，CPU float64
+    朴素 oracle 基准）：最深归约 case（wgrad n=8、out 33x33，按
+    n*out_h*out_w≈8.7k 项求和）的 fp32 累加顺序噪声为绝对 ~1.5e-3、相对
+    ~5e-6（出现于 |ref|≈280 的大值元素），1e-3+1e-3*|ref| 判据实测最坏
+    占用 0.34（≥3x 裕度）；隐藏 case 域内（归约 ≤660 项）最坏占用 0.02。
+    语义性错误（索引/padding/stride/dilation 错位）产生 O(1) 级偏差，远超
+    容差，可被可靠捕获。在线（搜索循环内）由 KernelBenchPaperEvaluator
+    判定：triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=
+    1e-4)，作用于 get_inputs 固定族（归约 576 项，fp32 噪声 ~3e-5）——
+    在线口径更紧但可行，在线结论仍不能替代终审。
+
+# 终审静态审计沿用（在线仅靠 Model docstring 软约束）；全局黑名单
+# （rocblas/hipblas*/miopen/hipdnn/cublas/cudnn/cutlass）由 static_audit.py
+# 自动取并集，此处列本题语义捷径
+forbidden:
+  - aiter
+  - torch.nn.functional.conv2d
+  - F.conv2d
+  - torch.conv2d
+  - torch.nn.Conv2d
+  - torch.nn.functional.conv_transpose2d
+  - F.conv_transpose2d
+  - torch.nn.ConvTranspose2d
+  - torch.nn.grad.conv2d_input
+  - torch.nn.grad.conv2d_weight
+  - aten.conv2d
+  - aten.convolution
+  - aten._convolution
+  - aten.conv_transpose2d
+  - aten.convolution_backward
+  - torch.autograd
+  - .backward(
+  - unfold
+  - F.fold
+  - torch.nn.functional.fold
+  - im2col
+  - col2im
+  - as_strided
+
+# 溯源（repo/commit/sha256/官方样例路径）完整记录见
+# benchmark/sources/5002_conv2d_bwd.yaml，题面元数据不重复携带库源标识

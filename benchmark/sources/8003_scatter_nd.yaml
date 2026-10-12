@@ -1,0 +1,63 @@
+task_id: "8003_scatter_nd"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/scatterND/scatterND.py
+      sha256: 03edf75a72976952fe516ce71b04fd83b29f9fdf46ad5c22fcc447ec05ff7b24
+      role: official_sample   # hipDNN graph.scatter_nd(data, indices, updates, reduction=NONE) 调用为覆盖写语义的唯一权威（样例仅执行不校验输出，未附 torch 参考）
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（clone + 高级索引 setitem 语义金标），不依赖任何外部源码
+  calls_closed_libs: false        # 题目本体不调用闭源库；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 已显式禁用 hipdnn
+  builds_standalone: true
+  has_reference: true             # reference.Model 内联 ScatterND 覆盖写语义；构建自检另用逐元素 Python 循环 + 标量定位赋值的独立 oracle 验证（与批量高级索引 setitem 不同代码路径）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集与 variant：单一样例 python/scatterND/scatterND.py 单独成题——
+    口径为 2-D (4,4) float32 data + int64 (2,2) 全索引坐标 [[0,0],[2,3]] +
+    同 dtype (2,) updates、graph.scatter_nd(data, indices, updates,
+    reduction=NONE)。全索引形式（indices.shape[-1] = data 维数，一行坐标
+    唯一确定一个元素位置、updates 一维 (K,)）以样例为准入题口径。
+    语义依据与冲突处理：样例只构建并执行 graph、不校验输出，也无 torch
+    参考可对照，语义由算子通名的统一定义确定——即 ONNX ScatterND 的
+    reduction=none 路径（hipDNN 图算子与之一一对应，样例显式传入
+    reduction=NONE），题目 reference 以 clone + 高级索引 setitem 内联，
+    构建自检用逐元素 Python 循环 + 标量定位赋值的独立 oracle 实测逐位
+    一致（无源码-测试冲突问题）。写入语义固定为覆盖写；重复 indices 的
+    处理：样例两行坐标互异、NONE 语义只定义"命中即覆盖"，重复元组下哪个
+    写入生效在 ONNX/PyTorch 语义中均为未定义——故输入域排除重复元组
+    （make_inputs 用 randperm 无放回抽样保证 K 个坐标两两互异），docstring
+    声明实现无需为其定义行为，隐藏 case 全部坐标互异，规避语义含糊。
+    输出契约：本算子天然单输出（out 与 data 同形状同 dtype），forward
+    返回单张量，无需多输出打包。容差：三档 dtype 全部 atol=rtol=0——纯
+    搬移无算术，未命中位置与 data、命中位置与 updates 逐位一致（构建
+    自检实测 reference vs oracle 最大绝对偏差 0、torch.equal 全真）。
+    dtype 域：样例为 FLOAT，按纯搬移语义补充 float16/bfloat16（数值安全，
+    逐位一致契约已在 task.yaml tolerance 说明）。
+    与 FlagGems 补齐路线的重叠：scatter_nd 属 FlagGems 已覆盖的通用
+    Triton 算子（FlagGems 补齐路线可作交叉验证口径）；本题考察生成侧
+    手写坐标->线性偏移寻址能力，生成侧禁用 torch.scatter / scatter_add /
+    scatter_reduce / index_put / torch.put / put_ / index_copy（含
+    index_copy_）/ torch_scatter 等全部库级写原语与扩展包（复核补充：
+    Tensor.put_ / Tensor.index_copy_ 经扁平化偏移可单步完成核心散写，
+    torch 2.14 CPU 实测与 reference 逐位一致，故一并禁用）。
+    留作后续变体：累加写（样例 API 的 reduction 归约参数还有累加模式，
+    样例未覆盖，语义需另立依据）、部分索引形式（indices.shape[-1] <
+    data 维数、updates 升维为切片形状）、Scatter / ScatterElements（沿
+    单轴写入，与本题全索引形式不同家族）、训练反向（scatter-add 梯度
+    累积）。8002_gather 的 sources 已将本样例预留为"scatterND 写路径
+    独立成题"，本题即该预留项落地。
+    case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后调
+    题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，
+    消费顺序 data -> indices -> updates；本题 Model 无构造超参，
+    task.yaml io.init_inputs 为空，audit_model_class 无参构造 Model）。
+    溯源补记：本地快照经 developer.sourcefind.cn 镜像克隆（origin remote
+    为该镜像），HEAD 即上述 commit；sha256 为该 commit 下本地检出文件
+    （Windows 检出，CRLF 行尾）的 sha256sum——HEAD 中 LF 内容的 sha256
+    为 d3b3193329af69c6d387896f8293ae64e87dbc9ece7143cfd85df1576f5a83bf，
+    与 8002_gather 的记录口径一致（同一快照、同为 CRLF 检出文件）。

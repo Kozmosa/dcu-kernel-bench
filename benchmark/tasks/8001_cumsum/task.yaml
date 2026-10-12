@@ -1,0 +1,85 @@
+id: "8001_cumsum"
+name: cumsum
+family: scan
+impl_lang: triton
+entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
+difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
+
+description: >
+  Cumsum 前缀和（inclusive scan）：对 1–4 维输入沿 dim 维做 inclusive
+  累加，out 在 dim 维第 i 个位置等于该维前 i+1 个元素的代数和（含当前
+  元素），其余维度各条链独立；累加一律在 float32 中进行，输出 cast 回
+  输入 dtype（float16/bfloat16 输入同样先 cast 到 float32 累加再 cast
+  回）。输出与输入同形状、同 dtype、contiguous，forward 返回单个张量
+  （本算子天然单输出，无需多输出打包）。dim 为 Model 构造超参（torch
+  惯例，非负从 0 起、负数从末尾计数），固定 shape 族取 dim=2、float32
+  （与样例口径一致）。float32 为主 dtype，另含 float16/bfloat16（float32
+  累加契约保证其数值安全，见 tolerance）。scan 维长度任意（含 1、非 2 的
+  幂、素数、超出单 block 容量的长轴，需掩码 / 分块扫描）。本题为自包含
+  KernelBench 题目文件（reference.py 即题目文件，同时镜像到
+  benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
+  model_class 路径（--kernelbench-root benchmark/kernelbench_compat
+  --level 2 --problem-id 8001），无需任何框架改动。starter 由框架 loader
+  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
+  forward_stmt_N），本任务包不单独提供 starter。
+
+io:
+  inputs:
+    - {name: x, dtype: [float32, float16, bfloat16], layout: contiguous, ndim: "1-4", shape: "[*, L, *]：scan 维长度 L ∈ [1, 65536]，其余各维 >= 1"}
+  outputs:
+    - {name: out, dtype: same_as_x, layout: contiguous, ndim: same_as_x, shape: "与 x 同形（dim 维上为 inclusive 前缀和）"}
+  init_inputs:
+    - {name: dim, dtype: int, layout: scalar}   # scan 维，torch 惯例（负数从末尾计数）；固定 shape 族取 2
+
+shape:
+  # get_inputs() 固定的 shape 族（在线评测单一实例；shape 全域约束见下）
+  fixed_family: {shape: [8, 16, 512, 128], dim: 2, dtype: "float32"}
+  dynamic: true
+  invariants:
+    - "ndim ∈ [1, 4]；scan 维长度 L ∈ [1, 65536]；总元素数 ≤ 2^25（允许非 2 的幂、素数长度、L=1 等边界，需掩码保证越界 lane 不进前缀和）"
+    - "dim 按 torch 惯例指向既有维度（非负从 0 起，负数从末尾计数），同一 case 内固定"
+    - "dtype ∈ {float32, float16, bfloat16}，float32 为主；float16/bfloat16 的累加同样在 float32 中进行后 cast 回输入 dtype"
+    - "输入值为常规 randn 量级（无 inf/NaN）；输入与输出均 contiguous，out 与 x 同形同 dtype"
+
+tolerance:
+  float32:  {atol: 1.0e-4, rtol: 1.0e-3}
+  float16:  {atol: 2.0e-2, rtol: 2.0e-2}
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
+  compare: "reference 在 float32 中累加后 cast 回输入 dtype 再比较；输出与输入同形同 dtype，单张量逐元素比较（无分段打包）"
+  note: >
+    fp32 容差按累加顺序差异放宽：reference 的 torch.cumsum（顺序实现）与
+    手写 Triton kernel 的分块并行 scan 在 float32 中求和顺序不同，构建期
+    实测（scan 长度 L=512/999/1021/4099/65536，块 64/128/1024 三种分块，
+    randn 输入）两者对 float64 真值的最大绝对偏差 ≈4.2e-5（L=65536），
+    近零前缀处的绝对偏差由 atol 分量覆盖；atol=1e-4/rtol=1e-3 下全部
+    组合的 allclose 最大裕度 0.075（≥13 倍余量）。fp16/bf16 在 float32
+    累加契约下与 float64 oracle cast 后逐元素全等（实测 0 mismatch），
+    容差沿用 atol=rtol=2e-2 覆盖 cast 舍入与 1 ULP 级顺序差异。在线
+    （搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与
+    模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线
+    结论不能替代终审。
+
+# 终审静态审计：库级 scan 原语与已知等价绕过路径（FFT 卷绕、下三角矩阵乘、
+# 全 1 conv1d、numpy）连同 tl 内建 scan 一并禁用——本题考察手写 scan；
+# hipdnn 已在全局黑名单，此处显式列出以自文档。审计剥除 docstring 与注释
+# 后按字面子串匹配（模型 docstring 中的禁用列表声明不会被误杀）。
+forbidden:
+  - torch.cumsum
+  - .cumsum(
+  - torch.cumulative_sum
+  - .cumulative_sum(
+  - aten.cumsum
+  - aten.cumulative_sum
+  - tl.cumsum
+  - tl.associative_scan
+  - torch.fft
+  - torch.matmul
+  - torch.mm
+  - torch.bmm
+  - torch.einsum
+  - conv1d(
+  - numpy
+  - hipdnn
+
+# 溯源（repo/commit/sha256/样例路径）完整记录见
+# benchmark/sources/8001_cumsum.yaml，题面元数据不重复携带库源标识

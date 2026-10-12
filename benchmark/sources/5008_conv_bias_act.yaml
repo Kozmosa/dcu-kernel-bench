@@ -1,0 +1,62 @@
+task_id: "5008_conv_bias_act"
+source:
+  repo: opendtk/hipdnn_samples
+  remote: https://github.com/opendtk/hipdnn_samples
+  commit: b67a3f96f4f11c34829929387e73739d2853b76c
+  license: 样例仓库未随附 LICENSE 文件，官方样例集，溯源以 commit 为准
+  files:
+    - path: python/conv_fusion/conv_bias_relu.py
+      sha256: 6edc578ac3179b4d93d00be9e5c5d991b516249cbfdcde6ab20eb862540f22ed
+      role: semantic_spec   # 主样例：conv_fprop + add(bias) + relu——NCHW、io fp16（hipdnn HALF）、intermediate/compute fp32（hipdnn FLOAT）、stride/pad/dil=(1,1)/(1,1)/(1,1)、bias (1,K,1,1)
+    - path: python/conv_fusion/conv_bias_swish.py
+      sha256: 4f4ebcde5a711316245003bad181bc4f2055fd7cc4fbb1a2a244dd997b201f08
+      role: semantic_spec   # variant=swish 口径：与主样例同图，激活换 graph.swish（z*sigmoid(z)）
+    - path: python/conv_fusion/conv_bias_prelu.py
+      sha256: 0476ebe6f532016c2d9398cd7fe7d21c5670c467d59e5c0125b2c17fc278c921
+      role: semantic_spec   # variant=prelu 口径：与主样例同图，激活换 graph.prelu（图级标量 negative_slope=0.01）
+
+admission:
+  core_compute_in_source: true    # 题目 reference.py 自包含纯 PyTorch（F.conv2d fp32 中间 + bias 广播 + 逐元素激活的 ATen 组合，即语义金标本体，不依赖任何闭源库）；生成侧核心计算要求在提交文件内以 Triton kernel 融合完成（task.yaml forbidden 强制）
+  calls_closed_libs: false        # 题目本体不调用 hipDNN/MIOpen；样例的 hipDNN graph 设备路径仅作语义口径与性能基线方向，不作为 core_compute 证据，生成侧 forbidden 明确禁用 miopen/hipdnn
+  builds_standalone: true
+  has_reference: true             # 语义金标内联于题目文件 Model（fp32 eager ATen 组合，reference 不受 forbidden 约束）
+  decision: admitted
+  reviewer: "批量准入工作流（构建/复核独立 agent）"
+  date: "2026-10-12"
+  note: >
+    题面子集：hipDNN 样例集 python/conv_fusion 融合族的 conv+bias+逐元素
+    激活前向三例——conv_bias_relu.py（variant="relu"：conv_fprop →
+    add(bias) → relu）、conv_bias_swish.py（variant="swish"：同图，激活换
+    graph.swish）、conv_bias_prelu.py（variant="prelu"：同图，激活换
+    graph.prelu，标量 negative_slope=0.01）。语义口径与冲突处理：三样例
+    完全同构（同一 build 骨架，仅激活 op 不同），以图拓扑为唯一权威——
+    conv_fprop 为 NCHW cross-correlation（stride/padding/dilation =
+    (1,1)/(1,1)/(1,1)，H_out = H - R + 3、W_out = W - S + 3），bias 以
+    (1,K,1,1) 张量经 graph.add 广播相加，激活在 fp32 intermediate 上逐元素
+    施加（io HALF / intermediate+compute FLOAT），输出单张量 (N,K,H_out,
+    W_out)、dtype 同 io；swish 取 z*sigmoid(z)，prelu 按样例的标量
+    negative_slope 语义取 z>0 直通否则 slope*z（等价 negative_slope=slope
+    的 leaky-ReLU）。x/w/bias 在样例中均为 torch.rand 直接生成的自由张量
+    （graph 输入，非模块参数），题目沿用为 forward 输入。与样例的两处
+    有意偏差：其一，样例输入为 torch.rand 的 [0,1) 均匀分布，题目改用
+    randn——使激活负半轴路径（relu/prelu 的 slope 分支）获得覆盖，值分布
+    不属于图语义；其二，按题目约束把 prelu 的 slope 从图级标量参数改为
+    forward 输入的 0 维标量张量（非模块参数，缺省值同为 0.01、case 可变，
+    relu/swish 下为垃圾输入不得影响输出），per-channel 斜率 PReLU 留作
+    后续。dtype/shape 域：样例 dtype 仅 fp16（hipdnn HALF），本题以 fp16
+    为主并补充 bfloat16 与 float32（float32 与样例的 FLOAT compute 口径
+    一致、数值语义安全；bf16 依赖 2e-2 容差，已在 tolerance 分档说明）；
+    样例维度 n=1/c=16/h=w=16/k=16/r=s=3 保留在域内（隐藏 case 覆盖），
+    公开固定族放宽为 n=2/h=w=32，全域允许各维 >= 1 的非 2 幂/素数/边界值
+    组合（含全 1 边界与 H_out=1），仅要求输出维为正。留作后续题：融合族
+    其余组合——conv_bias_add / conv_bias_add_relu（双 bias）、
+    conv_bias_asymmetric、conv_bias_mul_bias_add(_relu)、
+    conv_bias_leakyrelu_resize / resize_conv_bias_leakyrelu、
+    conv_bias_prelu_add、pad_conv(_bias) / pad_conv_bias_leakyrelu、
+    avgpool_conv_bias_leakyrelu、convint8_bias 系（int8 量化族）与 cpp/
+    conv_fusion 系；纯 conv 前向见 5001、conv 反向见 5002，均与本题不
+    重叠。case 文件为 {name + 语义字段} 字典，消费者剥离 name 元数据键后
+    调题目文件内 make_inputs(**fields) 确定性生成（torch.Generator(seed)，
+    消费顺序 x -> weight -> bias，slope 由字段直接物化、不消费 RNG）；
+    Model 构造超参由 audit_model_class.resolve_init_args 按 task.yaml
+    io.init_inputs 字段名从 case 取（仅 variant）。
