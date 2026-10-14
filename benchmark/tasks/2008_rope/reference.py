@@ -21,7 +21,7 @@ class Model(nn.Module):
       输入 x (S, B, H, D) 与 freqs (S, 1, 1, F)，freqs 在 B、H 维上广播。
       旋转宽度 R = F * 2（reuse_freqs_front_part=True）或 R = F（False）。
       将最后一维（长 D）拆为「旋转段」（长 R）与「直通段」（长 D - R）：
-      nope_first=False 时旋转段在前 D 个通道，True 时在后 R 个通道。
+      nope_first=False 时旋转段在前 R 个通道，True 时旋转段在后 R 个通道。
       角度行 Θ（长 R）：reuse=False 时 Θ = freqs，每个旋转通道一个角度；
       reuse=True 时由 F = R/2 个角度扩展成 R 列——NEOX 风格按整段平铺
       （[a, b] -> [a, b, a, b]，前后半各用一遍），GPTJ 风格按相邻重复
