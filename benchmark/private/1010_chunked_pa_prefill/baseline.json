@@ -43,9 +43,52 @@
       },
       "max_diff_vs_reference": 0.0,
       "compare_mode": "global"
+    },
+    {
+      "case": "perf_chunk8_h32kv8_d128_bs32_q512c1536_f16",
+      "us": 9601.754,
+      "mean_us": 9603.913,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 4e-06,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_mha4_h32kv32_d128_bs32_q512c512_f16",
+      "us": 1667.759,
+      "mean_us": 1669.796,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 1.5e-05,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_gqa32_h16kv2_d128_bs64_q256c2048_bf16",
+      "us": 11497.271,
+      "mean_us": 11495.757,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 6.1e-05,
+      "compare_mode": "global"
     }
   ],
   "impls": [
+    "aiter",
     "torch_eager"
   ],
   "environment": {

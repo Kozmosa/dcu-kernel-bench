@@ -43,9 +43,52 @@
       },
       "max_diff_vs_reference": 0.0,
       "compare_mode": "global"
+    },
+    {
+      "case": "perf_m4096_n7168_k2048_bf16",
+      "us": 2645.998,
+      "mean_us": 2645.203,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 1.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_m128_n7168_k2048_bf16",
+      "us": 266.72,
+      "mean_us": 268.992,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.5,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_m2048_n4096_k4096_bf16",
+      "us": 1728.799,
+      "mean_us": 1729.113,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 1.0,
+      "compare_mode": "global"
     }
   ],
   "impls": [
+    "aiter",
     "torch_eager"
   ],
   "environment": {

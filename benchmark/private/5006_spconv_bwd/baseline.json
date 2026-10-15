@@ -1,5 +1,57 @@
 {
   "task_id": "5006_spconv_bwd",
-  "status": "placeholder",
-  "baselines": []
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_dgrad_dense_n8192_c64_k27",
+      "us": 11535.757,
+      "mean_us": 12053.092,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 5,
+        "repeat_iters": 20,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_wgrad_dense_n8192_c128_k9",
+      "us": 3685.758,
+      "mean_us": 3687.831,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 5,
+        "repeat_iters": 20,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_dgrad_wide_n16384_c32_k9",
+      "us": 4303.759,
+      "mean_us": 4308.319,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 5,
+        "repeat_iters": 20,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    }
+  ],
+  "impls": [
+    "torch_eager"
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  }
 }

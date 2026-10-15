@@ -4,8 +4,8 @@
   "baselines": [
     {
       "case": "perf_llm_mlp_deep_k_f16",
-      "us": 1993.68,
-      "mean_us": 1995.205,
+      "us": 1997.2,
+      "mean_us": 1998.746,
       "impl": "torch_eager",
       "timing": {
         "warmup_iters": 10,
@@ -18,8 +18,8 @@
     },
     {
       "case": "perf_wide_out_f16",
-      "us": 3678.48,
-      "mean_us": 3679.76,
+      "us": 3675.439,
+      "mean_us": 3676.032,
       "impl": "torch_eager",
       "timing": {
         "warmup_iters": 10,
