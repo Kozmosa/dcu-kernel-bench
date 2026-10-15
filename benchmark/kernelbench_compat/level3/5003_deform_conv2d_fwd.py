@@ -97,10 +97,13 @@ class Model(nn.Module):
         bf = bias.to(torch.float32)
 
         # 每卷积核位置的基础感受野坐标（未加偏移），行主序 p = i*S + j
-        base_y = (torch.arange(h_out, dtype=torch.float32) * sh - ph).view(1, 1, h_out, 1) \
-            + torch.arange(r, dtype=torch.float32).view(r, 1, 1, 1) * dh      # (r, 1, h_out, 1)
-        base_x = (torch.arange(w_out, dtype=torch.float32) * sw - pw).view(1, 1, 1, w_out) \
-            + torch.arange(s, dtype=torch.float32).view(1, s, 1, 1) * dw      # (1, s, 1, w_out)
+        # device=dev 必需：这些坐标要与已在设备上的 off 相加，漏 device 会在
+        # CUDA/DCU 上抛 "Expected all tensors to be on the same device"（CPU 上无感）
+        dev = xf.device
+        base_y = (torch.arange(h_out, dtype=torch.float32, device=dev) * sh - ph).view(1, 1, h_out, 1) \
+            + torch.arange(r, dtype=torch.float32, device=dev).view(r, 1, 1, 1) * dh      # (r, 1, h_out, 1)
+        base_x = (torch.arange(w_out, dtype=torch.float32, device=dev) * sw - pw).view(1, 1, 1, w_out) \
+            + torch.arange(s, dtype=torch.float32, device=dev).view(1, s, 1, 1) * dw      # (1, s, 1, w_out)
 
         # 叠加逐位置偏移（偶数通道 dy、奇数通道 dx）→ 采样坐标 (n, R*S, H_out, W_out)
         y_coord = (base_y + off[:, 0::2].reshape(n, r, s, h_out, w_out))
@@ -115,8 +118,8 @@ class Model(nn.Module):
         wx = x_coord - ix0.to(torch.float32)
         iy1 = iy0 + 1
         ix1 = ix0 + 1
-        n_idx = torch.arange(n).view(n, 1, 1, 1, 1)
-        c_idx = torch.arange(c).view(1, c, 1, 1, 1)
+        n_idx = torch.arange(n, device=xf.device).view(n, 1, 1, 1, 1)
+        c_idx = torch.arange(c, device=xf.device).view(1, c, 1, 1, 1)
 
         def corner(iy, ix, wgt):
             # 单角点采样：越界角点权重置 0；clamp 仅防索引越界（乘 0 抵消）

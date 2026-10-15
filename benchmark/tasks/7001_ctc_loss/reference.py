@@ -92,26 +92,30 @@ class Model(nn.Module):
         L = target.numel()
         S = 2 * L + 1
         neg_inf = float("-inf")
+        # device=dev 必需：本函数内构造的所有中间张量都要与已在设备上的 logp_b/p_b
+        # 同设备；漏 device 会在 CUDA/DCU 上抛 "Expected all tensors to be on the
+        # same device"（CPU 上跑得通，所以本地单测发现不了）
+        dev = logp_b.device
 
-        ext = torch.empty(S, dtype=torch.long)
+        ext = torch.empty(S, dtype=torch.long, device=dev)
         ext[0::2] = self.blank
         ext[1::2] = target
 
         lp_ext = logp_b[:tb, ext]                      # (tb, S)
-        alpha = torch.full((tb, S), neg_inf, dtype=torch.float32)
-        beta = torch.full((tb, S), neg_inf, dtype=torch.float32)
+        alpha = torch.full((tb, S), neg_inf, dtype=torch.float32, device=dev)
+        beta = torch.full((tb, S), neg_inf, dtype=torch.float32, device=dev)
 
         # 前向递推（时间维步进，状态维整体向量化）
         alpha[0, 0] = lp_ext[0, 0]
         alpha[0, 1] = lp_ext[0, 1]
         for t in range(1, tb):
             prev = alpha[t - 1]
-            left = torch.full((S,), neg_inf, dtype=torch.float32)
+            left = torch.full((S,), neg_inf, dtype=torch.float32, device=dev)
             left[1:] = prev[:-1]
-            jump = torch.full((S,), neg_inf, dtype=torch.float32)
+            jump = torch.full((S,), neg_inf, dtype=torch.float32, device=dev)
             jump[2:] = prev[:-2]
             ok = (ext[2:] != self.blank) & (ext[2:] != ext[:-2])
-            jump[2:] = torch.where(ok, jump[2:], torch.full((S - 2,), neg_inf, dtype=torch.float32))
+            jump[2:] = torch.where(ok, jump[2:], torch.full((S - 2,), neg_inf, dtype=torch.float32, device=dev))
             alpha[t] = lp_ext[t] + torch.logsumexp(torch.stack((prev, left, jump)), dim=0)
 
         # 后向递推（beta 不含本帧发射：alpha+beta 对过状态 s 的完整路径
@@ -120,23 +124,23 @@ class Model(nn.Module):
         beta[tb - 1, S - 2] = 0.0
         for t in range(tb - 2, -1, -1):
             nxt = beta[t + 1] + lp_ext[t + 1]
-            right = torch.full((S,), neg_inf, dtype=torch.float32)
+            right = torch.full((S,), neg_inf, dtype=torch.float32, device=dev)
             right[:-1] = nxt[1:]
-            jump = torch.full((S,), neg_inf, dtype=torch.float32)
+            jump = torch.full((S,), neg_inf, dtype=torch.float32, device=dev)
             jump[:-2] = nxt[2:]
             ok = (ext[:-2] != self.blank) & (ext[:-2] != ext[2:])
-            jump[:-2] = torch.where(ok, jump[:-2], torch.full((S - 2,), neg_inf, dtype=torch.float32))
+            jump[:-2] = torch.where(ok, jump[:-2], torch.full((S - 2,), neg_inf, dtype=torch.float32, device=dev))
             beta[t] = torch.logsumexp(torch.stack((nxt, right, jump)), dim=0)
 
         log_z = torch.logsumexp(alpha[tb - 1] + beta[tb - 1], dim=0)
         gamma = torch.exp(alpha + beta - log_z)        # (tb, S) 状态后验
 
         # dL/dp[t,k] = -(1/p[t,k]) * sum_{s: ext[s]=k} gamma[t,s]
-        grad = torch.zeros(tb, C, dtype=torch.float32)
+        grad = torch.zeros(tb, C, dtype=torch.float32, device=dev)
         grad.index_add_(1, ext, -gamma)
         grad = grad / p_b[:tb]                         # 除以 p（probs 严格为正）
 
-        grad_full = torch.zeros(max_time, C, dtype=torch.float32)
+        grad_full = torch.zeros(max_time, C, dtype=torch.float32, device=dev)
         grad_full[:tb] = grad
         return -log_z, grad_full
 
@@ -150,8 +154,8 @@ class Model(nn.Module):
         max_time, batch, num_classes = pf.shape
         logp = torch.log(pf)
 
-        losses = torch.empty(batch, dtype=torch.float32)
-        grads = torch.zeros(batch, max_time, num_classes, dtype=torch.float32)
+        losses = torch.empty(batch, dtype=torch.float32, device=pf.device)
+        grads = torch.zeros(batch, max_time, num_classes, dtype=torch.float32, device=pf.device)
         offset = 0
         for n in range(batch):
             tb = int(input_lengths[n])
