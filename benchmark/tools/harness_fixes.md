@@ -107,14 +107,37 @@ PyramidKernel 的 **root 节点就是这份参考的直通**，所以 root 自�
 
 ## 部署与复验（**尚未执行**）
 
-两处修复都在本地仓库，未推 git、未部署到 DCU。
+两处修复都只在本地，未推 git、未部署到 DCU。
+
+修复落地位置：
+
+| 缺陷 | 仓库 / 文件 | 形态 |
+|---|---|---|
+| 1 脚手架 | `../PyramidKernel/pyramidkernel/core/loader.py` | 已提交 `77b7453` |
+| 2 no_grad | `../KernelBench-main/src/kernelbench/eval.py` | 工作树改动（该目录无独立仓库）+ 本仓库的 `kernelbench_no_grad.patch` |
+
+部署步骤：
+
+```powershell
+# 1) 重建 kernelbench.tar —— 它由 push.ps1 上传，是**制品**、不是现场构建的。
+#    已验证：tar 内 eval.py 与 KernelBench-main 版除本改动外逐字节相同，
+#    顶层 13 项也完全一致，故重建不会夹带别的改动。
+cd C:\Users\panyp\Desktop\agent4kernel
+tar -cf dcudeploy\kernelbench.tar --exclude=.git -C KernelBench-main .
+tar -tf dcudeploy\kernelbench.tar | Select-String "src/kernelbench/eval.py"   # 核对
+
+# 2) 上传。push.ps1 用 `git archive HEAD` 打包 PyramidKernel，故 loader 修复
+#    必须先 commit（已完成）。不要加 -SkipPyramid。
+cd dcu-kernel-bench-main\.dcu_runs\deploy
+.\push.ps1 -Server ssh.zzai.scnet.cn -Port 11556 -User root -Password <pwd>
+```
 
 ```bash
-# 1) 修复 1 已落到 ../PyramidKernel/pyramidkernel/core/loader.py
-#    修复 2 已落到 ../KernelBench-main/src/kernelbench/eval.py
-# 2) 重建 kernelbench.tar —— 该 tar 是 push.ps1 上传的**制品**，不是现场构建的。
-#    已核对：tar 内的 eval.py 与 KernelBench-main 版除本改动外逐字节相同，
-#    顶层 13 项也完全一致，故从 KernelBench-main 重建不会夹带别的改动。
-# 3) 上传（push.ps1 会用 `git archive HEAD` 打包 PyramidKernel，故需先 commit）
-# 4) 重跑那 9 道，确认 6 道脚手架题 + 3 道反向题都能建起合法基线
+# 3) 重跑这 9 道，确认 6 道脚手架题与 3 道反向题都能建起合法 root 基线
+#    （预期：3 道反向题的 root 变成 correct/root-only，speedup ≈1.0；
+#      6 道脚手架题不再在 compile 阶段报 SyntaxError/IndentationError）
 ```
+
+判别标准：修好后这 9 道的失败若仍存在，**不应**再是 `stage=compile` 的
+`SyntaxError`/`IndentationError`，也不应再是 `root` 节点的
+`element 0 of tensors does not require grad and does not have a grad_fn`。
