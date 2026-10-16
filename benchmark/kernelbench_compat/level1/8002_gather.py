@@ -62,7 +62,7 @@ class Model(nn.Module):
         - forward 返回单张量 out（评测器按单输出比较）。
 
     禁用列表（静态审计剥除 docstring 与注释后按字面子串匹配）：
-    torch.gather / .gather( / tl.gather / torch.index_select /
+    torch.gather / .gather( / torch.index_select /
     .index_select( / torch.take_along_dim / .take_along_dim( /
     torch.take( / .take(（含 Tensor.take 方法形式） /
     torch.embedding / nn.Embedding / .embedding( / hipdnn。

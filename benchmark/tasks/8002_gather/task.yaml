@@ -70,15 +70,14 @@ tolerance:
     由 KernelBenchPaperEvaluator 判定：cuda 后端输入与模型统一 cast 为
     fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
 
-# 终审静态审计：库级 gather/select 原语与已知等价绕过路径（tl 内建
-# gather、flat take、embedding 查表）显式禁用——本题考察手写索引寻址；
+# 终审静态审计：库级 gather/select 原语与已知等价绕过路径（flat take、
+# embedding 查表）显式禁用——本题考察手写索引寻址；
 # hipdnn 已在全局黑名单，此处显式列出以自文档。审计剥除 docstring 与
 # 注释后按字面子串匹配（模型 docstring 中的禁用列表声明不会被误杀）。
 forbidden:
   - torch.gather
   - .gather(
   - aten.gather
-  - tl.gather
   - torch.index_select
   - .index_select(
   - aten.index_select

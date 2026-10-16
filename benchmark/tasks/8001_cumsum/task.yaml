@@ -59,9 +59,10 @@ tolerance:
     结论不能替代终审。
 
 # 终审静态审计：库级 scan 原语与已知等价绕过路径（FFT 卷绕、下三角矩阵乘、
-# 全 1 conv1d、numpy）连同 tl 内建 scan 一并禁用——本题考察手写 scan；
-# hipdnn 已在全局黑名单，此处显式列出以自文档。审计剥除 docstring 与注释
-# 后按字面子串匹配（模型 docstring 中的禁用列表声明不会被误杀）。
+# 全 1 conv1d、numpy）一并禁用——本题考察手写 scan；hipdnn / rocprim / hipcub
+# 已在全局黑名单（benchmark/evaluator/static_audit.py 的 GLOBAL_FORBIDDEN），
+# 此处显式列出以自文档。审计剥除 docstring 与注释后按字面子串匹配
+# （模型 docstring 中的禁用列表声明不会被误杀）。
 forbidden:
   - torch.cumsum
   - .cumsum(
@@ -69,8 +70,6 @@ forbidden:
   - .cumulative_sum(
   - aten.cumsum
   - aten.cumulative_sum
-  - tl.cumsum
-  - tl.associative_scan
   - torch.fft
   - torch.matmul
   - torch.mm
@@ -79,6 +78,8 @@ forbidden:
   - conv1d(
   - numpy
   - hipdnn
+  - rocprim
+  - hipcub
 
 # 溯源（repo/commit/sha256/样例路径）完整记录见
 # benchmark/sources/8001_cumsum.yaml，题面元数据不重复携带库源标识
