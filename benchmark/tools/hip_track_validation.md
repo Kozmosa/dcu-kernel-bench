@@ -136,9 +136,12 @@ bash /root/dcudeploy/finish_hip20.sh    # 对照 -> 合并回 dcukb_final -> 全
 
 ## 后续待办
 
-- **应用脚手架补丁**（`.dcu_runs/deploy/apply_loader_fix.py --apply`）后重跑那 6 道
-  非法脚手架的题 —— 它们现在的失败完全不能反映 Agent 能力。
-- 3 道 autograd 题（1032/5002/5006）需要处理 `KernelBench/eval.py` 的
-  `torch.no_grad()` 与求导参考的冲突。
+- 两处 harness 缺陷**已在本地修复**（脚手架多行签名截断、评测器 `no_grad` 与
+  autograd 型参考冲突），根因/验证/部署步骤见 **`harness_fixes.md`**。
+  两处都**未推 git、未部署**：
+  - PyramidKernel `pyramidkernel/core/loader.py` 已打补丁（本地 297 pass / 0 fail）
+  - KernelBench `src/kernelbench/eval.py` 已改 `no_grad` → `enable_grad`
+  - 部署时需从 `../KernelBench-main` 重建 `kernelbench.tar`（该 tar 是上传制品）
+- 修复部署后重跑那 9 道（6 道脚手架非法 + 3 道反向），确认它们能建起合法 root 基线。
 - PyramidKernel 的默认 `CUDA_CU_SRC` 模板仍 include `<cuda_runtime.h>`（属该仓库的
   可改进项，本次未动）。
