@@ -26,8 +26,7 @@ description: >
   同时镜像到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel
   的原生 model_class 路径（--kernelbench-root benchmark/kernelbench_compat
   --level 3 --problem-id 2011），无需任何框架改动。starter 由框架 loader
-  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
-  forward_stmt_N），本任务包不单独提供 starter。
+  从 Model 自动生成 ModelNew scaffold（锚点：user_helpers / cuda_cpp / cuda_cu / init_body / forward_stmt_N），本任务包不单独提供 starter。
 
 io:
   inputs:
