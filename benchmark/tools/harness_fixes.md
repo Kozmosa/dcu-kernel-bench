@@ -170,7 +170,7 @@ cd dcu-kernel-bench-main\.dcu_runs\deploy
 - `element 0 of tensors does not require grad`：修复前 3 道（1032/5002/5006）→ 修复后 **0**
 - 5 道拿到真实加速比，6 道 best 落在非 root 的 `phase2_n*` 节点
 
-### 这次重跑暴露的两个**新**缺陷（未修）
+### 这次重跑暴露的缺陷 3（已修，未部署）
 
 **缺陷 3：计时路径仍包在 `no_grad` 里** —— 4 道反向题（1032/5002/5004/5006）的
 `reference_runtimes` 是 `{'torch_eager': None}`，即参考实现**测不出时间**，
@@ -187,4 +187,66 @@ cd dcu-kernel-bench-main\.dcu_runs\deploy
 实现（best 都是非 root 且 correct），但框架失去了可比基线。
 涉及 `PyramidKernel` 的 `loader.py`，与缺陷 1 同一处逻辑。
 
-两个缺陷都不影响"这 9 道不再失败"的结论（9/9 `best_correct=True`），但都值得修。
+两个缺陷都不影响"这 9 道不再失败"的结论（9/9 `best_correct=True`），但都值得修 ——
+**现已一并修复，见下节**。
+
+---
+
+## 全量归因：66 道里 13 道的 root 基线不合法（2026-10-16 补充）
+
+顺着缺陷 3/4 回扫 `runs/dcukb_final` 全 66 道，把 `root_correct=False` 的**全部**列出来
+并归类。结论：**13 道**，而其中只有 4 道被 Agent 自己绕过去了（best 非 root 且 correct），
+另 9 道在框架看来就是"完全失败"。
+
+| 归因 | 道数 | 题 | 对应修复 |
+|---|---|---|---|
+| D1 脚手架语法错 | 7 | 5003 5004 5005 5007 5008 5009 6001 | 修复 1（已部署验证） |
+| D2/D3 `no_grad` 冲掉 autograd 参考 | 3 | 1032 5002 5006 | 修复 2（已部署验证） |
+| D4 缺辅助方法 | 1 | **7001_ctc_loss** | 修复 4 |
+| D5 缺模块级定义 | 2 | **3006_moe_op_mxfp4**、**4005_fused_mxfp4_quant** | 修复 5 |
+
+> `7001_ctc_loss` 早前那轮全量里 root 就已经是
+> `AttributeError: 'ModelNew' object has no attribute '_ctc_one'` —— 它靠 Agent 拿到
+> 1212x 才没暴露问题，所以缺陷 4 影响的是 3 道（5004/5009/7001），不是当时看到的 2 道。
+
+### 缺陷 5：脚手架丢掉 `Model` 依赖的模块级定义
+
+**现象**：`3006` 的 root 报 `NameError: name '_dequant_mxfp4' is not defined`，
+`4005` 报 `name '_rmsnorm' is not defined`。
+
+**根因**：`_extract_imports` 只收集 `Import` / `ImportFrom` 节点，**模块级的函数定义与
+常量赋值全都进不了脚手架**，于是 `forward` 一调用模块级 helper 就 NameError。
+
+**修复**：新增 `_referenced_names` / `_defined_names` / `_extract_module_helpers`，
+从 class 各片段直接引用的名字出发求**闭包** —— 被选中的定义内部引用到的模块级名字也要
+带上（3006 的 `_dequant_mxfp4` 内部用 `_E2M1_TABLE`，实测这 2 道各带进 2 个模块级定义），
+按原文件顺序输出；三个 builder 在 imports 之后、类定义之前插入。
+顺带把 `_class_member_segment` 正名为 `_node_source_segment`（对模块级节点同样适用）。
+
+### 修复 3/4/5 的验证
+
+**结构检查**（`verify_scaffold_fix2.py`）：66 道题全部构建脚手架并 `ast.parse` 通过；
+`Model` 上带辅助方法的 3 道（5004/5009/7001）全部带过来了；合成用例证明
+`@staticmethod` 与 `@torch.no_grad()` **装饰器都被保留**
+（Python 3.8+ 的 `FunctionDef.lineno` 指向 `def` 行，装饰器只在 `decorator_list` 里，
+`ast.get_source_segment` 会静默丢掉它们）。
+
+**功能验证**（`verify_scaffold_fix3.py`，本地 CPU，最强判据）：
+对 13 道曾 root 不合法的题，真的 exec 脚手架 → 实例化 `ModelNew` → 跑 forward →
+与参考 `Model` 的输出比对：
+
+```
+PASS 13 / NEED-GPU 0 / FAIL 0   共 13 道
+```
+
+即**这 13 道的 root 基线现已功能等价于参考实现**（root 节点就是脚手架的直通）。
+
+**本地全套测试**：297 pass / 0 fail。
+
+**部署状态**：修复 3/4/5 **只在本地**（未部署、未重跑）。机器上目前是修复 1+2 的版本。
+
+| 缺陷 | 文件 | 形态 |
+|---|---|---|
+| 3 计时 `no_grad` | `../KernelBench-main/src/kernelbench/timing.py` | 工作树改动 + `kernelbench_timing_no_grad.patch` |
+| 4 缺辅助方法 | `../PyramidKernel/pyramidkernel/core/loader.py` | 与 5 同一次提交 |
+| 5 缺模块级定义 | `../PyramidKernel/pyramidkernel/core/loader.py` | 与 4 同一次提交 |
