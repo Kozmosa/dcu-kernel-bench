@@ -62,9 +62,11 @@ tasks:
   - alias: 1031_deform_attention_fwd
     level: 3
     problem_id: 1031
+    backend: cuda
   - alias: 1032_deform_attention_bwd
     level: 3
     problem_id: 1032
+    backend: cuda
   - alias: 2001_activation
     level: 2
     problem_id: 2001
@@ -95,18 +97,23 @@ tasks:
   - alias: 2010_batchnorm_fwd
     level: 2
     problem_id: 2010
+    backend: cuda
   - alias: 2011_batchnorm_bwd
     level: 3
     problem_id: 2011
+    backend: cuda
   - alias: 2012_groupnorm_fwd
     level: 2
     problem_id: 2012
+    backend: cuda
   - alias: 2013_groupnorm_bwd
     level: 3
     problem_id: 2013
+    backend: cuda
   - alias: 2014_instancenorm_fwd
     level: 2
     problem_id: 2014
+    backend: cuda
   - alias: 3002_moe_align_block_size
     level: 3
     problem_id: 3002
@@ -164,42 +171,55 @@ tasks:
   - alias: 5001_conv2d_fwd
     level: 3
     problem_id: 5001
+    backend: cuda
   - alias: 5002_conv2d_bwd
     level: 3
     problem_id: 5002
+    backend: cuda
   - alias: 5003_deform_conv2d_fwd
     level: 3
     problem_id: 5003
+    backend: cuda
   - alias: 5004_deform_conv2d_bwd
     level: 3
     problem_id: 5004
+    backend: cuda
   - alias: 5005_spconv_fprop
     level: 3
     problem_id: 5005
+    backend: cuda
   - alias: 5006_spconv_bwd
     level: 3
     problem_id: 5006
+    backend: cuda
   - alias: 5007_spconv_indice_pairs
     level: 2
     problem_id: 5007
+    backend: cuda
   - alias: 5008_conv_bias_act
     level: 3
     problem_id: 5008
+    backend: cuda
   - alias: 5009_conv_depthtospace
     level: 2
     problem_id: 5009
+    backend: cuda
   - alias: 6001_fused_adamw
     level: 2
     problem_id: 6001
+    backend: cuda
   - alias: 7001_ctc_loss
     level: 3
     problem_id: 7001
   - alias: 8001_cumsum
     level: 2
     problem_id: 8001
+    backend: cuda
   - alias: 8002_gather
     level: 1
     problem_id: 8002
+    backend: cuda
   - alias: 8003_scatter_nd
     level: 2
     problem_id: 8003
+    backend: cuda

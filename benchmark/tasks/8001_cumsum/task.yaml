@@ -1,7 +1,7 @@
 id: "8001_cumsum"
 name: cumsum
 family: scan
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -48,14 +48,14 @@ tolerance:
   compare: "reference 在 float32 中累加后 cast 回输入 dtype 再比较；输出与输入同形同 dtype，单张量逐元素比较（无分段打包）"
   note: >
     fp32 容差按累加顺序差异放宽：reference 的 torch.cumsum（顺序实现）与
-    手写 Triton kernel 的分块并行 scan 在 float32 中求和顺序不同，构建期
+    手写 HIP kernel 的分块并行 scan 在 float32 中求和顺序不同，构建期
     实测（scan 长度 L=512/999/1021/4099/65536，块 64/128/1024 三种分块，
     randn 输入）两者对 float64 真值的最大绝对偏差 ≈4.2e-5（L=65536），
     近零前缀处的绝对偏差由 atol 分量覆盖；atol=1e-4/rtol=1e-3 下全部
     组合的 allclose 最大裕度 0.075（≥13 倍余量）。fp16/bf16 在 float32
     累加契约下与 float64 oracle cast 后逐元素全等（实测 0 mismatch），
     容差沿用 atol=rtol=2e-2 覆盖 cast 舍入与 1 ULP 级顺序差异。在线
-    （搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与
+    （搜索循环内）由 KernelBenchPaperEvaluator 判定：cuda 后端输入与
     模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线
     结论不能替代终审。
 

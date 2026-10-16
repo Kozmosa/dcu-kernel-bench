@@ -1,7 +1,7 @@
 id: "5002_conv2d_bwd"
 name: conv2d_bwd
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -19,7 +19,7 @@ description: >
   域内）。本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时
   镜像到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的
   原生 model_class 路径（--kernelbench-root benchmark/kernelbench_compat
-  --level 3 --problem-id 5002 --backend triton），无需任何框架改动。starter
+  --level 3 --problem-id 5002 --backend cuda），无需任何框架改动。starter
   由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：helpers /
   init_body / forward_stmt_N），本任务包不单独提供 starter。
 
@@ -61,7 +61,7 @@ tolerance:
     占用 0.34（≥3x 裕度）；隐藏 case 域内（归约 ≤660 项）最坏占用 0.02。
     语义性错误（索引/padding/stride/dilation 错位）产生 O(1) 级偏差，远超
     容差，可被可靠捕获。在线（搜索循环内）由 KernelBenchPaperEvaluator
-    判定：triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=
+    判定：cuda 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=
     1e-4)，作用于 get_inputs 固定族（归约 576 项，fp32 噪声 ~3e-5）——
     在线口径更紧但可行，在线结论仍不能替代终审。
 

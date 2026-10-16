@@ -1,7 +1,7 @@
 id: "8003_scatter_nd"
 name: scatter_nd
 family: index
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -65,7 +65,7 @@ tolerance:
     与独立 oracle（逐元素 Python 循环 + 标量定位赋值，与 reference 的
     批量高级索引 setitem 不同代码路径）的最大绝对偏差为 0（torch.equal
     逐位一致）。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
-    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
+    cuda 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
     与上表不同——在线结论不能替代终审。
 
 # 终审静态审计：库级写原语与已知等价绕过路径显式禁用——单步散写族

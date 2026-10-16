@@ -1,7 +1,7 @@
 id: "5001_conv2d_fwd"
 name: conv2d_fwd
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 

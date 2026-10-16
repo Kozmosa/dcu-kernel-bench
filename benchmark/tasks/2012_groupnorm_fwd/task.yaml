@@ -1,7 +1,7 @@
 id: "2012_groupnorm_fwd"
 name: groupnorm_fwd
 family: norm
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -59,7 +59,7 @@ tolerance:
     fp16/bf16 为输入量化档：输入按该 dtype 生成后 cast fp32 参与全程
     计算，输出不做低精度量化（避免量化边界噪声污染统一 fp32 档），故
     这两档仅约束输入生成域。在线（搜索循环内）由
-    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    KernelBenchPaperEvaluator 判定：cuda 后端输入与模型统一 cast 为
     fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）

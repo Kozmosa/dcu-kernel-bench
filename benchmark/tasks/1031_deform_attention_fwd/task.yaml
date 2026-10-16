@@ -1,7 +1,7 @@
 id: "1031_deform_attention_fwd"
 name: deform_attention_fwd
 family: attention
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -65,7 +65,7 @@ tolerance:
     sources yaml 记录），float32 档容差据此取 atol=rtol=1e-3；fp16 档输出
     值域 [0,1]，中间计算强制 float32 后仅剩输出 cast 量化误差与累加次序
     差，取 atol=rtol=2e-2（与 norm / conv 家族低精度档一致）。在线（搜索
-    循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一
+    循环内）由 KernelBenchPaperEvaluator 判定：cuda 后端输入与模型统一
     cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代
     终审。
 

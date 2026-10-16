@@ -1,7 +1,7 @@
 id: "8002_gather"
 name: gather
 family: index
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: basic           # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -68,7 +68,7 @@ tolerance:
     （tmp/build_check/8002_gather.py）对全部隐藏 case 实测 reference 与
     独立 oracle（meshgrid 坐标网格 + 高级索引，与 torch.gather 不同代码
     路径）的最大绝对偏差为 0（torch.equal 逐位一致）。在线（搜索循环内）
-    由 KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    由 KernelBenchPaperEvaluator 判定：cuda 后端输入与模型统一 cast 为
     fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
 
 # 终审静态审计：库级 gather/select 原语与已知等价绕过路径（tl 内建

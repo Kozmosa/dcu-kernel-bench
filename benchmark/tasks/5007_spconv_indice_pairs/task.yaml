@@ -1,7 +1,7 @@
 id: "5007_spconv_indice_pairs"
 name: spconv_indice_pairs
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -66,7 +66,7 @@ tolerance:
     （任何非零整数差 >= 1 >> 1e-4），与上表相容。在线结论不能替代终审。
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）
-# 去重 / 排序 / 计数类的 ATen 拼装路线整体封死，核心 hash 去重必须进 Triton
+# 去重 / 排序 / 计数类的 ATen 拼装路线整体封死，核心 hash 去重必须进 HIP
 forbidden:
   - aiter
   - miopen

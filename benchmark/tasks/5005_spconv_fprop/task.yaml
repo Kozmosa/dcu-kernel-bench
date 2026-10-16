@@ -1,7 +1,7 @@
 id: "5005_spconv_fprop"
 name: spconv_fprop
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -69,7 +69,7 @@ tolerance:
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）
 # gather / index_select 类纯数据搬运未列入禁用（允许作为非核心整理）；
-# scatter 累加与矩阵乘必须进 Triton kernel
+# scatter 累加与矩阵乘必须进 HIP kernel
 forbidden:
   - aiter
   - torch.sparse

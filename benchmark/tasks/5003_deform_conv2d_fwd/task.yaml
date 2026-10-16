@@ -1,7 +1,7 @@
 id: "5003_deform_conv2d_fwd"
 name: deform_conv2d_fwd
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -64,7 +64,7 @@ tolerance:
     case 实测，见 sources yaml 记录），float32 档容差据此放宽到
     atol=rtol=1e-3；fp16/bf16 档输出值域达 O(10)，低精度 ulp 主导，取
     atol=rtol=2e-2。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
-    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与
+    cuda 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与
     上表不同——在线结论不能替代终审。
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）

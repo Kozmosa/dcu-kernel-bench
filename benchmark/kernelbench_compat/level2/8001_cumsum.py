@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=8001, backend=triton。
+#   level=2, problem_id=8001, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -39,7 +39,7 @@ class Model(nn.Module):
     lane 不得进入前缀和；dim 为负数时按 torch 惯例解释。
 
     实现约束（违规判负）：
-        - 核心 scan（前缀和）必须在提交文件内以 Triton kernel 手写完成
+        - 核心 scan（前缀和）必须在提交文件内以 HIP kernel 手写完成
           （分块扫描 / Hillis-Steele / Blelloch 等均可），禁止调用任何
           库级 scan 原语，禁止用 FFT / 矩阵乘 / 卷积等数学等价路径绕过。
         - ModelNew 的 __init__ 与 forward 签名不可更改。
@@ -51,7 +51,7 @@ class Model(nn.Module):
     aten.cumsum / aten.cumulative_sum / tl.cumsum / tl.associative_scan /
     torch.fft / torch.matmul / torch.mm / torch.bmm / torch.einsum /
     conv1d( / numpy / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self, dim: int = 2):

@@ -1,7 +1,7 @@
 id: "2010_batchnorm_fwd"
 name: batchnorm_fwd
 family: norm
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -62,7 +62,7 @@ tolerance:
     以上为本评测集的验收容差，用于离线终审。fp32 档 1e-3 相对 float32 BN
     实现间偏差（不同归约树序，量级 1e-6~1e-5）有约两个数量级裕量；
     fp16/bf16 档沿用 norm 家族（2006/2007）的 2e-2。在线（搜索循环内）由
-    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    KernelBenchPaperEvaluator 判定：cuda 后端输入与模型统一 cast 为
     fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）

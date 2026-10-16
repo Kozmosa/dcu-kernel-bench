@@ -1,7 +1,7 @@
 id: "5004_deform_conv2d_bwd"
 name: deform_conv2d_bwd
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -24,7 +24,7 @@ description: >
   本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像到
   benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
   model_class 路径（--kernelbench-root benchmark/kernelbench_compat
-  --level 3 --problem-id 5004 --backend triton），无需任何框架改动。starter
+  --level 3 --problem-id 5004 --backend cuda），无需任何框架改动。starter
   由框架 loader 从 Model 自动生成 ModelNew scaffold（锚点：helpers /
   init_body / forward_stmt_N），本任务包不单独提供 starter。
 
@@ -73,7 +73,7 @@ tolerance:
     5.3e-5（最坏 dil4x4 的 doffset），均在容差内且留有约 2 倍裕量。
   note: >
     以上为本评测集的验收容差，用于离线终审。在线（搜索循环内）由
-    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
+    KernelBenchPaperEvaluator 判定：cuda 后端输入与模型统一 cast 为
     fp32、allclose(atol=rtol=1e-4)，与本表同量级——在线结论仍不能替代
     终审（终审另有隐藏 case 与静态审计）。
 

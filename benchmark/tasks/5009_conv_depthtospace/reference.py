@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=5009, backend=triton。
+#   level=2, problem_id=5009, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -63,7 +63,7 @@ class Model(nn.Module):
 
     实现约束（违规判负）：
         - 核心计算（含 padding 的索引/掩码展开与点积累加、bias 加法、六维
-          重排索引映射）必须全部在提交文件内以 Triton kernel 完成并融合，
+          重排索引映射）必须全部在提交文件内以 HIP kernel 完成并融合，
           禁止以任何形式的库卷积、ATen GEMM（matmul/mm/bmm/addmm/baddbmm/
           einsum/tensordot/unfold/fold/linear 等）、pixel_shuffle 系原语
           （含 pixel_unshuffle 往返），或借 conv3d 深度维 unsqueeze、
@@ -90,7 +90,7 @@ class Model(nn.Module):
     torch.baddbmm / torch.einsum / torch.tensordot /
     torch.nn.functional.linear / torch.nn.Linear /
     miopen / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     # 卷积超参固定（两 variant 的 D2S 语义共享同一参数集）

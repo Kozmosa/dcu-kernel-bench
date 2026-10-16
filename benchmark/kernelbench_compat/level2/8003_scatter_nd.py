@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=8003, backend=triton。
+#   level=2, problem_id=8003, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -49,7 +49,7 @@ class Model(nn.Module):
 
     实现约束（违规判负）：
         - 核心计算（r 维坐标 -> 线性偏移的地址计算、updates 的读入与
-          未命中位置原值的搬运写出）必须在提交文件内以 Triton kernel
+          未命中位置原值的搬运写出）必须在提交文件内以 HIP kernel
           完成。
         - ModelNew 的 __init__ 与 forward 签名不可更改。
         - 纯搬移契约：未命中位置与 data、命中位置与 updates 均逐位一致
@@ -59,7 +59,7 @@ class Model(nn.Module):
     禁用列表（静态审计剥除 docstring 与注释后按字面子串匹配）：
     torch.scatter / .scatter( / .scatter_( / scatter_add / scatter_reduce /
     index_put / torch.put( / .put_( / index_copy / torch_scatter / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self):
