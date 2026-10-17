@@ -125,6 +125,9 @@ def main() -> int:
     ap.add_argument("--before", required=True)
     ap.add_argument("--after", required=True)
     ap.add_argument("--offline-audit", default="", help="audit_batch.py 产出的 offline_audit.json")
+    ap.add_argument("--model", default="gpt-6-astra",
+                    help="生成模型名。注意 run.json **不记录**模型名，只能从 llm.env 的 "
+                         "OPENAI_MODEL 取，故此处由调用方传入。")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -171,6 +174,7 @@ def main() -> int:
     w("")
     w("五个 harness 缺陷修复后的全量 66 道结果。数据源：")
     w("")
+    w(f"- 生成模型：`{args.model}`（取自 `llm.env` 的 `OPENAI_MODEL`；**run.json 未记录模型名**）")
     w(f"- 修复前在线：`runs/dcukb_final`（{AB['n']} 道）")
     w(f"- 修复后在线：`runs/dcukb_full_fixed`（{AA['n']} 道，16 片并行，10:08–11:53）")
     if audit:

@@ -2,6 +2,7 @@
 
 五个 harness 缺陷修复后的全量 66 道结果。数据源：
 
+- 生成模型：`gpt-6-astra`（取自 `llm.env` 的 `OPENAI_MODEL`；**run.json 未记录模型名**）
 - 修复前在线：`runs/dcukb_final`（66 道）
 - 修复后在线：`runs/dcukb_full_fixed`（66 道，16 片并行，10:08–11:53）
 - 修复后离线终审：`offline_audit.json`（审 31 道有 aiter 基线的题）

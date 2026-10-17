@@ -1,5 +1,6 @@
 # DCU 算子生成评测结果
 
+**生成模型**：`gpt-6-astra`（经 hejuapi 的 OpenAI 兼容端点，`chat_completions` 协议）
 **环境**：海光 DCU（BW / gfx936），DTK 26.04，torch 2.9.0+das.opt1.dtk2604
 **生成框架**：PyramidKernel（profile = `main`）
 **评测规模**：66 道算子题（Triton 46 道 / HIP 20 道）
