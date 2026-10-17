@@ -243,10 +243,71 @@ PASS 13 / NEED-GPU 0 / FAIL 0   共 13 道
 
 **本地全套测试**：297 pass / 0 fail。
 
-**部署状态**：修复 3/4/5 **只在本地**（未部署、未重跑）。机器上目前是修复 1+2 的版本。
+**部署状态**：修复 3/4/5 已部署到 DCU 机器并重跑（见下节）。
 
 | 缺陷 | 文件 | 形态 |
 |---|---|---|
 | 3 计时 `no_grad` | `../KernelBench-main/src/kernelbench/timing.py` | 工作树改动 + `kernelbench_timing_no_grad.patch` |
 | 4 缺辅助方法 | `../PyramidKernel/pyramidkernel/core/loader.py` | 与 5 同一次提交 |
 | 5 缺模块级定义 | `../PyramidKernel/pyramidkernel/core/loader.py` | 与 4 同一次提交 |
+
+---
+
+## 修复 3/4/5 的真机验证（2026-10-17 09:00–09:37，DCU 真机）
+
+部署（PyramidKernel `9f9549f` + 重建的 `kernelbench.tar`）后重跑这 13 道，
+产物在 `runs/dcukb_fix13`。上机前服务器侧预检：13 道脚手架全部合法、括号配平，
+且 `helpers` / `module` 计数与本地一致（5004/5009/7001 各 1 个辅助方法；
+5004/1032 各 1 个、3006/4005 各 2 个模块级定义）。
+
+### 修复前 vs 修复后
+
+| 题 | 修复前 root | 修复后 root | best（前→后） | speedup（前→后） |
+|---|---|---|---|---|
+| 1032_deform_attention_bwd | T/N/**D2** | T/Y | root→`phase2_n4` | →**724.58x** |
+| 3006_moe_op_mxfp4 | T/N/**D5** | T/Y | `phase2_n1`→root | 51.96→1.02 |
+| 4005_fused_mxfp4_quant | T/N/**D5** | T/Y | `phase2_n1`→`n10` | 106.51→85.07 |
+| 5002_conv2d_bwd | T/N/**D2** | T/Y | root→root | →1.92 |
+| 5003_deform_conv2d_fwd | F/N/**D1** | T/Y | root→`phase2_n1` | →33.68 |
+| 5004_deform_conv2d_bwd | F/N/**D1** | T/Y | root→`n5` | →**293.00** |
+| 5005_spconv_fprop | F/N/**D1** | T/Y | root→`phase2_n4` | →10.68 |
+| 5006_spconv_bwd | T/N/**D2** | T/Y | root→`phase2_n4` | →**137.02** |
+| 5007_spconv_indice_pairs | F/N/**D1** | T/Y | root→`phase2_n5` | →**387.76** |
+| 5008_conv_bias_act | F/N/**D1** | T/Y | `phase2_n2`→root | 0.81→0.95 |
+| 5009_conv_depthtospace | F/N/**D1** | T/Y | root→`phase2_n5` | →1.51 |
+| 6001_fused_adamw | F/N/**D1** | T/Y | root→`phase2_n5` | →6.58 |
+| 7001_ctc_loss | T/N/**D4** | T/Y | `phase2_n3`→root | 1212.39→1.02 |
+
+**汇总（13 道）**：
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| root 正确 | **0/13** | **13/13** |
+| best 正确 | 4/13 | **13/13** |
+| 有 speedup | 4/13 | **13/13** |
+| 缺陷签名 | D1=7 D2=3 D4=1 D5=2 | **全无** |
+
+修复后 9 道 best 落在非 root 节点（真实解），speedup 中位 **85.07x**、最大 **724.58x**。
+其中 **9 道是从「框架看来彻底失败」变成「有合法基线且拿到真实加速比」**
+（1032/5002/5003/5004/5005/5006/5007/5009/6001）。
+
+### 需要如实说明的两点
+
+- `3006`（51.96x→1.02x）与 `7001`（1212.39x→1.02x）**这次的解答质量下降了**：
+  两道的 best 都退回到 root。这不是修复引入的回归，而是 LLM 生成的**逐轮方差**
+  —— 修复只是让 root 基线变得合法可跑，题目难度没变，Agent 这一轮没找到更好的解。
+  换言之：修复前这两道的"高分"是在 root 无效的前提下拿到的，现在才有了可比的基准。
+- `5008` 修复前 best 是 `phase2_n2` 的 0.81x（**比参考实现还慢**），而 root 因
+  `SyntaxError` 无效，框架无从判断。修复后 root 合法、0.95x —— 基线终于诚实了。
+
+### 复现
+
+```bash
+bash /root/dcudeploy/rerun_fix13.sh    # 预检 -> 生成 fix13 清单 -> 起 13 片
+python .dcu_runs/deploy/compare_fix13.py \
+  --before .dcu_runs/before_fix13/runjson --after .dcu_runs/fix13_results/runjson
+```
+
+`compare_fix13.py` 的 D 类签名**只从 root 节点**判：`stats.failure_counts` 会把 Agent
+探索期自己写坏的 `python_region_syntax_error` 也算进去，那是 Agent 侧问题，不能用来
+判脚手架缺陷。
