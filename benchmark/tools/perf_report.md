@@ -178,7 +178,20 @@ aiter 在 DCU 上能达到的最好成绩**，因此由它导出的加速比不�
 `torch_eager`），因此只能给 `torch_eager` 口径。其中 **20 道是 HIP track
 （`backend=cuda`）**，全部落在这一类。
 
-另有 **2 道有 aiter 基线但本次离线终审没出结果**（不是没有基线）：`1016_lean_atten_paged`、`2004_fused_qk_concat`。这 2 道在双基线表里不出现。
+另有 **2 道有 aiter 基线但离线终审跑不出结果**（不是没有基线，也不要
+据此推断它们性能差）：
+
+| 题 | 失败原因 |
+|---|---|
+| `1016_lean_atten_paged` | exit 1，未产出 JSON 报告 |
+| `2004_fused_qk_concat` | exit -11（SIGSEGV），审计过程崩溃 |
+
+这两道已用 `--tasks ... --force` 定向重试，**可复现地失败**（`2004_fused_qk_concat`
+是 SIGSEGV）。属离线终审工具侧的待修项，与生成质量无关。它们的在线结果（分母
+eager）是：
+
+- `1016_lean_atten_paged`：在线 best 正确 True，speedup 436.91x
+- `2004_fused_qk_concat`：在线 best 正确 True，speedup 26.68x
 
 ### 5.1 为什么 HIP 题没有 aiter / hipDNN 基线
 

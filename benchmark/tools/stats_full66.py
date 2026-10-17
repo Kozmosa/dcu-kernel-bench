@@ -33,6 +33,12 @@ PURE_ATEN = {
     "6001_fused_adamw", "8001_cumsum", "8002_gather", "8003_scatter_nd",
 }
 
+# 有 aiter 基线、但离线终审跑不出结果的题（2026-10-17 实测，定向重试复现）。
+AUDIT_FAILURES = {
+    "1016_lean_atten_paged": "exit 1，未产出 JSON 报告",
+    "2004_fused_qk_concat": "exit -11（SIGSEGV），审计过程崩溃",
+}
+
 
 def load(root: str) -> dict:
     out, base = {}, pathlib.Path(root)
@@ -350,8 +356,27 @@ def main() -> int:
     w("（`backend=cuda`）**，全部落在这一类。")
     if unaudited:
         w("")
-        w(f"另有 **{len(unaudited)} 道有 aiter 基线但本次离线终审没出结果**（不是没有基线）："
-          + "、".join(f"`{t}`" for t in unaudited) + "。这 2 道在双基线表里不出现。")
+        w(f"另有 **{len(unaudited)} 道有 aiter 基线但离线终审跑不出结果**（不是没有基线，也不要")
+        w("据此推断它们性能差）：")
+        w("")
+        w("| 题 | 失败原因 |")
+        w("|---|---|")
+        for t in unaudited:
+            w(f"| `{t}` | {AUDIT_FAILURES.get(t, '未记录')} |")
+        w("")
+        w("这两道已用 `--tasks ... --force` 定向重试，**可复现地失败**（`2004_fused_qk_concat`")
+        w("是 SIGSEGV）。属离线终审工具侧的待修项，与生成质量无关。它们的在线结果（分母")
+        w("eager）是：")
+        w("")
+        for t in unaudited:
+            hit = [k for k in A if tid(k) == t]
+            if not hit:
+                continue
+            r = A[hit[0]]
+            sp = r["speedup"]
+            w(f"- `{t}`：在线 best 正确 {r['best_correct']}，speedup "
+              f"{fmt(sp) + 'x' if isinstance(sp, (int, float)) else '-'}"
+              f"{'（仅 root）' if r['is_root'] else ''}")
     w("")
     w("### 5.1 为什么 HIP 题没有 aiter / hipDNN 基线")
     w("")
