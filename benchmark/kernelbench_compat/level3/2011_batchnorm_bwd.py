@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem-id=2011, backend=triton。
+#   level=3, problem-id=2011, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -47,7 +47,7 @@ class Model(nn.Module):
 
     实现约束（违规判负）：
         - 核心计算（xhat 重构、两路通道归约、dx 的逐元素链式乘加）必须在提交
-          文件内以 Triton kernel 完成；任意规模的通道归约（m = N*H*W 可大于
+          文件内以 HIP kernel 完成；任意规模的通道归约（m = N*H*W 可大于
           单 block 容量）都需掩码 / 分块归约正确处理，通道内元素一个不漏。
         - 禁止借助 torch.autograd / autograd.grad / .backward() 反传求梯度，
           禁止调用 batch_norm 原语族与任何闭源库原语（MIOpen / hipDNN 等）。
@@ -63,7 +63,7 @@ class Model(nn.Module):
     torch.nn.BatchNorm2d / torch.nn.BatchNorm3d /
     torch.ops.aten.batch_norm / torch.ops.aten.native_batch_norm /
     autograd / .backward(。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self, variant: str = "dx"):

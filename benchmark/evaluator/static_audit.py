@@ -19,6 +19,13 @@ from pathlib import Path
 GLOBAL_FORBIDDEN = [
     "rocblas", "hipblas", "hipblaslt", "miopen", "hipdnn",
     "cublas", "cudnn", "cutlass",
+    # 设备原语库（scan / sort / reduce / segmented 原语）。HIP track 上
+    # rocprim / hipcub 与 cutlass 同类，都是"把核心计算整段交给库"的绕过路径；
+    # 实测：一份用 hipcub.DeviceScan.InclusiveScan + rocprim.inclusive_scan 完成
+    # 全部 scan 的提交，在补这条之前对 8001_cumsum 报 passed=true、零违规。
+    # 只列 ROCm 侧：本评测集只在 DCU 上跑，CUDA 的 thrust / cub 无意义，
+    # 而 `cub` 会以子串形式误伤 cuboid / incumbent 等词（3D 卷积题很常见）。
+    "rocprim", "hipcub",
 ]
 
 

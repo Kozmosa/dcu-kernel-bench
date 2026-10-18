@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=1032, backend=triton。
+#   level=3, problem_id=1032, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -148,7 +148,7 @@ class Model(nn.Module):
 
     实现约束（违规判负）：
       - 核心计算（softmax 反传、四角点梯度散射与插值分数偏导、跨 query 的
-        grad_value 散射累加）必须在提交文件内以 Triton kernel 手写完成。
+        grad_value 散射累加）必须在提交文件内以 HIP kernel 手写完成。
       - 禁止借助 torch.autograd / autograd.grad / .backward() 反传求梯度，
         梯度须按上述解析式手写。
       - 全部梯度累加在 float32 中进行，三段梯度 cast 回 value dtype 后按
@@ -162,14 +162,14 @@ class Model(nn.Module):
     torch.bmm / torch.mm / torch.einsum / torch.tensordot、
     torch.softmax / torch.nn.functional.softmax（F.softmax）、
     torch.autograd（含 autograd.grad）、.backward()。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self):
         super().__init__()
 
     def forward(self, value, spatial_shapes, level_start_index, sampling_locations, attention_weights, grad_output):
-        # 评测器会把全部输入 cast 成 fp32（triton 后端）；spatial_shapes /
+        # 评测器会把全部输入 cast 成 fp32（cuda 后端）；spatial_shapes /
         # level_start_index 是小整数索引，fp32 表示无损，此处恢复为 long
         spatial_shapes = spatial_shapes.to(torch.long)
         level_start_index = level_start_index.to(torch.long)

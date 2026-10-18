@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=2010, backend=triton。
+#   level=2, problem_id=2010, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -68,7 +68,7 @@ class Model(nn.Module):
 
     实现约束（违规判负）：
         - 核心计算（per-channel 归约统计、rsqrt、仿射、running 更新）必须
-          在提交文件内以 Triton kernel 完成。
+          在提交文件内以 HIP kernel 完成。
         - ModelNew 的 __init__ 与 forward 签名不可更改。
         - 统计、归一化与 running 更新全程 float32 中间计算；inference 的 y
           cast 回 x dtype；training 五段均为 float32。
@@ -78,7 +78,7 @@ class Model(nn.Module):
     torch.nn.BatchNorm3d / torch.nn.SyncBatchNorm /
     torch.nn.functional.batch_norm / torch.batch_norm /
     torch.native_batch_norm / miopen / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self, variant: str = "training", eps: float = 1e-5, momentum: float = 0.1):

@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=1, problem_id=8002, backend=triton。
+#   level=1, problem_id=8002, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -55,18 +55,18 @@ class Model(nn.Module):
 
     实现约束（违规判负）：
         - 核心计算（索引展开 / 地址计算 + 按地址 load/store）必须在提交
-          文件内以 Triton kernel 完成。
+          文件内以 HIP kernel 完成。
         - ModelNew 的 __init__ 与 forward 签名不可更改。
         - 纯搬移契约：输出与 data 中被选中元素逐位一致（含 float16 /
           bfloat16 的位模式），不得引入任何数值变换。
         - forward 返回单张量 out（评测器按单输出比较）。
 
     禁用列表（静态审计剥除 docstring 与注释后按字面子串匹配）：
-    torch.gather / .gather( / tl.gather / torch.index_select /
+    torch.gather / .gather( / torch.index_select /
     .index_select( / torch.take_along_dim / .take_along_dim( /
     torch.take( / .take(（含 Tensor.take 方法形式） /
     torch.embedding / nn.Embedding / .embedding( / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self, variant: str = "gather", axis: int = 1):

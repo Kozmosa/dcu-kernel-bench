@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=5003, backend=triton。
+#   level=3, problem_id=5003, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -54,7 +54,7 @@ class Model(nn.Module):
 
     实现约束（违规判负）：
       - 核心计算（采样网格构建、双线性插值采样、mask 调制、与 weight 的加权
-        归约）必须在提交文件内以 Triton kernel 手写完成。
+        归约）必须在提交文件内以 HIP kernel 手写完成。
       - forward 返回单张量 out（评测器按单输出比较）。
       - 插值与加权归约在 float32 中进行，输出 cast 回输入 dtype。
       - ModelNew 的 __init__ 与 forward 签名不可更改。
@@ -64,7 +64,7 @@ class Model(nn.Module):
     torch.nn.functional.grid_sample（F.grid_sample）、
     torch.nn.functional.unfold（F.unfold）、torch.matmul / torch.bmm /
     torch.mm / torch.einsum / torch.tensordot、miopen、hipdnn、aiter。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self, variant: str = "modulated", stride=(1, 1), padding=(1, 1),
@@ -97,10 +97,13 @@ class Model(nn.Module):
         bf = bias.to(torch.float32)
 
         # 每卷积核位置的基础感受野坐标（未加偏移），行主序 p = i*S + j
-        base_y = (torch.arange(h_out, dtype=torch.float32) * sh - ph).view(1, 1, h_out, 1) \
-            + torch.arange(r, dtype=torch.float32).view(r, 1, 1, 1) * dh      # (r, 1, h_out, 1)
-        base_x = (torch.arange(w_out, dtype=torch.float32) * sw - pw).view(1, 1, 1, w_out) \
-            + torch.arange(s, dtype=torch.float32).view(1, s, 1, 1) * dw      # (1, s, 1, w_out)
+        # device=dev 必需：这些坐标要与已在设备上的 off 相加，漏 device 会在
+        # CUDA/DCU 上抛 "Expected all tensors to be on the same device"（CPU 上无感）
+        dev = xf.device
+        base_y = (torch.arange(h_out, dtype=torch.float32, device=dev) * sh - ph).view(1, 1, h_out, 1) \
+            + torch.arange(r, dtype=torch.float32, device=dev).view(r, 1, 1, 1) * dh      # (r, 1, h_out, 1)
+        base_x = (torch.arange(w_out, dtype=torch.float32, device=dev) * sw - pw).view(1, 1, 1, w_out) \
+            + torch.arange(s, dtype=torch.float32, device=dev).view(1, s, 1, 1) * dw      # (1, s, 1, w_out)
 
         # 叠加逐位置偏移（偶数通道 dy、奇数通道 dx）→ 采样坐标 (n, R*S, H_out, W_out)
         y_coord = (base_y + off[:, 0::2].reshape(n, r, s, h_out, w_out))
@@ -115,8 +118,8 @@ class Model(nn.Module):
         wx = x_coord - ix0.to(torch.float32)
         iy1 = iy0 + 1
         ix1 = ix0 + 1
-        n_idx = torch.arange(n).view(n, 1, 1, 1, 1)
-        c_idx = torch.arange(c).view(1, c, 1, 1, 1)
+        n_idx = torch.arange(n, device=xf.device).view(n, 1, 1, 1, 1)
+        c_idx = torch.arange(c, device=xf.device).view(1, c, 1, 1, 1)
 
         def corner(iy, ix, wgt):
             # 单角点采样：越界角点权重置 0；clamp 仅防索引越界（乘 0 抵消）

@@ -1,0 +1,15 @@
+# dcu-kernel-bench 小样例 manifest：先用真 LLM 低代价验证链路，再跑全量。
+# 三题跨三个算子族（分页 attention / 行级归约 / 前缀和扫描），其中 8001 来自
+# 2026-10-12 新准入的 hipDNN 样例题批次，用于同时覆盖新旧两批题目。
+name: dcukb_smoke3
+backend: triton
+tasks:
+  - alias: 1002_paged_attention
+    level: 3
+    problem_id: 1002
+  - alias: 2009_softmax
+    level: 2
+    problem_id: 2009
+  - alias: 8001_cumsum
+    level: 2
+    problem_id: 8001

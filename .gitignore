@@ -18,3 +18,7 @@ benchmark/evaluator/results/
 
 # uv 虚拟环境
 .venv/
+
+# 本地暂存区：服务器资产抢救、aiter 稀疏检出、一次性脚本、CPU 预检产物。
+# 里面的东西随时可重建，不进仓库。
+.dcu_runs/

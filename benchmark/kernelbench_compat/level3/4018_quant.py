@@ -104,6 +104,18 @@ class Model(nn.Module):
         return torch.cat([codes, s.reshape(-1).to(torch.float32)])
 
 
+def output_segments(init_kwargs, numel, inputs=None):
+    """给评测器：输出里两段的边界（见 task.yaml 的 tolerance_segments）。
+
+    scale 段长随 mode 变化：per-tensor 为 1；per-token 为输入行数（故需要 inputs）。
+    """
+    mode = str(init_kwargs.get("mode", "dynamic_per_token"))
+    s_len = 1
+    if mode == "dynamic_per_token" and inputs:
+        s_len = int(inputs[0].shape[0])
+    return [("codes", 0, int(numel) - s_len), ("scales", int(numel) - s_len, int(numel))]
+
+
 def get_init_inputs():
     return ["dynamic_per_token", "int8"]   # mode；quant_dtype
 

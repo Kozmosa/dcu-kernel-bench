@@ -31,7 +31,7 @@ def _mxfp4_quant(x):
             * MXFP4_QUANT_BLOCK_SIZE
         ]
         shape = tuple(shape)
-        x_padded = torch.zeros(shape, dtype=x.dtype)
+        x_padded = torch.zeros(shape, dtype=x.dtype, device=x.device)
         x_padded[..., : x.shape[-1]] = x
     else:
         x_padded = x
@@ -146,6 +146,22 @@ class Model(nn.Module):
         norm = _rmsnorm(s, weight1.to(torch.float32), self.eps)
         codes, scales = _mxfp4_quant(norm)
         return torch.cat([codes, scales], dim=1)
+
+
+def output_segments(init_kwargs, numel, inputs=None):
+    """给评测器：输出里两段的边界（见 task.yaml 的 tolerance_segments）。
+
+    codes 段 = M * (N1//2) 字节（每字节 2 个 e2m1 码字），
+    scales 段 = M * ceil(N1/32) 个 e8m0 字节。
+    段长依赖输入形状，故需要 inputs（inp1 的 shape 为 (M, N1)）。
+    """
+    if not inputs:
+        return None
+    x = inputs[0]
+    n1 = int(x.shape[-1])
+    m = int(x.numel() // n1) if n1 else 0
+    codes = m * (n1 // 2)
+    return [("codes", 0, codes), ("scales", codes, int(numel))]
 
 
 def get_init_inputs():

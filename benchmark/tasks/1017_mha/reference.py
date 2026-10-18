@@ -80,7 +80,7 @@ class Model(nn.Module):
         assert nheads_q == nheads_k * group, "num_q_heads 必须是 num_kv_heads 的整数倍"
 
         qf = q.to(torch.float32).permute(0, 2, 1, 3)         # [B, Hq, Sq, D]
-        kf = k.to(torch.float32).permute(0, 2, 1, 3)         # [B, Hk, Sq, D]
+        kf = k.to(torch.float32).permute(0, 2, 1, 3)         # [B, Hk, Sk, D]
         vf = v.to(torch.float32).permute(0, 2, 1, 3)         # [B, Hk, Sk, D]
 
         # QK^T（先缩放 query），GQA：同一 KV head 的 K/V 复制给 group 内每个 head

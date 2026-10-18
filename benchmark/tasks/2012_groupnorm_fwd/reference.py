@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=2012, backend=triton。
+#   level=2, problem_id=2012, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -56,7 +56,7 @@ class Model(nn.Module):
 
     实现约束（违规判负）：
         - 核心计算（组内 mean/有偏 var 归约、rsqrt、逐通道仿射、Swish）
-          必须在提交文件内以 Triton kernel 完成。
+          必须在提交文件内以 HIP kernel 完成。
         - ModelNew 的 __init__ 与 forward 签名不可更改。
         - 统计、rsqrt、仿射与 Swish 全程 float32 中间计算；输出三段均为
           float32。
@@ -64,7 +64,7 @@ class Model(nn.Module):
 
     禁用列表：torch.nn.GroupNorm / torch.nn.functional.group_norm /
     F.group_norm / torch.group_norm / native_group_norm / miopen / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self, variant: str = "groupnorm", groups: int = 2, eps: float = 1e-5):

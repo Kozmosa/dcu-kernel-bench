@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=5006, backend=triton。
+#   level=3, problem_id=5006, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -67,7 +67,7 @@ class Model(nn.Module):
         （整型下标 <= 2^24 时精确，int()/long() 恢复）。
 
     实现约束（违规判负）：
-        - 核心计算必须在提交文件内以 Triton kernel 完成：dgrad 的散射累加
+        - 核心计算必须在提交文件内以 HIP kernel 完成：dgrad 的散射累加
           （out_bp 行经 W[:, :, k] 变换后按 in_idx 散射累加）或 wgrad 的
           按对外积相关累加，禁止回退到 torch 的 gather / matmul / scatter
           组合或 autograd。
@@ -88,7 +88,7 @@ class Model(nn.Module):
     torch.ops.aten / torch.autograd / .backward( / as_strided；
     闭源库 MIOpen / hipDNN / cuDNN / rocBLAS / hipBLASLt 同样禁止（全局
     黑名单）。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self, variant: str = "dgrad"):

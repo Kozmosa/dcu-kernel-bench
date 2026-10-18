@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=5005, backend=triton。
+#   level=3, problem_id=5005, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -55,7 +55,7 @@ class Model(nn.Module):
 
     实现约束（违规判负）：
         - 核心计算（按索引对 gather、与 W[:, :, k] 的矩阵乘、按输出行号的
-          scatter 累加）必须在提交文件内以 Triton kernel 完成；ATen 只允许
+          scatter 累加）必须在提交文件内以 HIP kernel 完成；ATen 只允许
           做 dtype 恢复 / 形状整理等非核心操作。
         - ModelNew 的 __init__ 与 forward 签名不可更改。
         - 累加全程 float32（fp16/bf16 输入先无损 cast 到 fp32），最终 cast
@@ -69,7 +69,7 @@ class Model(nn.Module):
     torch.nn.functional.linear / torch.nn.Linear / index_add_ /
     torch.index_add / index_put / torch.index_put / scatter_add_ /
     .scatter_( / torch.scatter / segment_reduce / miopen / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self):

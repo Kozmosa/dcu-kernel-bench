@@ -6,7 +6,7 @@
 #
 # 运行方式（PyramidKernel 原生 model_class 路径）：
 #   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=6001, backend=triton。
+#   level=2, problem_id=6001, backend=cuda（HIP）。
 
 import torch
 import torch.nn as nn
@@ -49,7 +49,7 @@ class Model(nn.Module):
 
     ③ 实现约束（违规判负）：
       - 核心计算（解耦权重衰减、一阶/二阶矩更新、bias correction 幂运算、
-        sqrt、逐元素更新）必须在提交文件内以 Triton kernel 完成；
+        sqrt、逐元素更新）必须在提交文件内以 HIP kernel 完成；
       - out-of-place：不得原地修改 params / grads / exp_avg / exp_avg_sq；
       - ModelNew 的 __init__ 与 forward 签名不可更改；
       - 中间计算用 float32（fp16 输入亦先提升到 float32），最终结果 cast
@@ -68,7 +68,7 @@ class Model(nn.Module):
         torch._foreach_addcmul 多张量原语同样禁止（含原地 _ 形式，单调用
         即可完成核心更新步）（终审静态审计对
         docstring/注释之外的代码做子串匹配）；
-      - 目标硬件：海光 DCU（gfx936），实现语言 Triton。
+      - 目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
     """
 
     def __init__(self, variant: str = "adamw", lr: float = 1e-3,
