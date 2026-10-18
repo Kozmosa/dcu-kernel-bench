@@ -160,8 +160,10 @@ HIP 那 20 道的基线状况与 hipDNN 基线探针的结论一致：hipDNN 在
 
 ## 附 2：对原框架的改动
 
-本轮结果是在**改动过的** PyramidKernel 与 KernelBench 上跑出来的，共 5 处，全部是修复
-harness 缺陷（不改题目数学语义、不改评分判据）：
+本轮结果是在**改动过的**框架上跑出来的：5 处框架代码修复 + 一批 DCU 适配。
+两类都**不改题目数学语义、不改评分判据**。
+
+### A. 框架代码改动（5 处）
 
 **PyramidKernel**（3 个提交，仅 1 个文件 `pyramidkernel/core/loader.py`，+201 / −18）
 
@@ -186,6 +188,23 @@ harness 缺陷（不改题目数学语义、不改评分判据）：
 > 两个 `enable_grad` 改动的安全性：无 `requires_grad` 张量时 PyTorch 不建图，对 62 道前向题
 > 零开销；反绕过仍由离线 `static_audit` 负责（线上 forbidden 本就是软约束）。
 > 根因与验证细节见 `harness_fixes.md`。
+
+### B. DCU 适配（题目与环境侧）
+
+原框架是按 CUDA 生态写的，迁到海光 DCU 需要在题目与环境层面做这些适配：
+
+| 项 | 改动内容 | 为什么 DCU 必须改 |
+|---|---|---|
+| **20 道题从 Triton track 迁到 HIP track** | `impl_lang: hip`、manifest 改 `backend: cuda`、题面语言整体改写（106 处 Triton 提法 → HIP）。迁移后 **Triton 46 / HIP 20** | 题面必须与实际编译路径一致，否则 Agent 按 Triton 写而框架走 hipcc |
+| **题面注入 DCU 编译约束**（改提示） | 20 道 HIP 题补上：`目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）` | 本机只有 `<hip/hip_runtime.h>`；框架默认模板 include 的恰是 `<cuda_runtime.h>`，题面不说清 Agent 必然写错头文件 |
+| **task.yaml 锚点说明补 HIP 路径** | 20 道补全 `user_helpers / cuda_cpp / cuda_cu / init_body / forward_stmt_N` | HIP 路径比 Triton 路径多 `user_helpers` 锚点，不说明则 Agent 找不到落笔位置 |
+| **修 DCU device bug** | `5003` / `7001` reference 的 forward 内张量构造漏 `device=`（另有 `2001_activation` 同类 1 行） | 在 DCU 上 `torch.zeros` 默认建在 CPU，与另一侧 GPU 张量运算直接 device mismatch |
+| **`static_audit` 补 HIP 设备原语库** | `GLOBAL_FORBIDDEN` 增加 `rocprim` / `hipcub` | 迁到 HIP 后原禁用清单没有 ROCm 侧原语库，用 `hipcub::DeviceScan` 整段完成 scan 即绕过（实测改前对 8001 报 `passed=true`） |
+| **`triton_compat.py` 垫片** | 在 DCU 版 triton 3.3.0 上补齐 aiter 依赖的 4 个缺失 API：`tl.matrix_load`、`tl.constexpr_function`、`autotune(perf_debug=)`、`triton.utils.hcutuner` | aiter 按更高版本 triton 写，缺这些 API 时 import 即失败，aiter 基线无从采集 |
+| **`aiter_shim` 垫片** | 部署侧提供 `aiter/__init__.py` + `_triton_compat.py` + `aiter/jit/` | 真 aiter 含未编译的扩展，直接 import 会崩；基线与离线审计需要能 import 它 |
+
+> 其中「改提示」的三项（track 迁移、DCU 约束句、锚点说明）是**题目数据**改动，
+> 会同步到 `benchmark/kernelbench_compat/` 镜像树（两者逐字节一致，由测试强制）。
 
 ---
 
