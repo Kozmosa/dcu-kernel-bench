@@ -1,52 +1,66 @@
-# 4017_group_quant_int8 — per-token-group int8 动态量化（W8A8 整数 GEMM 的
-# 激活前处理）的 model_class（KernelBench 兼容）题目文件。
+# 4017_group_quant_int8 -- per-token-group int8 dynamic quantization
+# (activation preprocessing for W8A8 integer GEMM) model_class (KernelBench
+# compatible) task file.
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=4017, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=4017, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """per-token-group int8 动态量化（W8A8 整数 GEMM 的激活前处理）。
+    """per-token-group int8 dynamic quantization (activation preprocessing for
+    W8A8 integer GEMM).
 
-    输入 x 是连续的 2D float 张量 (rows, cols)，要求 cols 能被 group_size 整除。
-    按行主序（展平）把 x 切成 G = rows*cols/group_size 个连续分组，每组
-    group_size 个元素。对每组 g（中间算术全程 float32）：
-        absmax_g = max( max_{i∈g} |x_i|, eps )       # eps 为除零保护
-        scale_g  = absmax_g / 127                    # fp32 除法
+    The input x is a contiguous 2D float tensor (rows, cols) and cols must be
+    divisible by group_size. In row-major (flattened) order x is cut into
+    G = rows*cols/group_size contiguous groups of group_size elements each.
+    For every group g (all intermediate arithmetic in float32):
+        absmax_g = max( max_{i in g} |x_i|, eps )    # eps is the division-by-zero guard
+        scale_g  = absmax_g / 127                    # fp32 division
         q_i      = trunc_int8( clamp( x_i / scale_g, -128, 127 ) )
-    trunc_int8 指向零截断后转 int8，量化码字最终落在 [-127, 127]。
-    边界行为：absmax_g < eps（含整组全零）时 scale_g = eps/127、组内码字全 0，
-    eps 保护必须生效（产出 0 scale 或 NaN 均为错误实现）。
+    trunc_int8 means truncate toward zero and then convert to int8, so the
+    quantized code words end up in [-127, 127].
+    Boundary behaviour: when absmax_g < eps (including an all-zero group)
+    scale_g = eps/127 and every code word in the group is 0; the eps guard must
+    take effect (producing a 0 scale or NaN is a wrong implementation).
 
-    输入输出规格：
-      x    float16/bfloat16，连续 (rows, cols)，cols % group_size == 0；
-           评测器会把输入 cast 成 fp32 传入——fp16/bf16 值在 fp32 中精确表示，
-           量化语义不变
-      out  一维 float32 张量，长度 rows*cols + rows*cols/group_size
-           （单张量输出协议，两段打包）：
-           out[:rows*cols]  = int8 码字提升为 float32（[-127,127] 内整数）
-           out[rows*cols:]  = 各组 scale，行主序（(rows, cols/group_size) 展平）
-      __init__ 超参：group_size（int，默认 128）、eps（float，默认 1e-10）。
+    Input/output specification:
+      x    float16/bfloat16, contiguous (rows, cols), cols % group_size == 0;
+           the evaluator casts the input to fp32 before passing it in --
+           fp16/bf16 values are exact in fp32, so the quantization semantics are
+           unchanged
+      out  a 1-D float32 tensor of length rows*cols + rows*cols/group_size
+           (single-tensor output protocol, two segments packed):
+           out[:rows*cols]  = int8 code words promoted to float32 (integers in
+                              [-127,127])
+           out[rows*cols:]  = the per-group scales, in row-major order
+                              ((rows, cols/group_size) flattened)
+      __init__ hyperparameters: group_size (int, default 128), eps (float,
+      default 1e-10).
 
-    实现约束（违规判负）：
-      - 核心计算（组内 absmax、scale、量化码字）必须在提交文件内的 Triton
-        kernel 中完成；forward 里只允许做输入/输出整理（dtype 转换、两段
-        拼接打包等）。禁止调用 aiter / torch.quantize_per_tensor /
-        torch.quantize_per_channel。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间算术用 float32；scale 必须按 absmax/127 的 fp32 除法计算（预计算
-        倒数再乘会在截断边界把码字移位 1）；码字先 clamp(-128, 127) 再向零
-        截断转 int8。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (in-group absmax, scale, quantized code words)
+        must be completed in Triton kernels inside the submitted file; forward
+        may only do input/output shaping (dtype conversion, the two-segment
+        packing, etc.). Calling aiter / torch.quantize_per_tensor /
+        torch.quantize_per_channel is forbidden.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Intermediate arithmetic uses float32; the scale must be computed as the
+        fp32 division absmax/127 (precomputing a reciprocal and multiplying
+        shifts the code words by 1 at the truncation boundary); the code words
+        are first clamped to [-128, 127] and then truncated toward zero into
+        int8.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：2D 连续输入、torch.int8 码字、fp32 scale，不含 GEMM 后端计算。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: 2D contiguous input, torch.int8 code words, fp32 scale, without
+    the GEMM back-end computation.
     """
 
     def __init__(self, group_size: int = 128, eps: float = 1e-10):
@@ -56,30 +70,32 @@ class Model(nn.Module):
 
     def forward(self, x):
         gs = self.group_size
-        assert x.dim() == 2, "x 必须是 2D 张量"
-        assert x.shape[-1] % gs == 0, "最后一维必须能被 group_size 整除"
-        assert x.is_contiguous(), "x 必须连续"
+        assert x.dim() == 2, "x must be a 2D tensor"
+        assert x.shape[-1] % gs == 0, "the last dimension must be divisible by group_size"
+        assert x.is_contiguous(), "x must be contiguous"
 
         rows, cols = x.shape
         int8_min, int8_max = -128.0, 127.0
 
-        # 展平分组，全程 float32（eps 保护在 float32 下生效）
+        # Flatten into groups, float32 throughout (the eps guard acts in float32)
         y = x.to(torch.float32).reshape(-1, gs)
         amax = y.abs().amax(dim=1, keepdim=True)
         amax = torch.maximum(amax, torch.full_like(amax, self.eps))
         y_s = amax / int8_max                                 # (G, 1) float32
         y_q = (y / y_s).clamp(min=int8_min, max=int8_max).to(torch.int8)
 
-        # 单张量输出协议：[码字提升 float32 | scale float32]
+        # Single-tensor output protocol: [code words promoted to float32 | scale float32]
         codes = y_q.reshape(rows, cols).reshape(-1).to(torch.float32)
         scales = y_s.reshape(rows, cols // gs).reshape(-1)
         return torch.cat([codes, scales])
 
 
 def output_segments(init_kwargs, numel, inputs=None):
-    """给评测器：输出里两段的边界（见 task.yaml 的 tolerance_segments）。
+    """For the evaluator: the boundaries of the two output segments (see
+    tolerance_segments in task.yaml).
 
-    codes 段在前、scales 段在后；scale 段长 = 组数 = numel/(group_size+1)。
+    The codes segment comes first and the scales segment after it; the scale
+    segment length = number of groups = numel/(group_size+1).
     """
     gs = int(init_kwargs.get("group_size", 128))
     s_len = int(numel) // (gs + 1)
@@ -87,13 +103,14 @@ def output_segments(init_kwargs, numel, inputs=None):
 
 
 def get_init_inputs():
-    return [128]   # group_size；eps 缺省 1e-10
+    return [128]   # group_size; eps defaults to 1e-10
 
 
 def get_inputs():
-    # 固定 shape 族（官方测试最高频 case 128x7168x128）；随机部分消费全局
-    # RNG——评测器在 set_seed 后调用本函数，多轮 correctness trial 因此获得
-    # 输入多样性
+    # Fixed shape family (128x7168x128, the most frequent case in the official
+    # test); the random part consumes the global RNG -- the evaluator calls this
+    # function after set_seed, so multiple correctness trials therefore see
+    # diverse inputs
     rows, cols = 128, 7168
     x = torch.randn(rows, cols).to(torch.float16)
     return [x]
@@ -102,15 +119,19 @@ def get_inputs():
 def make_inputs(rows: int, cols: int, group_size: int, dtype: str = "float16",
                 eps: float = 1e-10, value_scale: float = 1.0,
                 zero_rows: int = 0, seed: int = 0):
-    """按公开/隐藏/性能案例描述生成输入。仅在评测端运行（CPU 生成，评测器
-    搬运到设备）。eps/group_size 供评测端构造 Model 用，这里只做契约校验。
+    """Generate inputs from a public/hidden/perf case description. Runs on the
+    evaluation side only (generated on CPU; the evaluator moves them to the
+    device). eps/group_size are used by the evaluation side to construct Model;
+    here they only check the contract.
 
-    消费顺序固定：randn(rows*cols) 一次，同 seed 下逐位可复现。
-    value_scale 缩放数值幅度、zero_rows 把前 k 行置为精确 0，均用于构造
-    eps 保护 / 全零组边界 case。
+    Consumption order is fixed: one randn(rows*cols) call, bit-reproducible for
+    the same seed.
+    value_scale scales the numerical magnitude and zero_rows sets the first k
+    rows to exact 0; both are used to build the eps-guard / all-zero-group
+    boundary cases.
     """
-    assert cols % group_size == 0, "cols 必须能被 group_size 整除"
-    assert 0 <= zero_rows <= rows, "zero_rows 越界"
+    assert cols % group_size == 0, "cols must be divisible by group_size"
+    assert 0 <= zero_rows <= rows, "zero_rows out of range"
 
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)

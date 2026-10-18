@@ -1,28 +1,32 @@
-# 1026_sage_attention_qk_int8_per_block — SageAttention 风格非 causal 前向
-# （Q/K per-block int8 码字 + per-block scale，PV fp16）的 model_class
-# （KernelBench 兼容）题目文件。
+# 1026_sage_attention_qk_int8_per_block -- SageAttention-style non-causal forward
+# (Q/K per-block int8 codewords + per-block scale, PV fp16), a model_class
+# (KernelBench compatible) task file.
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=1026, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=1026, backend=triton.
 
 import torch
 import torch.nn as nn
 
-# log2(e)：量化阶段把 softmax scale 与 log2(e) 一起折入 q_scale，kernel 侧
-# 以 2 为底做在线 softmax；反量化回自然对数域需除以该常数
+# log2(e): the quantization stage folds the softmax scale and log2(e) into
+# q_scale together, and the kernel side runs the online softmax in base 2;
+# converting the dequantized result back to the natural-log domain requires
+# dividing by this constant
 _LOG2E = 1.4426950408889634
 
 
 def _quant_per_block_int8(x, blk):
-    """对 [b, h, L, d] 沿 L 维每 blk 行一块做 absmax/127 对称 int8 量化。
+    """Quantize [b, h, L, d] to int8 symmetric form with absmax/127 per block of blk rows along L.
 
-    复刻源量化 kernel 的数值行为：块内全部元素的 absmax 作 scale（fp32），
-    x/scale 后加 0.5*sign 再向零截断（round-half-away-from-zero）。
-    返回 (int8 码字 [b,h,L,d], scale [b,h,ceil(L/blk)] fp32)。
+    Replicates the numeric behaviour of the source quantization kernel: the
+    absmax over all block elements is the scale (fp32), then x/scale is offset by
+    0.5*sign and truncated toward zero (round-half-away-from-zero). Returns
+    (int8 codewords [b,h,L,d], scale [b,h,ceil(L/blk)] fp32).
     """
     b, h, length, d = x.shape
     n_blk = (length + blk - 1) // blk
@@ -40,11 +44,13 @@ def _quant_per_block_int8(x, blk):
 
 
 def _sage_quantize(q, k, v, sm_scale=None):
-    """把 HND 布局的 fp16 q/k/v 变换成本题前向的输入（量化阶段仿真）。
+    """Turn fp16 q/k/v in HND layout into the inputs of this task's forward (quantization-stage emulation).
 
-    smooth_k 默认开启：k 先减去沿序列维的均值（每行 logit 恒减 q·km，softmax
-    语义不变）；q 的量化把 sm_scale*log2(e) 折入 scale，k 的量化不折 scale。
-    Q 按 128 行分块，K 按 64 行分块。
+    smooth_k is on by default: k first has its mean along the sequence dimension
+    subtracted (every row of logits is reduced by the same q dot km, so the
+    softmax semantics are unchanged); the quantization of q folds
+    sm_scale*log2(e) into the scale, while the quantization of k folds no scale
+    in. Q is blocked in 128 rows and K in 64 rows.
     """
     head_dim = q.shape[-1]
     if sm_scale is None:
@@ -57,68 +63,84 @@ def _sage_quantize(q, k, v, sm_scale=None):
 
 
 class Model(nn.Module):
-    """SageAttention 风格的非 causal scaled dot-product attention 前向：
-    Q/K 已按块做 int8 对称量化（per-block absmax/127 scale），V 保持 fp16。
+    """SageAttention-style non-causal scaled dot-product attention forward:
+    Q/K are already quantized per block to int8 symmetric form (per-block
+    absmax/127 scale), while V stays fp16.
 
-    数学定义（g = num_q_heads // num_kv_heads，query 头 h 对应 KV 头 h//g；
-    量化分块：Q 沿序列方向每 128 行一块、K 每 64 行一块，块编号分别为
-    i//128 与 j//64，即 q_scale/k_scale 最后一维的索引）：
-      dq[b,h,i,:]    = q_int8[b,h,i,:] * q_scale[b,h,i//128]    （float32 反量化）
+    Mathematical definition (g = num_q_heads // num_kv_heads, query head h
+    corresponds to KV head h//g; quantization blocking: Q in blocks of 128 rows
+    along the sequence direction and K in blocks of 64 rows, with block indices
+    i//128 and j//64 respectively, i.e. the index along the last dimension of
+    q_scale/k_scale):
+      dq[b,h,i,:]    = q_int8[b,h,i,:] * q_scale[b,h,i//128]    (float32 dequant)
       dk[b,hk,j,:]   = k_int8[b,hk,j,:] * k_scale[b,hk,j//64]
       logit[b,h,i,j] = <dq[b,h,i,:], dk[b,h//g,j,:]> / log2(e)
-      （除以 log2(e)：量化阶段已把 softmax scale 与 log2(e) 折入 q_scale，
-        源 kernel 以 2 为底做在线 softmax，此处统一回自然对数域）
-      attn_mask[i,j] 为 False 的位置 logit 记 -inf（bool 掩码，
-        形状 [qo_len, kv_len]，对全部 batch 与头共享）
+      (divide by log2(e): the quantization stage already folded the softmax scale
+         and log2(e) into q_scale, and the source kernel runs the online softmax
+         in base 2, so everything is converted back to the natural-log domain
+         here)
+      positions where attn_mask[i,j] is False get logit = -inf (bool mask,
+        shape [qo_len, kv_len], shared by all batches and heads)
       p[b,h,i,:]   = softmax_j(logit[b,h,i,:])
       out[b,h,i,:] = sum_j p[b,h,i,j] * v[b,h//g,j,:]
-    softmax 采用数值稳定的在线实现语义；参考实现全程 float32（int8 码字的
-    点积在 float32 下是精确整数算术），输出 cast 回 v 的 dtype。
-    数值方案（源算子采用、提交可沿用）：p 转 fp16 与 v 做 fp16 矩阵乘，
-    每个 KV 分片的结果累加进 float32 缓冲（"PV fp16 + fp32 分片累加"），
-    int8 QK^T 用 int8 输入的矩阵乘直接整数累加——无论采用哪种数值方案，
-    都必须在容差内匹配本参考实现。
-    边界行为：qo_len 与 kv_len 可不相等，也无需是分块大小的整数倍（尾块
-    照常参与反量化与 softmax）；题面保证每个 query 行至少有一个未掩码
-    位置，softmax 分母恒为正。
+    The softmax follows the semantics of a numerically stable online
+    implementation; the reference implementation works entirely in float32 (the
+    dot product of int8 codewords is exact integer arithmetic in float32), and
+    the output is cast back to the dtype of v.
+    Numeric scheme (used by the source operator, a submission may reuse it): cast
+    p to fp16 and do the matrix multiply against v in fp16, accumulating the
+    result of each KV shard into a float32 buffer ("PV fp16 + fp32 shard
+    accumulation"), and do the int8 QK^T with a matrix multiply of int8 inputs
+    accumulating directly in integers -- whichever numeric scheme is used, it
+    must match this reference implementation within the tolerance.
+    Boundary behaviour: qo_len and kv_len may differ and need not be integer
+    multiples of the block sizes (the tail block takes part in the
+    dequantization and the softmax as usual); the task guarantees that every
+    query row has at least one unmasked position, so the softmax denominator is
+    always positive.
 
-    输入输出规格（tensor_layout="HND"/"NHD" 由 __init__ 指定）：
+    Input/output specification (tensor_layout="HND"/"NHD" is given by __init__):
       q_int8   int8     HND [batch, num_q_heads, qo_len, head_dim]
                          NHD [batch, qo_len, num_q_heads, head_dim]
       k_int8   int8     HND [batch, num_kv_heads, kv_len, head_dim]
                          NHD [batch, kv_len, num_kv_heads, head_dim]
-      v        float16  与 k_int8 同布局、同 KV 头数
-      q_scale  float32  [batch, num_q_heads, ceil(qo_len/128)]（与布局无关）
-      k_scale  float32  [batch, num_kv_heads, ceil(kv_len/64)]（与布局无关）
-      attn_mask bool    [qo_len, kv_len]（与布局无关）
-      out      与 q_int8 同形状，dtype 同 v（单张量输出）
-    全域约束：num_q_heads 是 num_kv_heads 的整数倍（GQA；相等即 MHA）；
-    head_dim ∈ {64, 128}；qo_len, kv_len >= 1。
+      v        float16  same layout and same number of KV heads as k_int8
+      q_scale  float32  [batch, num_q_heads, ceil(qo_len/128)] (layout independent)
+      k_scale  float32  [batch, num_kv_heads, ceil(kv_len/64)] (layout independent)
+      attn_mask bool    [qo_len, kv_len] (layout independent)
+      out      same shape as q_int8, dtype same as v (single-tensor output)
+    Global-domain constraints: num_q_heads is an integer multiple of num_kv_heads
+    (GQA; equality means MHA); head_dim in {64, 128}; qo_len, kv_len >= 1.
 
-    实现约束（违规判负）：
-      - 核心计算（int8 QK^T / 反量化 / softmax / PV）必须在提交文件内
-        完成，禁止调用 scaled_dot_product_attention / sdpa / flash_attn /
-        torch.matmul / torch.bmm / torch.mm / torch.addmm / F.linear /
-        torch.einsum / torch.softmax。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间累加用 float32；输出 cast 回输入 dtype。
-      - 评测器会把全部输入 cast 成 fp32 后传入 forward：int8 码字、fp16 的
-        v 与 bool 掩码均可被 fp32 精确表示，入口处无损恢复原 dtype。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (int8 QK^T / dequantization / softmax / PV) must be
+        completed inside the submitted file; calling
+        scaled_dot_product_attention / sdpa / flash_attn / torch.matmul /
+        torch.bmm / torch.mm / torch.addmm / F.linear / torch.einsum /
+        torch.softmax is forbidden.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Use float32 for intermediate accumulation; the output is cast back to
+        the input dtype.
+      - The evaluator casts every input to fp32 before calling forward: the int8
+        codewords, the fp16 v and the bool mask are all exactly representable in
+        fp32, so the original dtypes are recovered losslessly at the entry.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：非 causal 前向、bool 掩码、GQA、HND/NHD 两种布局；不含
-    causal 变体、float 加性掩码、LSE 输出与量化阶段本身（int8 码字由
-    输入直接给出）。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: non-causal forward, bool mask, GQA, both the HND and NHD layouts;
+    does not include the causal variant, float additive masks, LSE output, or the
+    quantization stage itself (the int8 codewords are given directly as inputs).
     """
 
     def __init__(self, tensor_layout="HND"):
         super().__init__()
-        assert tensor_layout in ("HND", "NHD"), "tensor_layout 只支持 HND / NHD"
+        assert tensor_layout in ("HND", "NHD"), "tensor_layout only supports HND / NHD"
         self.tensor_layout = tensor_layout
 
     def forward(self, q_int8, k_int8, v, q_scale, k_scale, attn_mask):
-        # 说明：forward 全部使用单行语句（条件用条件表达式），保证 loader 把
-        # 逐条语句提取进 ModelNew scaffold 时不破坏缩进
+        # Note: forward uses single-line statements only (conditions are written
+        # as conditional expressions), so that the loader extracting the
+        # statements one by one into the ModelNew scaffold does not break
+        # indentation
         q_int8 = q_int8.to(torch.int8)
         k_int8 = k_int8.to(torch.int8)
         v = v.to(torch.float16)
@@ -126,23 +148,27 @@ class Model(nn.Module):
         k_scale = k_scale.to(torch.float32)
         attn_mask = attn_mask.to(torch.bool)
         nhd = self.tensor_layout == "NHD"
-        # NHD [b,l,h,d] 统一换轴成 HND [b,h,l,d] 视角计算
+        # NHD [b,l,h,d] is uniformly transposed into the HND [b,h,l,d] view for the computation
         q = (q_int8.permute(0, 2, 1, 3) if nhd else q_int8).to(torch.float32)
         k = (k_int8.permute(0, 2, 1, 3) if nhd else k_int8).to(torch.float32)
         vv = (v.permute(0, 2, 1, 3) if nhd else v).to(torch.float32)
         b, h_q, qo_len, head_dim = q.shape
         h_kv, kv_len = k.shape[1], k.shape[2]
         group = h_q // h_kv
-        assert h_q == h_kv * group, "num_q_heads 必须是 num_kv_heads 的整数倍"
-        # GQA：同一 KV head 的 K/V（及 k_scale）复制给 group 内的每个 query head
+        assert h_q == h_kv * group, "num_q_heads must be an integer multiple of num_kv_heads"
+        # GQA: the K/V (and k_scale) of one KV head are replicated to every
+        # query head in the group
         k = k.repeat_interleave(group, dim=1)
         vv = vv.repeat_interleave(group, dim=1)
         k_scale = k_scale.repeat_interleave(group, dim=1)
-        # per-block scale 展开到序列维：Q 块 128 行、K 块 64 行
+        # Expand the per-block scale to the sequence dimension: Q blocks of 128
+        # rows, K blocks of 64 rows
         qs = q_scale.repeat_interleave(128, dim=-1)[..., :qo_len]   # [b,h_q,qo_len]
         ks = k_scale.repeat_interleave(64, dim=-1)[..., :kv_len]    # [b,h_q,kv_len]
-        # int8 码字点积（fp32 下为精确整数算术）后按块反量化，除以 log2(e)
-        # 换回自然对数域（常数内联，保证 scaffold 自包含）
+        # int8 codeword dot product (exact integer arithmetic under fp32), then
+        # dequantize per block and divide by log2(e) to get back to the
+        # natural-log domain (the constant is inlined so the scaffold stays
+        # self-contained)
         logits = torch.matmul(q, k.transpose(-2, -1))
         logits = logits * qs[:, :, :, None] * ks[:, :, None, :] / 1.4426950408889634
         logits = logits.masked_fill(~attn_mask, float("-inf"))
@@ -157,11 +183,12 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family; the random part consumes the global RNG -- the
+    # evaluator calls this function after set_seed, so multiple correctness
+    # trials therefore see diverse inputs
     batch = 2
     num_kv_heads = 4
-    query_group_size = 2      # num_q_heads = 8（GQA）
+    query_group_size = 2      # num_q_heads = 8 (GQA)
     qo_len = 256
     kv_len = 512
     head_dim = 64
@@ -172,7 +199,8 @@ def get_inputs():
     v = torch.randn(batch, num_kv_heads, kv_len, head_dim).to(torch.float16)
     q_int8, k_int8, v, q_scale, k_scale = _sage_quantize(q, k, v)
 
-    # bool 掩码：随机丢弃约 15% 位置，第 0 列恒开，保证每行至少一个未掩码位
+    # bool mask: randomly drop about 15% of the positions, column 0 is always on,
+    # guaranteeing at least one unmasked position per row
     attn_mask = torch.rand(qo_len, kv_len) > 0.15
     attn_mask[:, 0] = True
     return [q_int8, k_int8, v, q_scale, k_scale, attn_mask]
@@ -182,20 +210,22 @@ def make_inputs(batch: int, num_q_heads: int, num_kv_heads: int, qo_len: int,
                 kv_len: int, head_dim: int, tensor_layout: str = "HND",
                 mask_mode: str = "all_true", dtype: str = "float16",
                 seed: int = 0):
-    """确定性 case 生成器（CPU，torch.Generator 按 seed 初始化）。
+    """Deterministic case generator (CPU, torch.Generator initialized from seed).
 
-    先按 HND 视角生成 fp16 q/k/v，经 smooth_k 与 per-block int8 量化
-    （Q 块 128 行、K 块 64 行，sm_scale 折入 q_scale），再按需转到
-    NHD 布局。mask_mode："all_true" 全开；"random" 随机掩掉约 15%
-    位置并强制第 0 列为 True。字段与 hidden/perf case 一一对应。
+    fp16 q/k/v are generated in the HND view first, go through smooth_k and
+    per-block int8 quantization (Q blocks of 128 rows, K blocks of 64 rows,
+    sm_scale folded into q_scale), and are then transposed to the NHD layout when
+    required. mask_mode: "all_true" leaves everything open; "random" randomly
+    masks about 15% of the positions and forces column 0 to True. The fields map
+    one to one onto the hidden/perf cases.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
 
     group = num_q_heads // num_kv_heads
-    assert num_q_heads == num_kv_heads * group, "num_q_heads 必须是 num_kv_heads 的整数倍"
-    assert head_dim in (64, 128), "head_dim 仅支持 64 / 128"
-    assert tensor_layout in ("HND", "NHD"), "tensor_layout 只支持 HND / NHD"
+    assert num_q_heads == num_kv_heads * group, "num_q_heads must be an integer multiple of num_kv_heads"
+    assert head_dim in (64, 128), "head_dim only supports 64 / 128"
+    assert tensor_layout in ("HND", "NHD"), "tensor_layout only supports HND / NHD"
 
     q = torch.randn(batch, num_q_heads, qo_len, head_dim, generator=gen).to(dt)
     k = torch.randn(batch, num_kv_heads, kv_len, head_dim, generator=gen).to(dt)

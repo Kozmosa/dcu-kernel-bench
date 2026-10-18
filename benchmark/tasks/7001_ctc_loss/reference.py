@@ -1,83 +1,106 @@
-# 7001_ctc_loss —— CTC 前向损失（手写 alpha/beta 前向-后向动态规划）的
-# KernelBench 兼容题目文件。
+# 7001_ctc_loss -- CTC forward loss (hand-written alpha/beta forward-backward
+# dynamic programming), a KernelBench-compatible task file.
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=7001, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=7001, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """CTC（Connectionist Temporal Classification）前向损失：一次前向同时算出
-    逐序列 CTC 损失与对输入概率的梯度。输入 probs 是**概率**而不是 logits
-    （等价于生产库 apply_softmax=False 口径：直接对 probs 取 log，不做
-    softmax），沿类别维每帧为正数且和为 1；blank 类别 id 由超参给出
-    （生成域恒为 0）。
+    """CTC (Connectionist Temporal Classification) forward loss: one forward pass
+    produces both the per-sequence CTC loss and the gradient with respect to the
+    input probabilities. The input probs holds **probabilities**, not logits
+    (equivalent to the production library's apply_softmax=False convention: take
+    the log of probs directly, no softmax), positive every frame along the class
+    dimension and summing to 1; the blank class id is given by a hyperparameter
+    (always 0 in the generation domain).
 
-    布局与输入契约（time-major 输入）：
-      probs          (T, N, C) 浮点概率张量，T=max_time、N=batch、C=num_classes
-      labels         (sum(label_lengths),) 整型，按 batch 顺序拼接的扁平标签
-                     序列，标签取值 [0, C-1] 且不等于 blank（生成域为 [1, C-1]）
-      label_lengths  (N,) 整型，各序列目标长度
-      input_lengths  (N,) 整型，各序列有效输入帧数（1 <= input_lengths[n] <= T）
-    数学定义（对每个序列 n，记 Tb=input_lengths[n]、目标 l_1..l_L
-    （L=label_lengths[n]），扩展状态序列 ext = [b, l_1, b, l_2, ..., b, l_L, b]
-    （前后及每两个标签之间插入 blank），S = 2L+1 个状态，s = 0..S-1；
-    全部递推在 log 空间、float32 中进行，-inf 表示不可达）：
-      前向变量 alpha（尺寸 (Tb, S)）：
-        alpha[0,0] = log p[0, blank]；alpha[0,1] = log p[0, ext[1]]（S>1）；
-        其余 -inf
+    Layout and input contract (time-major inputs):
+      probs          (T, N, C) floating-point probability tensor, T=max_time,
+                     N=batch, C=num_classes
+      labels         (sum(label_lengths),) integer, the flattened label sequences
+                     concatenated in batch order; label values lie in [0, C-1]
+                     and are not equal to blank ([1, C-1] in the generation
+                     domain)
+      label_lengths  (N,) integer, target length of each sequence
+      input_lengths  (N,) integer, number of valid input frames of each sequence
+                     (1 <= input_lengths[n] <= T)
+    Mathematical definition (for each sequence n, write Tb=input_lengths[n], the
+    target l_1..l_L (L=label_lengths[n]) and the extended state sequence
+    ext = [b, l_1, b, l_2, ..., b, l_L, b] (blank inserted before and after and
+    between every two labels), S = 2L+1 states, s = 0..S-1; every recurrence runs
+    in log space in float32, with -inf meaning unreachable):
+      forward variable alpha (shape (Tb, S)):
+        alpha[0,0] = log p[0, blank]; alpha[0,1] = log p[0, ext[1]] (S>1);
+        everything else -inf
         alpha[t,s] = log p[t, ext[s]] + LSE( alpha[t-1,s], alpha[t-1,s-1],
-                     alpha[t-1,s-2]（仅当 ext[s] != blank 且 ext[s] != ext[s-2]） )
-      后向变量 beta（对称；beta 不含本帧发射，使 alpha+beta 对每条过状态 s
-      的完整对齐路径恰好把每个发射因子计一次）：
-        beta[Tb-1,S-1] = beta[Tb-1,S-2] = 0（S>1），其余 -inf
+                     alpha[t-1,s-2] (only when ext[s] != blank and
+                     ext[s] != ext[s-2]) )
+      backward variable beta (symmetric; beta does not include the emission of
+      the current frame, so that alpha+beta counts every emission factor exactly
+      once along each complete alignment path through state s):
+        beta[Tb-1,S-1] = beta[Tb-1,S-2] = 0 (S>1), everything else -inf
         beta[t,s] = LSE( log p[t+1,ext[s]] + beta[t+1,s],
                          log p[t+1,ext[s+1]] + beta[t+1,s+1],
                          log p[t+1,ext[s+2]] + beta[t+1,s+2]
-                         （最后一项仅当 ext[s] != blank 且 ext[s] != ext[s+2]） )
-      losses[n] = -log Z，Z = LSE( alpha[Tb-1,S-1], alpha[Tb-1,S-2] )
-        （全部合法对齐路径的概率和；reduction 为逐序列 'none'）
+                         (the last term only when ext[s] != blank and
+                         ext[s] != ext[s+2]) )
+      losses[n] = -log Z, Z = LSE( alpha[Tb-1,S-1], alpha[Tb-1,S-2] )
+        (the probability sum over all legal alignment paths; the reduction is the
+        per-sequence 'none')
       gamma[t,s] = exp( alpha[t,s] + beta[t,s] - log Z )
       gradients[n,t,k] = d losses[n] / d probs[n,t,k]
-        = -(1 / p[t,k]) * sum_{s: ext[s]=k} gamma[t,s]，t < Tb；t >= Tb 处为 0
-    forward 返回**单个一维张量** out（dtype 同 probs，单张量打包协议）：
-      out[0:N]         = losses（N 项）
-      out[N : N+N*T*C] = gradients 按 (N, T, C) 行主序平铺
-    边界行为：
-      - 生成域保证 probs 严格为正（softmax 口径）、标签无连续重复且
-        L <= Tb，故 Z 有限，无 inf/NaN；losses 量级 <= T*ln(C)，fp16 可表示。
-      - 不可达状态的 alpha/beta 为 -inf，gamma 对应为 0。
-      - 梯度对概率输入定义（非对 log 概率）：链式因子 1/p[t,k] 已含在定义中。
+        = -(1 / p[t,k]) * sum_{s: ext[s]=k} gamma[t,s], t < Tb; 0 for t >= Tb
+    forward returns **a single 1-D tensor** out (dtype same as probs, the
+    single-tensor packing protocol):
+      out[0:N]         = losses (N entries)
+      out[N : N+N*T*C] = gradients flattened in (N, T, C) row-major order
+    Boundary behaviour:
+      - the generation domain guarantees probs strictly positive (the softmax
+        convention), labels without consecutive repeats and L <= Tb, so Z is
+        finite with no inf/NaN; losses are on the order of <= T*ln(C), which fp16
+        can represent.
+      - the alpha/beta of unreachable states are -inf and the matching gamma is 0.
+      - the gradient is defined with respect to the probability input (not the
+        log probability): the chain factor 1/p[t,k] is already part of the
+        definition.
 
-    输入输出规格：
-      probs          float32 / float16 / bfloat16 (T, N, C)，contiguous
-      labels / label_lengths / input_lengths   整型 (…,)，contiguous
-      out            单张量、一维、同 probs dtype、长度 N + N*T*C
-      评测器会把全部输入 cast 成 fp32 传入（整型张量需自行恢复为 long，
-      整数值在 fp32 下可无损表示）。
+    Input/output specification:
+      probs          float32 / float16 / bfloat16 (T, N, C), contiguous
+      labels / label_lengths / input_lengths   integer (...,), contiguous
+      out            a single 1-D tensor, same dtype as probs, length N + N*T*C
+      The evaluator casts all inputs to fp32 before passing them in (integer
+      tensors must be restored to long by the implementation; their integer
+      values are losslessly representable in fp32).
 
-    实现约束（违规判负）：
-      - 核心计算（log 概率、alpha/beta 前向-后向递推、梯度组装）必须在提交
-        文件内以 Triton kernel 完成。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间计算在 float32 中进行（先把 probs cast 到 fp32 再取 log），输出
-        cast 回 probs dtype 后按上述打包协议拼接为单张量。
-      - forward 返回单张量 out（评测器按单输出比较）。
+    Implementation constraints (violations are scored as failures):
+      - Core computation (log probabilities, the alpha/beta forward-backward
+        recurrence, gradient assembly) must be done with a Triton kernel inside
+        the submitted file.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Intermediate computation happens in float32 (cast probs to fp32 first,
+        then take the log); the output is cast back to the probs dtype and then
+        concatenated into a single tensor per the packing protocol above.
+      - forward returns the single tensor out (the evaluator compares a single
+        output).
 
-    禁用列表：aiter / torch.nn.functional.ctc_loss / torch.ctc_loss /
+    Disallowed list: aiter / torch.nn.functional.ctc_loss / torch.ctc_loss /
     F.ctc_loss / torch.nn.CTCLoss / torch.ops.aten.ctc_loss /
-    torch.ops.aten._ctc_loss / aten.ctc_loss / .ctc_loss(（含一切库级一步
-    CTC 原语） / warpctc / warp_ctc / torch.autograd 与 .backward()（禁止
-    以自动微分求梯度）。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：单 blank、reduction='none'（逐序列损失 + 全量梯度）、
-    输入已是概率（无 apply_softmax 分支）、无空目标序列。
+    torch.ops.aten._ctc_loss / aten.ctc_loss / .ctc_loss( (including every
+    library-level one-step CTC primitive) / warpctc / warp_ctc / torch.autograd
+    and .backward() (automatic differentiation must not be used to obtain the
+    gradient).
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: single blank, reduction='none' (per-sequence loss plus the full
+    gradient), the input is already a probability (no apply_softmax branch), and
+    there are no empty target sequences.
     """
 
     def __init__(self, blank: int = 0):
@@ -85,16 +108,19 @@ class Model(nn.Module):
         self.blank = int(blank)
 
     def _ctc_one(self, logp_b, p_b, target, tb, num_classes, max_time):
-        # 单序列 log 空间前向-后向：logp_b / p_b 为 (T, C) fp32 的 log 概率 /
-        # 概率，target (L,) long，tb 为有效帧数；返回 (loss_n, grad_n)，
-        # grad_n 为 (max_time, C)、有效帧数之外恒 0
+        # Single-sequence log-space forward-backward: logp_b / p_b are the (T, C)
+        # fp32 log probabilities / probabilities, target is (L,) long, tb is the
+        # number of valid frames; returns (loss_n, grad_n) with grad_n of shape
+        # (max_time, C), always 0 outside the valid frames
         C = num_classes
         L = target.numel()
         S = 2 * L + 1
         neg_inf = float("-inf")
-        # device=dev 必需：本函数内构造的所有中间张量都要与已在设备上的 logp_b/p_b
-        # 同设备；漏 device 会在 CUDA/DCU 上抛 "Expected all tensors to be on the
-        # same device"（CPU 上跑得通，所以本地单测发现不了）
+        # device=dev is required: every intermediate tensor built inside this
+        # function must live on the same device as logp_b/p_b, which are already
+        # on it; omitting device raises "Expected all tensors to be on the same
+        # device" on CUDA/DCU (it works on CPU, so local unit tests cannot catch
+        # it)
         dev = logp_b.device
 
         ext = torch.empty(S, dtype=torch.long, device=dev)
@@ -105,7 +131,8 @@ class Model(nn.Module):
         alpha = torch.full((tb, S), neg_inf, dtype=torch.float32, device=dev)
         beta = torch.full((tb, S), neg_inf, dtype=torch.float32, device=dev)
 
-        # 前向递推（时间维步进，状态维整体向量化）
+        # Forward recurrence (stepping over the time dimension, the state
+        # dimension vectorized as a whole)
         alpha[0, 0] = lp_ext[0, 0]
         alpha[0, 1] = lp_ext[0, 1]
         for t in range(1, tb):
@@ -118,8 +145,9 @@ class Model(nn.Module):
             jump[2:] = torch.where(ok, jump[2:], torch.full((S - 2,), neg_inf, dtype=torch.float32, device=dev))
             alpha[t] = lp_ext[t] + torch.logsumexp(torch.stack((prev, left, jump)), dim=0)
 
-        # 后向递推（beta 不含本帧发射：alpha+beta 对过状态 s 的完整路径
-        # 恰好计一次每个发射因子，gamma 即状态后验）
+        # Backward recurrence (beta excludes the current frame's emission:
+        # alpha+beta counts every emission factor exactly once along a complete
+        # path through state s, so gamma is the state posterior)
         beta[tb - 1, S - 1] = 0.0
         beta[tb - 1, S - 2] = 0.0
         for t in range(tb - 2, -1, -1):
@@ -133,19 +161,20 @@ class Model(nn.Module):
             beta[t] = torch.logsumexp(torch.stack((nxt, right, jump)), dim=0)
 
         log_z = torch.logsumexp(alpha[tb - 1] + beta[tb - 1], dim=0)
-        gamma = torch.exp(alpha + beta - log_z)        # (tb, S) 状态后验
+        gamma = torch.exp(alpha + beta - log_z)        # (tb, S) state posterior
 
         # dL/dp[t,k] = -(1/p[t,k]) * sum_{s: ext[s]=k} gamma[t,s]
         grad = torch.zeros(tb, C, dtype=torch.float32, device=dev)
         grad.index_add_(1, ext, -gamma)
-        grad = grad / p_b[:tb]                         # 除以 p（probs 严格为正）
+        grad = grad / p_b[:tb]                         # divide by p (probs is strictly positive)
 
         grad_full = torch.zeros(max_time, C, dtype=torch.float32, device=dev)
         grad_full[:tb] = grad
         return -log_z, grad_full
 
     def forward(self, probs, labels, label_lengths, input_lengths):
-        # 在线评测器会把整型输入 cast 成 fp32；整数值可无损恢复
+        # The online evaluator casts the integer inputs to fp32; the integer
+        # values restore losslessly
         labels = labels.to(torch.long)
         label_lengths = label_lengths.to(torch.long)
         input_lengths = input_lengths.to(torch.long)
@@ -167,21 +196,24 @@ class Model(nn.Module):
             losses[n] = loss_n
             grads[n] = grad_n
 
-        # 单张量打包：losses (N,) 在前，gradients (N, T, C) 行主序平铺在后，
-        # cast 回 probs dtype 后拼接为单个一维张量
+        # Single-tensor packing: losses (N,) first, then gradients (N, T, C)
+        # flattened in row-major order; both cast back to the probs dtype and
+        # concatenated into one 1-D tensor
         losses = losses.to(probs.dtype).reshape(-1)
         grads = grads.to(probs.dtype).reshape(-1)
         return torch.cat((losses, grads))
 
 
 def get_init_inputs():
-    return [0]   # blank（生成域恒为 0，与生产库 blank_label_id=0 一致）
+    return [0]   # blank (always 0 in the generation domain, consistent with the production library's blank_label_id=0)
 
 
 def get_inputs():
-    # 固定 shape 族（与生产样例调用契约一致）；随机部分消费全局 RNG——probs 由
-    # randn 经 softmax 得到合法概率（沿类别维和为 1、严格为正）。评测器在
-    # set_seed 后调用本函数，多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family (consistent with the production sample call contract);
+    # the random part consumes the global RNG -- probs comes from randn passed
+    # through softmax to give legal probabilities (summing to 1 along the class
+    # dimension and strictly positive). The evaluator calls this function after
+    # set_seed, so multiple correctness trials see diverse inputs
     max_time, batch, num_classes = 500, 4, 5
     input_lengths = [4, 100, 100, 200]
     label_lengths = [1, 2, 1, 3]
@@ -198,30 +230,34 @@ def get_inputs():
 
 def make_inputs(max_time, batch, num_classes, input_lengths, label_lengths,
                 labels, blank=0, dtype="float32", seed=0):
-    """按公开/隐藏/性能案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden/perf case description. Runs on the
+    evaluation side only (generated on CPU; the evaluator moves them to the
+    device).
 
-    消费顺序固定：probs（randn 后 softmax 沿类别维归一化，再 cast 到 dtype）
-    为唯一随机量，labels / label_lengths / input_lengths 为案例给定的确定
-    值、不消费随机数；同 seed 下逐位可复现。blank 同时是构造 Model 的 init
-    超参，此处校验标签域与可行性（标签 != blank、无连续重复、
-    1 <= L <= 有效帧数 <= max_time、num_classes >= 2）。
+    The consumption order is fixed: probs (randn then softmax normalized along
+    the class dimension, then cast to dtype) is the only random quantity, while
+    labels / label_lengths / input_lengths are deterministic values given by the
+    case and consume no randomness; bit-reproducible under the same seed. blank
+    is also the init hyperparameter used to build Model, so the label domain and
+    feasibility are validated here (labels != blank, no consecutive repeats,
+    1 <= L <= valid frames <= max_time, num_classes >= 2).
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
-    assert max_time >= 1 and batch >= 1, "需 max_time >= 1 且 batch >= 1"
-    assert num_classes >= 2, "至少需要 blank + 1 个非空类别（num_classes >= 2）"
-    assert 0 <= blank < num_classes, "blank 必须是合法类别 id"
-    assert len(input_lengths) == batch and len(label_lengths) == batch, "长度向量须与 batch 一致"
-    assert len(labels) == sum(label_lengths), "labels 长度须等于 sum(label_lengths)"
+    assert max_time >= 1 and batch >= 1, "max_time >= 1 and batch >= 1 are required"
+    assert num_classes >= 2, "at least blank plus 1 non-blank class are needed (num_classes >= 2)"
+    assert 0 <= blank < num_classes, "blank must be a legal class id"
+    assert len(input_lengths) == batch and len(label_lengths) == batch, "the length vectors must match batch"
+    assert len(labels) == sum(label_lengths), "the length of labels must equal sum(label_lengths)"
     for il, ll in zip(input_lengths, label_lengths):
-        assert 1 <= ll <= il <= max_time, "需 1 <= label_length <= input_length <= max_time"
+        assert 1 <= ll <= il <= max_time, "1 <= label_length <= input_length <= max_time is required"
     pos = 0
     for ll in label_lengths:
         seg = labels[pos:pos + ll]
         pos += ll
         for a, b in zip(seg, seg[1:]):
-            assert a != b, "生成域保证标签无连续重复"
-        assert all(v != blank for v in seg), "标签不得等于 blank"
+            assert a != b, "the generation domain guarantees labels without consecutive repeats"
+        assert all(v != blank for v in seg), "labels must not equal blank"
 
     probs = torch.softmax(torch.randn(max_time, batch, num_classes, generator=gen), dim=-1).to(dt)
     return (

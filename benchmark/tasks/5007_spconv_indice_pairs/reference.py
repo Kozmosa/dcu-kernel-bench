@@ -1,124 +1,151 @@
-# 5007_spconv_indice_pairs —— 稀疏卷积 indice pairs 生成（spconv 风格索引
-# 对表构建）的 model_class（KernelBench 兼容）题目文件。
+# 5007_spconv_indice_pairs -- model_class (KernelBench compatible) task file for
+# sparse convolution indice pairs generation (spconv-style index-pair table
+# construction).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=5007, backend=cuda（HIP）。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=2, problem_id=5007, backend=cuda (HIP).
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """稀疏卷积 indice pairs 生成：由活跃输入点表与卷积几何参数，构建稀疏卷
-    积前向所需的索引对表（spconv 风格 kernel map，Native 算法、非 subm）。
+    """Sparse convolution indice pairs generation: from the active input point
+    table and the convolution geometry, build the index-pair table required by
+    the sparse convolution forward pass (spconv-style kernel map, Native
+    algorithm, not subm).
 
-    输入 indices 是 (n, ndim+1) 的活跃点表，每行 [batch_idx, x_0, ..., x_{ndim-1}]
-    （列 0 为 batch 下标，其余为空间坐标），行互异、顺序任意。
+    The input indices is an (n, ndim+1) active point table, each row
+    [batch_idx, x_0, ..., x_{ndim-1}] (column 0 is the batch index, the rest are
+    the spatial coordinates); rows are distinct and in arbitrary order.
 
-    卷积几何由 6 个构造超参给出：batch_size（B）、input_dims（网格各维大小
-    D）、ksize（K）、stride（S）、padding（P）、dilation（L），均为每维列表
-    （1D/2D/3D）。派生量：
+    The convolution geometry is given by 6 constructor hyper-parameters:
+    batch_size (B), input_dims (the size of each grid dimension, D), ksize (K),
+    stride (S), padding (P), dilation (L), all lists with one entry per dimension
+    (1D/2D/3D). Derived quantities:
         kv = prod(K)
         output_dims[d] = (D[d] + 2*P[d] - L[d]*(K[d]-1) - 1) // S[d] + 1
-    kernel 偏移 k ∈ [0, kv) 按混合进制（C-order）分解为每维偏移 o_d：第 0 维
-    最慢、第 ndim-1 维最快，即 k = o_0*K_1*...*K_{n-1} + ... + o_{ndim-1}。
+    The kernel offset k in [0, kv) is decomposed into the per-dimension offsets
+    o_d in mixed radix (C-order): dimension 0 is the slowest and dimension
+    ndim-1 the fastest, i.e. k = o_0*K_1*...*K_{n-1} + ... + o_{ndim-1}.
 
-    生成规则（按此顺序枚举：外层 k 从 0 到 kv-1，内层输入行 i 从 0 到 n-1；
-    每个有效对 (k, i) 依次处理）：
-        对每维 d 令 val = x_d + P[d] - o_d*L[d]；
-        对 (k, i) 有效当且仅当 0 <= batch_idx < B，且每维满足
-            val % S[d] == 0（整除）且 0 <= val // S[d] < output_dims[d]，
-        此时输出坐标为 q_d = val // S[d]（batch 不变）。
-        (1) 输出点去重编号：有效输出坐标 (batch_idx, q_0..q_{ndim-1}) 首次
-            出现时按枚举序赋予递增行号 r（从 0 开始）；out_indices 的第 r 行
-            写入该坐标。有效输出数 m 的上界为
-            cap = min(kv * n, B * prod(output_dims))（有效对数与输出网格容量
-            的较小者），out_indices 形状固定 (cap, ndim+1)（容量式分配，有效
-            行数 m <= cap），行号 >= m 的行全部填 -1。
-        (2) indice_pairs 形状 (2, kv, n)，先全填 -1；对偏移 k，其第 c 个有效
-            对（c 从 0 递增计数，密集前缀槽位）写入：
-                indice_pairs[0, k, c] = i      # 输入行号（gather 源）
-                indice_pairs[1, k, c] = r      # 输出行号（scatter 目标）
-            槽位 c >= 该偏移有效对数的表项保持 -1。
-        (3) indice_num_per_loc 形状 (kv,)：indice_num_per_loc[k] 为偏移 k 的
-            有效对数（即 (2) 中的 c 计数终值）。
-    一个 1D 示例（B=1，input_dims=[4]，ksize=[2]，stride=[2]，padding=[0]，
-    dilation=[1]，output_dims=[2]，cap = min(kv*n, B*prod(output_dims)) =
-    min(6, 2) = 2），indices = [[0,0],[0,1],[0,3]]：
-        k=0（o=0）：i=0 命中输出 (0,0)→r=0；i=1（val=1 不整除）、i=2（val=3
-        不整除）无效。k=1（o=1）：i=0（val=-1）无效；i=1（val=0）命中
-        (0,0)→r=0；i=2（val=2）命中 (0,1)→r=1。
-        out_indices = [[0,0],[0,1]]（m=2 恰好占满容量）；indice_num_per_loc =
-        [1, 2]；indice_pairs[0] = [[0,-1,-1],[1,2,-1]]，indice_pairs[1] =
-        [[0,-1,-1],[0,1,-1]]。
+    Generation rule (enumerate in this order: the outer loop k runs from 0 to
+    kv-1, the inner loop over input rows i from 0 to n-1; each valid pair (k, i)
+    is processed in turn):
+        for each dimension d let val = x_d + P[d] - o_d*L[d];
+        (k, i) is valid if and only if 0 <= batch_idx < B and, for every
+        dimension,
+            val % S[d] == 0 (divisible) and 0 <= val // S[d] < output_dims[d],
+        in which case the output coordinate is q_d = val // S[d] (the batch is
+        unchanged).
+        (1) Output point deduplication and numbering: the first time a valid
+            output coordinate (batch_idx, q_0..q_{ndim-1}) appears, it is given
+            the next increasing row number r (starting at 0) in enumeration
+            order; row r of out_indices is written with that coordinate. The
+            number of valid outputs m is bounded by
+            cap = min(kv * n, B * prod(output_dims)) (the smaller of the number
+            of valid pairs and the output-grid capacity), and out_indices has the
+            fixed shape (cap, ndim+1) (capacity allocation, with m <= cap valid
+            rows); every row with row number >= m is filled with -1.
+        (2) indice_pairs has shape (2, kv, n) and is first filled entirely with
+            -1; for offset k, its c-th valid pair (c counting up from 0, a dense
+            prefix of slots) writes:
+                indice_pairs[0, k, c] = i      # input row index (gather source)
+                indice_pairs[1, k, c] = r      # output row index (scatter target)
+            Slots with c >= the number of valid pairs of that offset stay -1.
+        (3) indice_num_per_loc has shape (kv,): indice_num_per_loc[k] is the
+            number of valid pairs of offset k (i.e. the final value of the c
+            counter in (2)).
+    A 1D example (B=1, input_dims=[4], ksize=[2], stride=[2], padding=[0],
+    dilation=[1], output_dims=[2], cap = min(kv*n, B*prod(output_dims)) =
+    min(6, 2) = 2), indices = [[0,0],[0,1],[0,3]]:
+        k=0 (o=0): i=0 hits output (0,0) -> r=0; i=1 (val=1, not divisible) and
+        i=2 (val=3, not divisible) are invalid. k=1 (o=1): i=0 (val=-1) is
+        invalid; i=1 (val=0) hits (0,0) -> r=0; i=2 (val=2) hits (0,1) -> r=1.
+        out_indices = [[0,0],[0,1]] (m=2 exactly fills the capacity);
+        indice_num_per_loc = [1, 2]; indice_pairs[0] = [[0,-1,-1],[1,2,-1]],
+        indice_pairs[1] = [[0,-1,-1],[0,1,-1]].
 
-    单张量输出协议（forward 返回一维 int32 张量，三段拼接；cap =
-    min(kv*n, B*prod(output_dims))）：
-        段 1 [0, cap*(ndim+1))                         = out_indices 展平
-        段 2 [cap*(ndim+1), cap*(ndim+1) + 2*kv*n)     = indice_pairs 展平
-        段 3 尾部 kv 个元素                             = indice_num_per_loc
-    输出总数恒为 cap*(ndim+1) + 2*kv*n + kv，由构造超参唯一决定。
+    Single-tensor output protocol (forward returns a 1-D int32 tensor, three
+    concatenated segments; cap = min(kv*n, B*prod(output_dims))):
+        segment 1 [0, cap*(ndim+1))                       = out_indices flattened
+        segment 2 [cap*(ndim+1), cap*(ndim+1) + 2*kv*n)   = indice_pairs flattened
+        segment 3 the trailing kv elements                = indice_num_per_loc
+    The total output length is always cap*(ndim+1) + 2*kv*n + kv, uniquely
+    determined by the constructor hyper-parameters.
 
-    输入输出规格：
-        indices  int32 (n, ndim+1)，contiguous；n >= 1，ndim ∈ [1, 3]；
-                 行互异，0 <= batch_idx < B，0 <= x_d < D[d]。
-        超参域   D[d] >= 1，K[d] >= 1，S[d] >= 1，P[d] >= 0，L[d] >= 1，
-                 output_dims[d] >= 1；n <= B * prod(D)。
-        out      一维 int32（见上打包协议）。索引语义为精确匹配（逐位一致），
-                 无容差。
-        评测器会把全部输入张量 cast 成 fp32 传入（索引值 <= 2^24 时 fp32 可
-        精确表示），实现需先恢复 int32 再参与索引运算。
+    Input/output specification:
+        indices  int32 (n, ndim+1), contiguous; n >= 1, ndim in [1, 3];
+                 rows distinct, 0 <= batch_idx < B, 0 <= x_d < D[d].
+        hyper-parameter domain  D[d] >= 1, K[d] >= 1, S[d] >= 1, P[d] >= 0,
+                 L[d] >= 1, output_dims[d] >= 1; n <= B * prod(D).
+        out      a 1-D int32 tensor (see the packing protocol above). The index
+                 semantics are exact matching (bit-for-bit), with no tolerance.
+        The evaluator casts all input tensors to fp32 before the call (index
+        values <= 2^24 are exactly representable in fp32), so the implementation
+        must first restore int32 before using them in index arithmetic.
 
-    实现约束（违规判负）：
-        - 核心计算（坐标映射与整除/范围判定、输出点去重编号、三个输出表的
-          填充）必须在提交文件内以 HIP kernel 完成；ATen 只允许 dtype
-          恢复、torch.full/zeros/arange、形状整理与 torch.cat 等非核心操作。
-        - ModelNew 的 __init__ 与 forward 签名不可更改。
-        - 输出为索引：必须逐位一致（行号顺序、槽位顺序、-1 填充全部按上述
-          规则），任何顺序差异都判负。
-        - forward 返回单张量（评测器按单输出比较 shape/dtype/allclose）。
+    Implementation constraints (violations are scored as failures):
+        - The core computation (coordinate mapping and the divisibility / range
+          tests, output point deduplication and numbering, filling of the three
+          output tables) must be done with a HIP kernel inside the submitted
+          file; ATen is only allowed for non-core operations such as dtype
+          recovery, torch.full/zeros/arange, shape cleanup and torch.cat.
+        - The __init__ and forward signatures of ModelNew must not be changed.
+        - The output is indices: it must match bit-for-bit (row-number order,
+          slot order and -1 padding all follow the rules above); any difference
+          in order is scored as a failure.
+        - forward returns a single tensor (the evaluator compares
+          shape/dtype/allclose on a single output).
 
-    禁用列表：aiter / miopen / hipdnn / torch.unique /
+    Forbidden (static audit strips docstrings and comments, then does literal
+    substring matching):
+    aiter / miopen / hipdnn / torch.unique /
     torch.unique_consecutive / torch.sort / torch.argsort / torch.msort /
     .sort( / .argsort( / torch.mode / torch.histc / torch.bincount /
-    torch.topk / scatter（含 scatter_ / scatter_add_ / scatter_reduce /
-    torch.scatter 等全部形式）/ index_put（含 index_put_ 与 torch.index_put）/
-    segment_reduce。
-    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
+    torch.topk / scatter (including every form scatter_ / scatter_add_ /
+    scatter_reduce / torch.scatter) / index_put (including index_put_ and
+    torch.index_put) / segment_reduce.
+    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
+    regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
+    is not available on this machine).
     """
 
     def __init__(self, batch_size: int = 2, input_dims=None, ksize=None,
                  stride=None, padding=None, dilation=None):
         super().__init__()
-        # 构造超参：网格与卷积几何（缺省值 = get_inputs 固定族）
+        # Constructor hyper-parameters: grid and convolution geometry (defaults
+        # = the fixed family of get_inputs)
         self.batch_size = int(batch_size)
         self.input_dims = list(input_dims if input_dims is not None else [4, 32, 32])
         self.ksize = list(ksize if ksize is not None else [3, 3, 3])
         self.stride = list(stride if stride is not None else [1, 1, 1])
         self.padding = list(padding if padding is not None else [1, 1, 1])
         self.dilation = list(dilation if dilation is not None else [1, 1, 1])
-        assert self.batch_size >= 1, "batch_size 需 >= 1"
+        assert self.batch_size >= 1, "batch_size must be >= 1"
         ndim = len(self.input_dims)
-        assert 1 <= ndim <= 3, "ndim 需在 [1, 3]"
+        assert 1 <= ndim <= 3, "ndim must be in [1, 3]"
         assert all(len(p) == ndim for p in
                    (self.ksize, self.stride, self.padding, self.dilation)), \
-            "ksize/stride/padding/dilation 需与 input_dims 同维"
+            "ksize/stride/padding/dilation must have the same rank as input_dims"
         for d in range(ndim):
             assert self.input_dims[d] >= 1 and self.ksize[d] >= 1 \
                 and self.stride[d] >= 1 and self.padding[d] >= 0 \
-                and self.dilation[d] >= 1, "各维超参非法"
+                and self.dilation[d] >= 1, "a per-dimension hyper-parameter is invalid"
             out_d = (self.input_dims[d] + 2 * self.padding[d]
                      - self.dilation[d] * (self.ksize[d] - 1) - 1) \
                 // self.stride[d] + 1
-            assert out_d >= 1, "output_dims 每维需 >= 1"
+            assert out_d >= 1, "every dimension of output_dims must be >= 1"
 
     def forward(self, indices):
-        # 在线评测会把全部输入张量 cast 成 fp32：索引值 <= 2^24 时精确，
-        # 这里恢复 int32
+        # The online evaluator casts all input tensors to fp32: index values
+        # <= 2^24 are exact, so int32 is restored here
         rows = indices.to(torch.int32).tolist()
         n = len(rows)
         B = self.batch_size
@@ -131,13 +158,15 @@ class Model(nn.Module):
             kv *= k
         out_dims = [(D[d] + 2 * P[d] - L[d] * (K[d] - 1) - 1) // S[d] + 1
                     for d in range(ndim)]
-        # out_indices 容量 = 有效输出数上界：min(有效对总数 kv*n, 输出网格容量)
+        # out_indices capacity = upper bound on the number of valid outputs:
+        # min(total valid pairs kv*n, output grid capacity)
         out_vol = B
         for od in out_dims:
             out_vol *= od
         cap = min(kv * n, out_vol)
 
-        # kernel 偏移的 C-order 分解（第 0 维最慢、第 ndim-1 维最快）
+        # C-order decomposition of the kernel offset (dimension 0 slowest,
+        # dimension ndim-1 fastest)
         offs = []
         for k in range(kv):
             o = [0] * ndim
@@ -150,7 +179,7 @@ class Model(nn.Module):
         out_flat = [-1] * (cap * (ndim + 1))
         pair_flat = [-1] * (2 * kv * n)
         num = [0] * kv
-        table = {}   # 输出坐标 tuple -> 输出行号（首次出现序）
+        table = {}   # output coordinate tuple -> output row number (first-appearance order)
         m = 0
         for k in range(kv):
             o = offs[k]
@@ -190,7 +219,8 @@ class Model(nn.Module):
                 cnt += 1
             num[k] = cnt
 
-        # 单张量打包：out_indices 段 -> indice_pairs 段 -> indice_num_per_loc 段
+        # Single-tensor packing: out_indices segment -> indice_pairs segment ->
+        # indice_num_per_loc segment
         seg1 = torch.tensor(out_flat, dtype=torch.int32)
         seg2 = torch.tensor(pair_flat, dtype=torch.int32).reshape(2, kv, n)
         seg3 = torch.tensor(num, dtype=torch.int32)
@@ -198,18 +228,20 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    # batch_size, input_dims, ksize, stride, padding, dilation（固定族）
+    # batch_size, input_dims, ksize, stride, padding, dilation (fixed family)
     return [2, [4, 32, 32], [3, 3, 3], [1, 1, 1], [1, 1, 1], [1, 1, 1]]
 
 
 def _sample_indices(n, batch_size, input_dims, gen):
-    # 在 B×D 网格上无放回均匀采样 n 个活跃点（行互异），保持采样顺序（不排
-    # 序，模拟真实点云的任意顺序）；gen 为 None 时消费全局 RNG
+    # Uniformly sample n active points without replacement on the B x D grid
+    # (rows distinct), keeping the sampling order (no sorting, to mimic the
+    # arbitrary order of a real point cloud); when gen is None the global RNG is
+    # consumed
     sv = 1
     for d in input_dims:
         sv *= d
     vol = batch_size * sv
-    assert 1 <= n <= vol, "n 需落在 [1, B*prod(D)]（活跃点行互异）"
+    assert 1 <= n <= vol, "n must lie in [1, B*prod(D)] (active point rows are distinct)"
     if gen is not None:
         perm = torch.randperm(vol, generator=gen)[:n]
     else:
@@ -229,36 +261,44 @@ def _sample_indices(n, batch_size, input_dims, gen):
 
 
 def get_inputs():
-    # 固定 shape 族（3D，B=2，D=[4,32,32]，3x3x3 卷积，stride/padding/dilation
-    # 全 1）；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，多轮
-    # correctness trial 因此获得输入多样性。唯一随机消费：torch.randperm。
+    # Fixed shape family (3D, B=2, D=[4,32,32], 3x3x3 convolution, with
+    # stride/padding/dilation all 1); the random part consumes the global RNG --
+    # the evaluator calls this function after set_seed, so multiple correctness
+    # trials therefore see diverse inputs. The only random consumption:
+    # torch.randperm.
     return [_sample_indices(1024, 2, [4, 32, 32], None)]
 
 
 def make_inputs(n: int, batch_size: int, input_dims, ksize, stride, padding,
                 dilation, seed: int = 0):
-    """按公开/隐藏/性能案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬
-    运到设备）。
+    """Generate inputs from a public/hidden/perf case description.
 
-    消费顺序固定：唯一随机消费 torch.randperm(B*prod(D), torch.Generator(seed))
-    的前 n 个位置，解码为 (batch_idx, x_0..x_{ndim-1}) 行（C-order，采样序即
-    行序，不排序）。同 seed 下逐位可复现。6 个几何超参同时是构造 Model 的
-    init 超参，此处仅做合法性校验（同 __init__ 的断言）。
-    返回与 forward 形参同序的 (indices,)。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    The consumption order is fixed: the only random consumption is the first n
+    positions of torch.randperm(B*prod(D), torch.Generator(seed)), decoded into
+    (batch_idx, x_0..x_{ndim-1}) rows (C-order; the sampling order is the row
+    order, no sorting). The same seed reproduces inputs bit-for-bit. The 6
+    geometry hyper-parameters are also the init hyper-parameters used to
+    construct the Model; only validity checks are done here (the same assertions
+    as __init__).
+    Returns, in the same order as the forward parameters, (indices,).
     """
     gen = torch.Generator().manual_seed(int(seed))
-    # 合法性校验（与 Model.__init__ 同域，供评测端提前定位坏 case）
+    # Validity checks (same domain as Model.__init__, so the evaluation side can
+    # locate a bad case early)
     ndim = len(input_dims)
-    assert n >= 1 and batch_size >= 1 and 1 <= ndim <= 3, "n/B/ndim 非法"
+    assert n >= 1 and batch_size >= 1 and 1 <= ndim <= 3, "n/B/ndim are invalid"
     assert all(len(p) == ndim for p in (ksize, stride, padding, dilation)), \
-        "ksize/stride/padding/dilation 需与 input_dims 同维"
+        "ksize/stride/padding/dilation must have the same rank as input_dims"
     vol = 1
     for d in range(ndim):
         assert input_dims[d] >= 1 and ksize[d] >= 1 and stride[d] >= 1 \
-            and padding[d] >= 0 and dilation[d] >= 1, "各维超参非法"
+            and padding[d] >= 0 and dilation[d] >= 1, "a per-dimension hyper-parameter is invalid"
         out_d = (input_dims[d] + 2 * padding[d] - dilation[d] * (ksize[d] - 1)
                  - 1) // stride[d] + 1
-        assert out_d >= 1, "output_dims 每维需 >= 1"
+        assert out_d >= 1, "every dimension of output_dims must be >= 1"
         vol *= input_dims[d]
-    assert n <= batch_size * vol, "n 需 <= B*prod(D)（活跃点行互异）"
+    assert n <= batch_size * vol, "n must be <= B*prod(D) (active point rows are distinct)"
     return (_sample_indices(n, batch_size, input_dims, gen),)

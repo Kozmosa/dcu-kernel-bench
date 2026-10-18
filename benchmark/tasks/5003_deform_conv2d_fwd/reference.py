@@ -1,76 +1,98 @@
-# 5003_deform_conv2d_fwd —— 可变形 2D 卷积前向（modulated / plain 两 variant）
-# 的 model_class（KernelBench 兼容）题目文件。
+# 5003_deform_conv2d_fwd -- model_class (KernelBench compatible) task file for
+# the deformable 2D convolution forward pass (modulated / plain variants).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=5003, backend=cuda（HIP）。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=5003, backend=cuda (HIP).
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """可变形 2D 卷积前向（Deformable Convolution）：采样网格 + 手写双线性插值。
+    """Deformable 2D convolution forward (Deformable Convolution): sampling grid
+    plus a handwritten bilinear interpolation.
 
-    语义（NCHW，中间计算全程 float32）：
-      对每个输出位置 (oi, oj) 与卷积核位置 p = i*S + j（i∈[0,R)、j∈[0,S)，行主
-      序），常规卷积感受野给出的基础采样坐标为
+    Semantics (NCHW, all intermediate computation in float32):
+      For each output position (oi, oj) and kernel position p = i*S + j
+      (i in [0,R), j in [0,S), row-major), the base sampling coordinate given by
+      the regular convolutional receptive field is
           y0 = oi * stride_h + i * dilation_h - padding_h
           x0 = oj * stride_w + j * dilation_w - padding_w
-      叠加逐（输出位置 × 卷积核位置）的偏移后，在输入图上按实数坐标做双线性
-      插值采样：
-          yc = y0 + offset[n, 2*p,     oi, oj]     # 偶数通道 = y 方向偏移
-          xc = x0 + offset[n, 2*p + 1, oi, oj]     # 奇数通道 = x 方向偏移
-          v(n, c, p, oi, oj) = bilinear(输入图, yc, xc)
-      __init__ 参数 variant 选择两条路径之一：
-          "modulated"（缺省，调制型）：采样值再乘以逐位置调制掩码
+      After adding the per-(output position x kernel position) offsets, the
+      input map is sampled at real-valued coordinates with bilinear
+      interpolation:
+          yc = y0 + offset[n, 2*p,     oi, oj]     # even channel = y offset
+          xc = x0 + offset[n, 2*p + 1, oi, oj]     # odd channel = x offset
+          v(n, c, p, oi, oj) = bilinear(input map, yc, xc)
+      The __init__ parameter variant selects one of the two paths:
+          "modulated" (default, modulated form): the sampled value is
+              additionally multiplied by the per-position modulation mask
               v *= mask[n, p, oi, oj]
-          "plain"（无掩码型）：mask 不参与计算（内容任意，可为垃圾数据）。
-      输出为单张量：
-          out[n, k, oi, oj] = bias[k] + Σ_{c, p} v(n, c, p, oi, oj) * weight[k, c, i, j]
-      计算完成后 cast 回输入 dtype。
+          "plain" (mask-free form): mask does not take part in the computation
+              (its contents are arbitrary, possibly garbage data).
+      The output is a single tensor:
+          out[n, k, oi, oj] = bias[k]
+                              + sum_{c, p} v(n, c, p, oi, oj) * weight[k, c, i, j]
+      After the computation it is cast back to the input dtype.
 
-    双线性插值定义（与通行可变形卷积算子逐点同值）：
-      令 iy = floor(yc)、ix = floor(xc)、wy = yc - iy、wx = xc - ix，取四个角点
-      (iy, ix)、(iy, ix+1)、(iy+1, ix)、(iy+1, ix+1)，权重依次为
-      (1-wy)(1-wx)、(1-wy)wx、wy(1-wx)、wy*wx；某角点的行或列越界（<0 或
-      >dim-1）时该角点贡献记 0、其余角点照常加权——即零填充语义：坐标部分
-      越界仍按剩余有效角点加权，完全越界（yc <= -1、yc >= H-1 边界带之外等）
-      时采样值为 0。全程不做 clamp / 最近邻回拉。
+    Bilinear interpolation definition (point-wise identical to mainstream
+    deformable convolution operators):
+      Let iy = floor(yc), ix = floor(xc), wy = yc - iy, wx = xc - ix, and take
+      the four corners (iy, ix), (iy, ix+1), (iy+1, ix), (iy+1, ix+1) with
+      weights (1-wy)(1-wx), (1-wy)wx, wy(1-wx), wy*wx respectively; when either
+      the row or the column of a corner is out of range (< 0 or > dim-1) that
+      corner contributes 0 while the remaining corners are weighted as usual --
+      i.e. zero-fill semantics: a partially out-of-range coordinate is still
+      weighted by the remaining valid corners, and when it is entirely out of
+      range (yc <= -1, outside the yc >= H-1 boundary band, etc.) the sampled
+      value is 0. No clamp / nearest-neighbour pull-back is done anywhere.
 
-    输入输出规格（张量均 contiguous，NCHW 布局）：
+    Input/output specification (all tensors contiguous, NCHW layout):
       x        float32 / float16 / bfloat16 (N, C, H, W)
-      offset   同 x dtype (N, 2*R*S, H_out, W_out)：每个卷积核位置 2 个通道
-               （偶数通道 y 偏移、奇数通道 x 偏移，p = i*S + j 行主序）
-      weight   同 x dtype (K, C, R, S)
-      bias     同 x dtype (K,)
-      mask     同 x dtype (N, R*S, H_out, W_out)（variant="plain" 时忽略）
-      out      单张量、同 x dtype (N, K, H_out, W_out)
-      H_out = (H + 2*padding_h - dilation_h*(R-1) - 1) // stride_h + 1，
-      W_out 同理。评测器会把全部输入 cast 成 fp32 传入（低精度输入无损）。
+      offset   same dtype as x (N, 2*R*S, H_out, W_out): 2 channels per kernel
+               position (even channel = y offset, odd channel = x offset,
+               p = i*S + j row-major)
+      weight   same dtype as x (K, C, R, S)
+      bias     same dtype as x (K,)
+      mask     same dtype as x (N, R*S, H_out, W_out) (ignored when
+               variant="plain")
+      out      a single tensor, same dtype as x (N, K, H_out, W_out)
+      H_out = (H + 2*padding_h - dilation_h*(R-1) - 1) // stride_h + 1, likewise
+      for W_out. The evaluator casts all inputs to fp32 before the call
+      (low-precision inputs are lossless).
 
-    实现约束（违规判负）：
-      - 核心计算（采样网格构建、双线性插值采样、mask 调制、与 weight 的加权
-        归约）必须在提交文件内以 HIP kernel 手写完成。
-      - forward 返回单张量 out（评测器按单输出比较）。
-      - 插值与加权归约在 float32 中进行，输出 cast 回输入 dtype。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (sampling-grid construction, bilinear-interpolation
+        sampling, mask modulation, the weighted reduction against weight) must
+        be handwritten with a HIP kernel inside the submitted file.
+      - forward returns the single tensor out (the evaluator compares a single
+        output).
+      - Interpolation and the weighted reduction are computed in float32, with
+        the output cast back to the input dtype.
+      - The __init__ and forward signatures of ModelNew must not be changed.
 
-    禁用列表：torchvision（含 torchvision.ops.deform_conv2d）、
-    torch.nn.functional.conv2d（F.conv2d）、torch.nn.Conv2d、
-    torch.nn.functional.grid_sample（F.grid_sample）、
-    torch.nn.functional.unfold（F.unfold）、torch.matmul / torch.bmm /
-    torch.mm / torch.einsum / torch.tensordot、miopen、hipdnn、aiter。
-    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
+    Forbidden (static audit strips docstrings and comments, then does literal
+    substring matching):
+    torchvision (including torchvision.ops.deform_conv2d) /
+    torch.nn.functional.conv2d (F.conv2d) / torch.nn.Conv2d /
+    torch.nn.functional.grid_sample (F.grid_sample) /
+    torch.nn.functional.unfold (F.unfold) / torch.matmul / torch.bmm /
+    torch.mm / torch.einsum / torch.tensordot / miopen / hipdnn / aiter.
+    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
+    regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
+    is not available on this machine).
     """
 
     def __init__(self, variant: str = "modulated", stride=(1, 1), padding=(1, 1),
                  dilation=(1, 1)):
         super().__init__()
-        assert variant in ("modulated", "plain"), "variant 必须是 modulated / plain 之一"
+        assert variant in ("modulated", "plain"), "variant must be either modulated or plain"
         self.variant = variant
         self.stride = (int(stride[0]), int(stride[1]))
         self.padding = (int(padding[0]), int(padding[1]))
@@ -86,32 +108,36 @@ class Model(nn.Module):
         h_out = (h + 2 * ph - (dh * (r - 1) + 1)) // sh + 1
         w_out = (w + 2 * pw - (dw * (s - 1) + 1)) // sw + 1
         assert offset.shape[1] == 2 * r * s and mask.shape[1] == r * s, \
-            "offset/mask 通道数须为 2*R*S / R*S"
+            "the channel counts of offset/mask must be 2*R*S / R*S"
         assert offset.shape[2] == h_out and offset.shape[3] == w_out \
             and mask.shape[2] == h_out and mask.shape[3] == w_out, \
-            "offset/mask 空间尺寸须为 (H_out, W_out)"
+            "the spatial sizes of offset/mask must be (H_out, W_out)"
 
         xf = x.to(torch.float32)
         off = offset.to(torch.float32)
         wf = weight.to(torch.float32)
         bf = bias.to(torch.float32)
 
-        # 每卷积核位置的基础感受野坐标（未加偏移），行主序 p = i*S + j
-        # device=dev 必需：这些坐标要与已在设备上的 off 相加，漏 device 会在
-        # CUDA/DCU 上抛 "Expected all tensors to be on the same device"（CPU 上无感）
+        # Base receptive-field coordinate per kernel position (offsets not added
+        # yet), row-major p = i*S + j
+        # device=dev is required: these coordinates are added to the already
+        # on-device off; a missing device raises "Expected all tensors to be on
+        # the same device" on CUDA/DCU (harmless on CPU)
         dev = xf.device
         base_y = (torch.arange(h_out, dtype=torch.float32, device=dev) * sh - ph).view(1, 1, h_out, 1) \
             + torch.arange(r, dtype=torch.float32, device=dev).view(r, 1, 1, 1) * dh      # (r, 1, h_out, 1)
         base_x = (torch.arange(w_out, dtype=torch.float32, device=dev) * sw - pw).view(1, 1, 1, w_out) \
             + torch.arange(s, dtype=torch.float32, device=dev).view(1, s, 1, 1) * dw      # (1, s, 1, w_out)
 
-        # 叠加逐位置偏移（偶数通道 dy、奇数通道 dx）→ 采样坐标 (n, R*S, H_out, W_out)
+        # Add the per-position offsets (even channel dy, odd channel dx) ->
+        # sampling coordinates (n, R*S, H_out, W_out)
         y_coord = (base_y + off[:, 0::2].reshape(n, r, s, h_out, w_out))
         x_coord = (base_x + off[:, 1::2].reshape(n, r, s, h_out, w_out))
         y_coord = y_coord.reshape(n, r * s, h_out, w_out)
         x_coord = x_coord.reshape(n, r * s, h_out, w_out)
 
-        # 手写双线性插值：四角点采样、越界角点贡献记 0（零填充语义）
+        # Handwritten bilinear interpolation: sample the four corners and let
+        # out-of-range corners contribute 0 (zero-fill semantics)
         iy0 = torch.floor(y_coord).to(torch.long)
         ix0 = torch.floor(x_coord).to(torch.long)
         wy = y_coord - iy0.to(torch.float32)
@@ -122,7 +148,8 @@ class Model(nn.Module):
         c_idx = torch.arange(c, device=xf.device).view(1, c, 1, 1, 1)
 
         def corner(iy, ix, wgt):
-            # 单角点采样：越界角点权重置 0；clamp 仅防索引越界（乘 0 抵消）
+            # Single-corner sampling: the weight of an out-of-range corner is
+            # set to 0; clamp only guards the index (cancelled by the times-0)
             valid = ((iy >= 0) & (iy <= h - 1) & (ix >= 0) & (ix <= w - 1)).to(torch.float32)
             vals = xf[n_idx, c_idx, iy.clamp(0, h - 1).unsqueeze(1),
                       ix.clamp(0, w - 1).unsqueeze(1)]
@@ -133,11 +160,12 @@ class Model(nn.Module):
                    + corner(iy1, ix0, wy * (1.0 - wx))
                    + corner(iy1, ix1, wy * wx))            # (n, c, R*S, H_out, W_out)
 
-        # 调制掩码（plain variant 下 mask 不参与计算）
+        # Modulation mask (under the plain variant mask does not take part)
         if self.variant == "modulated":
             sampled = sampled * mask.to(torch.float32).unsqueeze(1)
 
-        # 与 weight 的加权归约（float32），加 bias，cast 回输入 dtype
+        # Weighted reduction against weight (float32), add bias, cast back to
+        # the input dtype
         y = torch.matmul(wf.reshape(k_out, c * r * s),
                          sampled.reshape(n, c * r * s, h_out * w_out))
         y = y + bf.view(1, k_out, 1)
@@ -149,9 +177,10 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族（N=4, C=16, H=W=32, K=32, R=S=3, stride=padding=dilation=(1,1)，
-    # variant=modulated，float32）；随机部分消费全局 RNG——评测器在 set_seed 后调用
-    # 本函数，多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family (N=4, C=16, H=W=32, K=32, R=S=3; stride, padding and
+    # dilation all (1,1); variant=modulated, float32); the random part consumes
+    # the global RNG -- the evaluator calls this function after set_seed, so
+    # multiple correctness trials therefore see diverse inputs
     n, c, h, w, k, r, s = 4, 16, 32, 32, 32, 3, 3
     ph = pw = 1
     dh = dw = 1
@@ -168,26 +197,31 @@ def get_inputs():
 def make_inputs(n: int, c: int, h: int, w: int, k: int, r: int = 3, s: int = 3,
                 variant: str = "modulated", dtype: str = "float32", seed: int = 0,
                 stride=(1, 1), padding=(1, 1), dilation=(1, 1)):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description.
 
-    消费顺序固定：x -> offset -> weight -> bias -> mask（均 fp32 torch.randn 后
-    cast 到 dtype），全部来自同一 torch.Generator(seed)，同 seed 下逐位可复现。
-    variant/stride/padding/dilation 同时是构造 Model 的 init 超参，此处用于推导
-    H_out/W_out 并做合法性校验。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    The consumption order is fixed: x -> offset -> weight -> bias -> mask (all
+    fp32 torch.randn, then cast to dtype), all drawn from the same
+    torch.Generator(seed), so the same seed reproduces inputs bit-for-bit.
+    variant/stride/padding/dilation are also the init hyper-parameters used to
+    construct the Model; they are used here to derive H_out/W_out and for
+    validity checks.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
-    assert variant in ("modulated", "plain"), "variant 必须是 modulated / plain 之一"
+    assert variant in ("modulated", "plain"), "variant must be either modulated or plain"
     assert n >= 1 and c >= 1 and h >= 1 and w >= 1 and k >= 1 and r >= 1 and s >= 1, \
-        "全部维度须 >= 1"
+        "every dimension must be >= 1"
     sh, sw = int(stride[0]), int(stride[1])
     ph, pw = int(padding[0]), int(padding[1])
     dh, dw = int(dilation[0]), int(dilation[1])
-    assert sh >= 1 and sw >= 1 and dh >= 1 and dw >= 1, "stride/dilation 须 >= 1"
-    assert ph >= 0 and pw >= 0, "padding 须 >= 0"
+    assert sh >= 1 and sw >= 1 and dh >= 1 and dw >= 1, "stride/dilation must be >= 1"
+    assert ph >= 0 and pw >= 0, "padding must be >= 0"
     h_out = (h + 2 * ph - (dh * (r - 1) + 1)) // sh + 1
     w_out = (w + 2 * pw - (dw * (s - 1) + 1)) // sw + 1
-    assert h_out >= 1 and w_out >= 1, "H_out/W_out 须 >= 1（padding 需覆盖膨胀核）"
+    assert h_out >= 1 and w_out >= 1, "H_out/W_out must be >= 1 (padding must cover the dilated kernel)"
     x = torch.randn(n, c, h, w, generator=gen).to(dt)
     offset = torch.randn(n, 2 * r * s, h_out, w_out, generator=gen).to(dt)
     weight = torch.randn(k, c, r, s, generator=gen).to(dt)

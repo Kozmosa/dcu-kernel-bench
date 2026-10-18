@@ -1,16 +1,20 @@
-# 1021 —— 分页 KV decode attention 的长上下文（分区两 pass）变体：题面与评测真值。
+# 1021 -- long-context (split two-pass) variant of paged KV decode attention:
+# task prompt and evaluation ground truth.
 #
-# 本文件必须自包含：评测器以 exec(source) 加载题目，禁止本地模块导入，
-# reference 实现与输入生成全部内联。语义以官方测试的 PyTorch 参考实现为准
-# （单 token decode 分页 attention；长序列 max_seq_len > 8192 时生产调度
-# 切换为"逐 1024-token 分区并行 + 跨分区归并"的两 pass 形态），中间计算
-# float32，输出 cast 回输入 dtype。与已入库的 1002 分界：1002 取短上下文
-# 单 pass 工况（max_seq_len <= 8192），本题取长上下文分区两 pass 工况，
-# 变体子集互不重叠。
+# This file must be self-contained: the evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here. The semantics follow
+# the official test's PyTorch reference implementation (single-token decode paged
+# attention; for long sequences with max_seq_len > 8192 the production schedule
+# switches to a two-pass form of "1024-token splits in parallel + cross-split
+# merging"), intermediate computation is in float32, and the output is cast back
+# to the input dtype. Boundary against the already-onboarded 1002: 1002 takes the
+# short-context single-pass regime (max_seq_len <= 8192), while this task takes
+# the long-context split two-pass regime -- the variant subsets do not overlap.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=1021, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=1021, backend=triton.
 
 import math
 
@@ -19,49 +23,60 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
-    """长上下文 decode 阶段（单 token query）的分页 attention，MHA 与 GQA 通用。
+    """Paged attention for the long-context decode phase (single-token query), for both MHA and GQA.
 
-    算子语义：KV Cache 以固定 block_size 分页存放于物理块池 key_cache /
-    value_cache，每个序列通过 block_tables 中的物理块编号间接寻址；每个序列
-    实际参与 attention 的 KV 长度由 seq_lens[s] 给出（>=1）；物理块池中未被
-    引用的槽位、以及尾块中超出 seq_lens[s] 的槽位均为垃圾数据，不得参与
-    计算。对序列 s 的第 h 个 query head（其 KV head 为 h // query_group_size，
-    记 bs = block_size，bt = block_tables）：
+    Operator semantics: the KV cache is paged with a fixed block_size in the
+    physical block pool key_cache / value_cache, and each sequence is addressed
+    indirectly through the physical block ids in block_tables; the KV length that
+    actually takes part in attention for each sequence is given by seq_lens[s]
+    (>=1); slots of the physical block pool that nothing references, and slots of
+    the tail block beyond seq_lens[s], are garbage data and must not take part in
+    the computation. For query head h of sequence s (its KV head is
+    h // query_group_size; let bs = block_size, bt = block_tables):
       logits[l] = scale * <query[s,h,:], key_cache[bt[s,l//bs], h_kv, l%bs, :]>
       p = softmax(logits[0:seq_lens[s]])
       out[s,h,:] = sum_l p[l] * value_cache[bt[s,l//bs], h_kv, l%bs, :]
-    softmax 为对整个 [0, seq_lens[s]) 区间的数值稳定在线实现。
+    softmax is a numerically stable online implementation over the whole
+    [0, seq_lens[s]) interval.
 
-    本题处于长上下文工况：块表容量 max_seq_len（固定族为 16384）远超 8192，
-    单序列 KV 无法由单个计算单元在单趟内高效处理。生产实现把 KV 序列切成
-    1024-token 的分区并行计算（flash-decoding 式 split-KV：逐分区在线
-    softmax 得到局部最大 logit m_p、指数和 l_p 与部分输出 o_p，再跨分区以
-    log-sum-exp 归并：M = max_p m_p，
-    out = sum_p exp(m_p-M)*l_p*o_p / sum_p exp(m_p-M)*l_p），数学上与整体
-    softmax 完全等价；分区只是取得并行度的手段，不作为判分条件，实现路径
-    不限。核心边界行为：尾分区部分填充（seq_len 不是 1024 整数倍）、
-    seq_len 恰为分区长度整数倍、同一 batch 内序列长度悬殊（短至 1）、
-    尾块槽位掩蔽——超出 seq_len 的位置不得贡献任何概率质量。
+    This task is in the long-context regime: the block-table capacity max_seq_len
+    (16384 in the fixed family) far exceeds 8192, so a single sequence's KV cannot
+    be processed efficiently by one compute unit in one pass. The production
+    implementation cuts the KV sequence into 1024-token splits computed in
+    parallel (flash-decoding style split-KV: per-split online softmax yields the
+    local max logit m_p, the exponential sum l_p and the partial output o_p, then
+    the splits are merged with log-sum-exp: M = max_p m_p,
+    out = sum_p exp(m_p-M)*l_p*o_p / sum_p exp(m_p-M)*l_p), which is
+    mathematically exactly equivalent to the full softmax; splitting is only a
+    means to gain parallelism and is not a scoring criterion, so the
+    implementation path is free. Core boundary cases: partially filled tail split
+    (seq_len not a multiple of 1024), seq_len exactly a multiple of the split
+    length, wildly different sequence lengths within one batch (as short as 1),
+    and tail-block slot masking -- positions beyond seq_len must not contribute
+    any probability mass.
 
-    输入输出规格：
-      query       [num_seqs, num_q_heads, head_size]，fp16/bf16
-      key_cache   [num_blocks, num_kv_heads, block_size, head_size]，fp16/bf16
-      value_cache 同 key_cache
-      block_tables[num_seqs, max_blocks_per_seq] int32，逻辑块 -> 物理块编号
-      seq_lens    [num_seqs] int32，每序列有效 KV 长度，1 <= seq_lens[s] <= max_seq_len
-      输出 out    [num_seqs, num_q_heads, head_size]，dtype 与 query 一致
+    Input/output specification:
+      query       [num_seqs, num_q_heads, head_size], fp16/bf16
+      key_cache   [num_blocks, num_kv_heads, block_size, head_size], fp16/bf16
+      value_cache same as key_cache
+      block_tables[num_seqs, max_blocks_per_seq] int32, logical block -> physical block id
+      seq_lens    [num_seqs] int32, each sequence's valid KV length, 1 <= seq_lens[s] <= max_seq_len
+      output out  [num_seqs, num_q_heads, head_size], dtype matches query
 
-    实现约束（违规判负）：
-      - 核心计算（QK^T / softmax / PV）必须在提交文件内完成，禁止调用
-        scaled_dot_product_attention / sdpa / flash_attn 等外部 attention
-        算子库，以及 torch.matmul / torch.bmm / torch.einsum / torch.softmax。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间累加用 float32；输出 cast 回输入 dtype。
-      - 未引用物理块与超出 seq_len 的槽位不得影响输出。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (QK^T / softmax / PV) must be done inside the
+        submitted file; calling external attention operator libraries such as
+        scaled_dot_product_attention / sdpa / flash_attn, and torch.matmul /
+        torch.bmm / torch.einsum / torch.softmax, is forbidden.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Use float32 for intermediate accumulation; cast the output back to the
+        input dtype.
+      - Unreferenced physical blocks and slots beyond seq_len must not affect the
+        output.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：单 token decode、非量化 KV、无 ALiBi、无滑窗；长上下文
-    （max(seq_lens) > 8192）的分区两 pass 工况。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: single-token decode, non-quantized KV, no ALiBi, no sliding
+    window; the long-context (max(seq_lens) > 8192) split two-pass regime.
     """
 
     def __init__(self, head_size: int, scale=None):
@@ -69,8 +84,9 @@ class Model(nn.Module):
         self.scale = float(scale) if scale is not None else 1.0 / math.sqrt(head_size)
 
     def forward(self, query, key_cache, value_cache, block_tables, seq_lens):
-        # 在线评测器会把全部输入张量 cast 成评测 precision（triton 后端为
-        # fp32）；块编号与序列长度都是小整数，fp32 可精确表示，此处无损恢复
+        # The online evaluator casts every input tensor to the evaluation precision
+        # (fp32 for the triton backend); block ids and sequence lengths are small
+        # integers that fp32 represents exactly, so they are recovered losslessly
         block_tables = block_tables.to(torch.long)
         seq_lens = seq_lens.to(torch.int32)
 
@@ -78,7 +94,7 @@ class Model(nn.Module):
         H_KV = key_cache.shape[1]
         bs = key_cache.shape[2]
         group = H_Q // H_KV
-        assert H_Q == H_KV * group, "num_q_heads 必须是 num_kv_heads 的整数倍"
+        assert H_Q == H_KV * group, "num_q_heads must be an integer multiple of num_kv_heads"
 
         out = torch.empty_like(query)
         for s in range(B):
@@ -86,11 +102,11 @@ class Model(nn.Module):
             num_blocks = (seq_len + bs - 1) // bs
             physical = block_tables[s, :num_blocks]
 
-            # 按块表收集本序列的 K/V：[num_blocks, H_KV, bs, D] -> [H_KV, seq_len, D]
+            # Gather this sequence's K/V through the block table: [num_blocks, H_KV, bs, D] -> [H_KV, seq_len, D]
             k = key_cache[physical].permute(1, 0, 2, 3).reshape(H_KV, num_blocks * bs, D)[:, :seq_len].to(torch.float32)
             v = value_cache[physical].permute(1, 0, 2, 3).reshape(H_KV, num_blocks * bs, D)[:, :seq_len].to(torch.float32)
 
-            # GQA：同一 KV head 的 K/V 复制给 group 内的每个 query head
+            # GQA: the K/V of one KV head is replicated to every query head in the group
             if group > 1:
                 k = k.repeat_interleave(group, dim=0)   # [H_Q, seq_len, D]
                 v = v.repeat_interleave(group, dim=0)
@@ -103,13 +119,14 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    return [128]  # head_size；scale 缺省 1/sqrt(head_size)
+    return [128]  # head_size; scale defaults to 1/sqrt(head_size)
 
 
 def get_inputs():
-    # 固定 shape 族（长上下文工况：max_seq_len=16384 > 8192，分区两 pass 调度
-    # 在 max(seq_lens) > 8192 时触发）；随机部分消费全局 RNG——评测器在
-    # set_seed 后调用本函数，多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family (long-context regime: max_seq_len=16384 > 8192, the split
+    # two-pass schedule triggers when max(seq_lens) > 8192); the random part
+    # consumes the global RNG -- the evaluator calls this function after set_seed,
+    # so multiple correctness trials therefore see diverse inputs
     num_seqs = 4
     num_kv_heads = 8
     query_group_size = 4      # num_q_heads = 32
@@ -119,7 +136,7 @@ def get_inputs():
 
     num_q_heads = num_kv_heads * query_group_size
     max_blocks_per_seq = (max_seq_len + block_size - 1) // block_size
-    # 物理块池大于实际用量：未引用槽位是垃圾数据，用于检验掩码正确性
+    # The physical block pool exceeds the actual usage: unreferenced slots are garbage data, used to check mask correctness
     num_blocks = num_seqs * max_blocks_per_seq + 8
 
     seq_lens = torch.randint(1, max_seq_len + 1, (num_seqs,), dtype=torch.int32)
@@ -135,11 +152,14 @@ def get_inputs():
 def make_inputs(num_seqs: int, num_q_heads: int, num_kv_heads: int,
                 head_size: int, block_size: int, max_seq_len: int,
                 dtype: str = "float16", seed: int = 0, seq_lens=None):
-    """确定性 case 生成器（隐藏/性能案例共用）。仅在评测端运行（CPU 生成，
-    评测器搬运到设备），随机性全部来自 torch.Generator().manual_seed(seed)。
+    """Deterministic case generator (shared by hidden/perf cases).
 
-    参数字段与 hidden/perf case 一一对应；seq_lens 可显式指定（用于精确构造
-    分区/尾块边界），缺省时在 [1, max_seq_len] 均匀采样。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device); all randomness comes from
+    torch.Generator().manual_seed(seed). The parameter fields correspond one to
+    one with the hidden/perf cases; seq_lens may be given explicitly (to construct
+    split/tail-block boundaries exactly) and by default is sampled uniformly in
+    [1, max_seq_len].
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
@@ -147,13 +167,13 @@ def make_inputs(num_seqs: int, num_q_heads: int, num_kv_heads: int,
     if seq_lens is None:
         seq_lens = torch.randint(1, max_seq_len + 1, (num_seqs,), generator=gen, dtype=torch.int32)
     else:
-        if len(seq_lens) == 1 and num_seqs > 1:   # 单值广播到整个 batch
+        if len(seq_lens) == 1 and num_seqs > 1:   # a single value broadcasts to the whole batch
             seq_lens = seq_lens * num_seqs
         seq_lens = torch.tensor(seq_lens, dtype=torch.int32)
         assert len(seq_lens) == num_seqs and int(seq_lens.max()) <= max_seq_len
     max_blocks_per_seq = (max_seq_len + block_size - 1) // block_size
 
-    # 物理块池大于实际用量：未引用槽位是"垃圾数据"，用于检验掩码正确性
+    # The physical block pool exceeds the actual usage: unreferenced slots are "garbage data", used to check mask correctness
     num_blocks = num_seqs * max_blocks_per_seq + 8
     perm = torch.randperm(num_blocks, generator=gen)
     block_tables = perm[: num_seqs * max_blocks_per_seq].reshape(num_seqs, max_blocks_per_seq).to(torch.int32)

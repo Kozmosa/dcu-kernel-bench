@@ -1,24 +1,29 @@
-# 5004_deform_conv2d_bwd —— 可变形 2D 卷积反向（DCNv2 dgrad / wrw）的
-# model_class（KernelBench 兼容）题目文件。
+# 5004_deform_conv2d_bwd -- model_class (KernelBench compatible) task file for
+# the deformable 2D convolution backward pass (DCNv2 dgrad / wrw).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=5004, backend=cuda（HIP）。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=5004, backend=cuda (HIP).
 
 import torch
 import torch.nn as nn
 
 
 def _bilinear_zero_pad(x, y_coord, x_coord):
-    """双线性采样（整数 = 像素中心），边界外贡献为 0。
+    """Bilinear sampling (an integer coordinate is the pixel centre);
+    contributions outside the boundary are 0.
 
-    x: (n, c, h, w)；y_coord / x_coord: (n, oh, ow) 浮点采样坐标（H/W 坐标系）。
-    返回 (n, c, oh, ow)。对 y_coord / x_coord 可导：坐标梯度只经插值分数
-    （frac 项）回传，floor/索引路径视为常数——即标准零填充双线性 Theano
-    /DCNv2 约定的次梯度。
+    x: (n, c, h, w); y_coord / x_coord: (n, oh, ow) floating-point sampling
+    coordinates (in the H/W coordinate system).
+    Returns (n, c, oh, ow). Differentiable with respect to y_coord / x_coord:
+    the coordinate gradient flows back only through the interpolation fractions
+    (the frac terms) while the floor/index path is treated as a constant -- i.e.
+    the subgradient of the standard zero-padding bilinear Theano/DCNv2
+    convention.
     """
     n, c, h, w = x.shape
     oh, ow = y_coord.shape[1], y_coord.shape[2]
@@ -33,8 +38,10 @@ def _bilinear_zero_pad(x, y_coord, x_coord):
         valid = ((yc >= 0) & (yc <= h - 1) & (xc >= 0) & (xc <= w - 1)).unsqueeze(1)
         yi = yc.clamp(0, h - 1).long()
         xi = xc.clamp(0, w - 1).long()
-        # 索引张量自带 batch 维，直接高级索引会把索引维前置成 5-D；
-        # 用展平 + gather 保持 (n, c, oh, ow)，对 x 可导
+        # The index tensors carry a batch dimension, so plain advanced indexing
+        # would move the index dimensions to the front and produce 5-D;
+        # flattening plus gather keeps (n, c, oh, ow) and stays differentiable
+        # with respect to x
         idx = (yi * w + xi).reshape(n, 1, oh * ow).expand(n, c, oh * ow)
         got = x.reshape(n, c, h * w).gather(2, idx).reshape(n, c, oh, ow)
         return got * valid.to(x.dtype)
@@ -46,88 +53,117 @@ def _bilinear_zero_pad(x, y_coord, x_coord):
 
 
 class Model(nn.Module):
-    """可变形 2D 卷积反向（DCNv2，带 mask 调制）：对输入求梯度（dgrad）与对
-    权值求梯度（wrw）。
+    """Deformable 2D convolution backward (DCNv2, with mask modulation):
+    gradient with respect to the input (dgrad) and gradient with respect to the
+    weights (wrw).
 
-    语义（NCHW、offset group = 1、无 bias，与标准 DCNv2 前向严格一致）：
-        前向 y = deform_conv2d(x, offset, weight, mask, stride=(sh,sw),
+    Semantics (NCHW, offset group = 1, no bias, strictly consistent with the
+    standard DCNv2 forward):
+        forward y = deform_conv2d(x, offset, weight, mask, stride=(sh,sw),
                                padding=(ph,pw), dilation=(dh,dw))
-        输出尺寸 out_h = floor((H + 2*ph - dh*(R-1) - 1) / sh) + 1（out_w 同理）
-        第 m 个核采样点按行主序 m = pm*S + pn（pm = m // S，pn = m % S），在
-        输出位置 (i, j) 处：
-            采样坐标  Y = i*sh - ph + dh*pm + offset[b, 2*m,   i, j]
-                      X = j*sw - pw + dw_*pn + offset[b, 2*m+1, i, j]
-            采样值  V[b, :, i, j, m] = bilinear(x, Y, X)：整数坐标即像素中心，
-                双线性插值；采样点落在 [0,H-1]x[0,W-1] 之外的部分贡献为 0。
+        output size out_h = floor((H + 2*ph - dh*(R-1) - 1) / sh) + 1 (likewise
+        for out_w)
+        the m-th kernel sampling point in row-major order m = pm*S + pn
+        (pm = m // S, pn = m % S), at output position (i, j):
+            sampling coordinate  Y = i*sh - ph + dh*pm + offset[b, 2*m,   i, j]
+                                 X = j*sw - pw + dw_*pn + offset[b, 2*m+1, i, j]
+            sampled value  V[b, :, i, j, m] = bilinear(x, Y, X): an integer
+                coordinate is the pixel centre, interpolated bilinearly; the part
+                of a sampling point that falls outside [0,H-1]x[0,W-1]
+                contributes 0.
             y[b, ko, i, j] = sum_m mask[b, m, i, j] *
                                  sum_ci weight[ko, ci, pm, pn] * V[b, ci, i, j, m]
-        offset 通道与核采样点按行主序一一对应：通道 2*m 为 H 方向偏移、
-        2*m+1 为 W 方向偏移（DCNv2 唯一通行约定；本题 offset group = 1）。
-    给定上游梯度 dy = dL/dy（形状 (N, out_c, out_h, out_w)）：
-        dgrad：dx = dL/dx (N,C,H,W)、doffset = dL/doffset (N,2*R*S,out_h,out_w)、
+        offset channels correspond one-to-one with the kernel sampling points in
+        row-major order: channel 2*m is the H-direction offset and 2*m+1 the
+        W-direction offset (the only widespread DCNv2 convention; offset
+        group = 1 for this task).
+    Given the upstream gradient dy = dL/dy (shape (N, out_c, out_h, out_w)):
+        dgrad: dx = dL/dx (N,C,H,W), doffset = dL/doffset (N,2*R*S,out_h,out_w),
                dmask = dL/dmask (N,R*S,out_h,out_w)
-        wrw：  dw = dL/dw (out_c,C,R,S)
-    __init__ 参数 variant 选择返回的方向：
-        "dgrad"：返回三个梯度按分段协议打包成的单个一维张量；
-        "wrw"：  返回 dw；此时 weight 的数值不参与输出（仅形状约定）。
-    forward(dy, weight, x, offset, mask) 为固定五输入签名，各张量含义：
-        dy     (N, out_c, out_h, out_w)     上游梯度，两方向都消费
-        weight (out_c, C, R, S)             卷积核（out_c 输出通道 / C 输入通道）
-        x      (N, C, H, W)                 前向输入
-        offset (N, 2*R*S, out_h, out_w)     采样偏移
-        mask   (N, R*S, out_h, out_w)       调制掩码
-    forward 返回单张量 out（float32）——dgrad 为一维拼接打包（分段协议）：
+        wrw:   dw = dL/dw (out_c,C,R,S)
+    The __init__ parameter variant selects which direction is returned:
+        "dgrad": returns the three gradients packed into a single 1-D tensor by
+                 the segmentation protocol;
+        "wrw":   returns dw; the values of weight do not take part in the
+                 output here (shape convention only).
+    forward(dy, weight, x, offset, mask) has a fixed five-input signature; the
+    tensors mean:
+        dy     (N, out_c, out_h, out_w)     upstream gradient, consumed by both
+                                            directions
+        weight (out_c, C, R, S)             convolution kernel (out_c output
+                                            channels / C input channels)
+        x      (N, C, H, W)                 forward input
+        offset (N, 2*R*S, out_h, out_w)     sampling offsets
+        mask   (N, R*S, out_h, out_w)       modulation mask
+    forward returns the single tensor out (float32) -- dgrad is a 1-D
+    concatenated packing (segmentation protocol):
         out = cat([dx.reshape(-1), doffset.reshape(-1), dmask.reshape(-1)])
-        长度 = N*C*H*W + N*2*R*S*out_h*out_w + N*R*S*out_h*out_w，段序固定
-        dx | doffset | dmask，各段为对应 4-D 张量的 C 序展平，段序不得交换；
-        wrw → (out_c, C, R, S)，天然单输出无打包。
+        length = N*C*H*W + N*2*R*S*out_h*out_w + N*R*S*out_h*out_w, with the
+        segment order fixed as dx | doffset | dmask, each segment being the
+        C-order flattening of the corresponding 4-D tensor; the segment order
+        must not be swapped;
+        wrw -> (out_c, C, R, S), inherently single-output with no packing.
 
-    输入输出规格：
-        dy / weight / x / offset / mask 均为 float32、contiguous、NCHW 排布；
-        各维 >= 1；R/S 允许 1（1x1 核）；H/W 允许 1、奇数、非 2 的幂、
-        非 16 对齐；stride/dilation >= 1、padding >= 0，padding 为前向的四向
-        对称 (ph, pw) 语义；一致性约束
-            H + 2*ph >= dh*(R-1) + 1，W + 2*pw >= dw_*(S-1) + 1，
-        且 dy/offset/mask 的空间尺寸必须等于前向公式的 out_h/out_w，offset
-        通道数 = 2*R*S、mask 通道数 = R*S。
-        输入值域为常规 randn 量级（无 inf/NaN）。评测器会把全部输入 cast
-        成 fp32 传入。
+    Input/output specification:
+        dy / weight / x / offset / mask are all float32, contiguous, NCHW
+        layout; every dimension >= 1; R/S may be 1 (1x1 kernel); H/W may be 1,
+        odd, non-power-of-two, not 16-aligned; stride/dilation >= 1, padding
+        >= 0, padding follows the forward four-sided symmetric (ph, pw)
+        semantics; consistency constraint
+            H + 2*ph >= dh*(R-1) + 1, W + 2*pw >= dw_*(S-1) + 1,
+        and the spatial sizes of dy/offset/mask must equal out_h/out_w from the
+        forward formula, offset channels = 2*R*S, mask channels = R*S.
+        Input values are ordinary randn magnitude (no inf/NaN). The evaluator
+        casts all inputs to fp32 before the call.
 
-    实现约束（违规判负）：
-        - 核心计算必须在提交文件内以 HIP kernel 完成：dgrad 的反向双线性
-          采样散射（对 Y/X 的解析偏导经核权值与 mask 链回 dx/doffset/dmask，
-          边界外贡献置 0）或 wrw 的采样值相关累加（x 采样窗与 dy 的互相关
-          求和），禁止回退到 torch autograd / 卷积原语 / grid_sample 完成
-          核心计算。
-        - ModelNew 的 __init__ 与 forward 签名不可更改；forward 返回单张量
-          out（评测器按单输出比较）；dgrad 三段须按上述分段协议打包，段序
-          不得交换。
-        - 数值约定：float32 输入直接以 float32 累加，不做半精度下转；dgrad
-          三个梯度段与 wrw 输出均为 float32。
+    Implementation constraints (violations are scored as failures):
+        - The core computation must be done with a HIP kernel inside the
+          submitted file: the backward bilinear-sampling scatter of dgrad (the
+          analytic partial derivatives with respect to Y/X chained back through
+          the kernel weights and the mask into dx/doffset/dmask, with
+          out-of-boundary contributions set to 0) or the sampled-value
+          correlation accumulation of wrw (summing the cross-correlation of the
+          x sampling windows with dy); falling back to torch autograd /
+          convolution primitives / grid_sample for the core computation is
+          forbidden.
+        - The __init__ and forward signatures of ModelNew must not be changed;
+          forward returns the single tensor out (the evaluator compares a single
+          output); the three dgrad segments must be packed by the segmentation
+          protocol above and the segment order must not be swapped.
+        - Numeric contract: float32 inputs are accumulated directly in float32,
+          with no downcast to half precision; the three dgrad gradient segments
+          and the wrw output are all float32.
 
-    禁用列表：aiter / torchvision / torch.nn.functional.conv2d / F.conv2d /
+    Forbidden (static audit strips docstrings and comments, then does literal
+    substring matching):
+    aiter / torchvision / torch.nn.functional.conv2d / F.conv2d /
     torch.conv2d / torch.nn.Conv2d / torch.nn.functional.conv_transpose2d /
     F.conv_transpose2d / torch.nn.ConvTranspose2d /
     torch.nn.grad.conv2d_input / torch.nn.grad.conv2d_weight /
     aten.convolution_backward / deform_conv2d / deform_conv2d_backward /
     grid_sample / F.grid_sample / torch.nn.functional.grid_sample /
     torch.autograd / .backward( / unfold / F.fold /
-    torch.nn.functional.fold / im2col / col2im / as_strided；
-    闭源库 MIOpen / hipDNN / cuDNN / rocBLAS / hipBLASLt 同样禁止（全局黑名单）。
-    目标硬件：海光 DCU（gfx936/gfx938），实现语言 HIP（经 hipcc 编译；在 CUDA_CU_SRC / CUDA_CPP_SRC 锚点区编写，设备侧必须 include <hip/hip_runtime.h>，本机无 <cuda_runtime.h>）。
+    torch.nn.functional.fold / im2col / col2im / as_strided;
+    the closed-source libraries MIOpen / hipDNN / cuDNN / rocBLAS / hipBLASLt
+    are forbidden as well (global blacklist).
+    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
+    regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
+    is not available on this machine).
     """
 
     def __init__(self, variant: str = "dgrad", stride_h: int = 1, stride_w: int = 1,
                  pad_h: int = 1, pad_w: int = 1, dil_h: int = 1, dil_w: int = 1):
         super().__init__()
-        assert variant in ("dgrad", "wrw"), "variant 必须是 dgrad / wrw 之一"
+        assert variant in ("dgrad", "wrw"), "variant must be either dgrad or wrw"
         self.variant = variant
         self.stride_h, self.stride_w = int(stride_h), int(stride_w)
         self.pad_h, self.pad_w = int(pad_h), int(pad_w)
         self.dil_h, self.dil_w = int(dil_h), int(dil_w)
 
     def _deform_conv2d_forward(self, x, offset, weight, mask):
-        """手写 DCNv2 前向（标准 torch 可导算子组合），供 autograd 反传。"""
+        """Handwritten DCNv2 forward (a composition of standard differentiable
+        torch operators), used for the autograd backward pass."""
         n, c, h, w = x.shape
         k, _, r, s = weight.shape
         sh, sw = self.stride_h, self.stride_w
@@ -148,9 +184,11 @@ class Model(nn.Module):
         return out
 
     def forward(self, dy, weight, x, offset, mask):
-        # 对手写 DCNv2 前向构图后用 autograd 反传：保证 dgrad / wrw 与前向
-        # 语义严格一致（reference 不受禁用列表约束；数学上 dw 与 weight 的
-        # 数值无关，autograd 自然给出该定义）。
+        # Build the handwritten DCNv2 forward graph and backpropagate with
+        # autograd: this keeps dgrad / wrw strictly consistent with the forward
+        # semantics (the reference is not bound by the forbidden list;
+        # mathematically dw does not depend on the values of weight, and
+        # autograd naturally yields exactly that definition).
         xg = x.detach().requires_grad_(True)
         og = offset.detach().requires_grad_(True)
         mg = mask.detach().requires_grad_(True)
@@ -158,7 +196,8 @@ class Model(nn.Module):
         y = self._deform_conv2d_forward(xg, og, wg, mg)
         if self.variant == "dgrad":
             dx, doffset, dmask = torch.autograd.grad(y, (xg, og, mg), dy)
-            # 单张量输出：三段一维拼接，段序 dx | doffset | dmask
+            # Single-tensor output: the three segments concatenated into 1-D,
+            # segment order dx | doffset | dmask
             return torch.cat([dx.reshape(-1), doffset.reshape(-1), dmask.reshape(-1)])
         (dw,) = torch.autograd.grad(y, (wg,), dy)
         return dw
@@ -169,9 +208,11 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族（样例口径：3x3 核、stride=1、dilation=1；pad 取 1 覆盖填充
-    # 路径，尺寸为样例的适度放宽）；随机部分消费全局 RNG——评测器在 set_seed
-    # 后调用本函数，多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family (sample convention: 3x3 kernel, stride=1, dilation=1;
+    # pad=1 exercises the padding path and the sizes are a modest relaxation of
+    # the sample); the random part consumes the global RNG -- the evaluator
+    # calls this function after set_seed, so multiple correctness trials
+    # therefore see diverse inputs
     n, c, h, w = 2, 16, 16, 16
     out_c, r, s = 32, 3, 3
     out_h = (h + 2 * 1 - 1 * (3 - 1) - 1) // 1 + 1
@@ -188,23 +229,29 @@ def make_inputs(n: int, c: int, h: int, w: int, out_c: int, r: int, s: int,
                 stride_h: int = 1, stride_w: int = 1, pad_h: int = 1, pad_w: int = 1,
                 dil_h: int = 1, dil_w: int = 1, variant: str = "dgrad",
                 dtype: str = "float32", seed: int = 0):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description.
 
-    消费顺序固定：dy -> weight -> x -> offset -> mask（均 torch.randn 后 cast
-    到 dtype），全部来自同一 torch.Generator(seed)，同 seed 下逐位可复现。
-    dy/offset/mask 的空间尺寸由前向公式从 x/weight/卷积属性推出
-    （out = floor((in + 2*pad - dil*(k-1) - 1) / stride) + 1），保证五张量对
-    任意 variant 始终自洽。variant 与各卷积属性同时是构造 Model 的 init 超参，
-    此处仅做合法性校验。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    The consumption order is fixed: dy -> weight -> x -> offset -> mask (all
+    torch.randn, then cast to dtype), all drawn from the same
+    torch.Generator(seed), so the same seed reproduces inputs bit-for-bit.
+    The spatial sizes of dy/offset/mask are derived by the forward formula from
+    x/weight/the convolution attributes
+    (out = floor((in + 2*pad - dil*(k-1) - 1) / stride) + 1), which keeps the
+    five tensors self-consistent for any variant. variant and the convolution
+    attributes are also the init hyper-parameters used to construct the Model;
+    only validity checks are done here.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
-    assert variant in ("dgrad", "wrw"), "variant 必须是 dgrad / wrw 之一"
-    assert min(n, c, h, w, out_c, r, s) >= 1, "各维需 >= 1"
+    assert variant in ("dgrad", "wrw"), "variant must be either dgrad or wrw"
+    assert min(n, c, h, w, out_c, r, s) >= 1, "every dimension must be >= 1"
     assert min(stride_h, stride_w, dil_h, dil_w) >= 1 and min(pad_h, pad_w) >= 0, \
-        "stride/dilation >= 1 且 padding >= 0"
+        "stride/dilation >= 1 and padding >= 0"
     eff_r, eff_s = dil_h * (r - 1) + 1, dil_w * (s - 1) + 1
-    assert h + 2 * pad_h >= eff_r and w + 2 * pad_w >= eff_s, "前向卷积尺寸不自洽"
+    assert h + 2 * pad_h >= eff_r and w + 2 * pad_w >= eff_s, "the forward convolution sizes are inconsistent"
     out_h = (h + 2 * pad_h - eff_r) // stride_h + 1
     out_w = (w + 2 * pad_w - eff_s) // stride_w + 1
     dy = torch.randn(n, out_c, out_h, out_w, generator=gen).to(dt)
