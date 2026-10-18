@@ -29,6 +29,12 @@ import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
+# ---- 题面语言 ---------------------------------------------------------------
+# 题面已全量英文化（零 CJK，由 tests/test_prompt_english.py 回归），因此下面的
+# 规则以**英文字面**为主；同时保留中文分支，便于审计历史上的中文题面快照。
+LANG_RE = re.compile(r"(?:实现语言|Implementation language)\s*[:：]?\s*([A-Za-z]+)")
+HARDWARE_HINTS = ("目标硬件", "target hardware")
+
 # ---- B 溯源词 ---------------------------------------------------------------
 TRACE_PATTERNS = {
     "aiter": r"aiter",
@@ -45,7 +51,13 @@ TRACE_PATTERNS = {
 
 # 「禁止/禁用」段落里的词是**题面应该写**的内容（禁用列表），不算溯源泄漏。
 # 注意必须按**段落**判断而非按行：禁用清单经常换行，关键词落在上一行。
-FORBIDDEN_HINT = re.compile(r"禁止|禁用|不得|不许|forbidden|违规", re.I)
+# 英文化后禁用段落的标准写法是 `Forbidden (static audit ... )` /
+# `Implementation constraints (violations are scored as failures)`。
+FORBIDDEN_HINT = re.compile(
+    r"禁止|禁用|不得|不许|违规|forbidden|disallow\w*|implementation constraints|violations?"
+    r"|prohibited|not allowed",
+    re.I,
+)
 
 
 def _forbidden_spans(doc: str) -> list[tuple[int, int]]:
@@ -62,23 +74,51 @@ def _in_spans(index: int, spans: list[tuple[int, int]]) -> bool:
 
 # ---- C 解法暴露词（点名"怎么做"，而非"做什么"）------------------------------
 PRESCRIPTION_PATTERNS = {
-    "算法名": r"Hillis[- ]?Steele|Blelloch|Kahan|Welford|Kogge[- ]?Stone|flash\s*attention\s*算法",
-    "分块/线程组织": r"BLOCK_[A-Z_]+\s*=|num_warps|num_stages|block_size\s*=|线程块|grid\s*=\s*\(",
-    "实现步骤": r"第一步|第二步|步骤\s*[1-9]|先.{0,12}再.{0,12}最后",
-    "性能技巧": r"双缓冲|软件流水|向量化加载|合并访存|shared\s*memory\s*复用|bank\s*conflict",
-    "推荐做法": r"推荐用|建议使用|应当采用|最优做法",
+    "算法名": r"Hillis[- ]?Steele|Blelloch|Kahan|Welford|Kogge[- ]?Stone"
+              r"|flash\s*attention\s*(?:算法|algorithm)",
+    "分块/线程组织": r"BLOCK_[A-Z_]+\s*=|num_warps|num_stages|block_size\s*="
+                     r"|线程块|thread\s*block|grid\s*=\s*\(",
+    "实现步骤": r"第一步|第二步|步骤\s*[1-9]|step\s*[1-9]|first\s+step|second\s+step"
+                r"|先.{0,12}再.{0,12}最后|first\b.{0,20}\bthen\b.{0,20}\bfinally\b",
+    "性能技巧": r"双缓冲|软件流水|向量化加载|合并访存|shared\s*memory\s*复用|bank\s*conflict"
+                r"|double[- ]?buffer|software\s*pipelin|vectori[sz]ed\s+load|coalesc",
+    "推荐做法": r"推荐用|建议使用|应当采用|最优做法"
+                r"|recommended\s+(?:to|approach)|it\s+is\s+advisable|best\s+practice|preferred\s+approach",
 }
 
 
 def load_manifest_backends() -> dict:
-    import yaml
+    """alias -> backend。优先用 pyyaml；开发机常常没有它，退化为逐行扫描。
 
-    man = yaml.safe_load(
-        (REPO / "benchmark/kernelbench_compat/manifest_dcukb.yaml").read_text(encoding="utf-8")
-    )
-    out = {}
-    for t in man["tasks"]:
-        out[t["alias"]] = (t.get("backend") or "triton")
+    manifest_dcukb.yaml 的 `tasks:` 一层只有 `- alias / level / problem_id /
+    backend` 四个标量，没有多行标量或嵌套结构，逐行解析足够安全。
+    """
+    text = (REPO / "benchmark/kernelbench_compat/manifest_dcukb.yaml").read_text(encoding="utf-8")
+    try:
+        import yaml
+    except ModuleNotFoundError:
+        yaml = None
+    if yaml is not None:
+        man = yaml.safe_load(text)
+        return {t["alias"]: (t.get("backend") or "triton") for t in man["tasks"]}
+
+    out, cur, default = {}, None, "triton"
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith(" "):
+            if line.startswith("backend:"):
+                default = line.split(":", 1)[1].strip() or default
+            continue
+        stripped = line.strip()
+        if stripped.startswith("- alias:"):
+            cur = stripped.split(":", 1)[1].strip()
+            out[cur] = default
+        elif stripped.startswith("backend:") and cur is not None:
+            out[cur] = stripped.split(":", 1)[1].strip() or default
+        elif stripped.startswith("alias:") and cur is not None:
+            cur = stripped.split(":", 1)[1].strip()
+            out[cur] = default
     return out
 
 
@@ -106,11 +146,11 @@ def audit_one(alias: str, backend: str) -> dict:
 
     low = doc.lower()
     # --- A 后端口径 ---------------------------------------------------------
-    m = re.search(r"实现语言\s*([A-Za-z]+)", doc)
+    m = LANG_RE.search(doc)
     lang = m.group(1).lower() if m else None
     rec["declared_lang"] = lang
     if lang is None:
-        rec["problems"].append(("A", "题面未声明实现语言"))
+        rec["problems"].append(("A", "题面未声明实现语言（Implementation language）"))
     else:
         want = "hip" if backend == "cuda" else backend
         if want not in lang and lang not in want:
@@ -124,8 +164,8 @@ def audit_one(alias: str, backend: str) -> dict:
         hits = sorted(set(re.findall(r"hip/hip_runtime|hipcc|hipLaunchKernel|__global__", low)))
         if hits:
             rec["problems"].append(("A", f"Triton 题里出现 HIP 字样: {hits[:6]}"))
-    if "目标硬件" not in doc:
-        rec["problems"].append(("A", "题面缺「目标硬件」声明"))
+    if not any(h in low for h in HARDWARE_HINTS):
+        rec["problems"].append(("A", "题面缺「目标硬件 / Target hardware」声明"))
 
     # --- B 溯源泄漏 ---------------------------------------------------------
     exempt = _forbidden_spans(doc)
