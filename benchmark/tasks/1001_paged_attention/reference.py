@@ -1,21 +1,23 @@
-"""1001_paged_attention — 独立 PyTorch 参考实现（语义唯一依据）。
+"""1001_paged_attention -- standalone PyTorch reference implementation (the sole
+semantic authority).
 
-评测器以本文件生成的输出为 expected。计算在 float32 中完成，
-最后 cast 回输入 dtype；生成 Agent 的 kernel 只需在容差内匹配。
+The evaluator uses the output produced by this file as `expected`. The
+computation is done in float32 and finally cast back to the input dtype; the
+kernel written by the generating Agent only needs to match within tolerance.
 """
 
 
 def reference(query, key_cache, value_cache, block_tables, seq_lens, scale=None):
-    """单 token decode 的 paged attention（MHA / GQA 通用）。
+    """Paged attention for single-token decode (works for both MHA and GQA).
 
     query       [B, H_Q, D]
     key_cache   [num_blocks, H_KV, block_size, D]
     value_cache [num_blocks, H_KV, block_size, D]
-    block_tables[B, max_blocks_per_seq] int32 —— 逻辑块 -> 物理块编号
-    seq_lens    [B] int32 —— 每个序列实际有效的 KV 长度
-    scale       float，默认 1/sqrt(D)
+    block_tables[B, max_blocks_per_seq] int32 -- logical block -> physical block id
+    seq_lens    [B] int32 -- the actually valid KV length of each sequence
+    scale       float, defaults to 1/sqrt(D)
 
-    返回 out [B, H_Q, D]，dtype 与 query 一致。
+    Returns out [B, H_Q, D] with the same dtype as query.
     """
     import torch
 
@@ -23,7 +25,7 @@ def reference(query, key_cache, value_cache, block_tables, seq_lens, scale=None)
     H_KV = key_cache.shape[1]
     bs = key_cache.shape[2]
     group = H_Q // H_KV
-    assert H_Q == H_KV * group, "num_q_heads 必须是 num_kv_heads 的整数倍"
+    assert H_Q == H_KV * group, "num_q_heads must be an integer multiple of num_kv_heads"
 
     if scale is None:
         import math
@@ -35,11 +37,12 @@ def reference(query, key_cache, value_cache, block_tables, seq_lens, scale=None)
         num_blocks = (seq_len + bs - 1) // bs
         physical = block_tables[s, :num_blocks].to(torch.long)
 
-        # 按块表收集本序列的 K/V：[num_blocks, H_KV, bs, D] -> [H_KV, seq_len, D]
+        # Gather this sequence's K/V according to the block table:
+        # [num_blocks, H_KV, bs, D] -> [H_KV, seq_len, D]
         k = key_cache[physical].permute(1, 0, 2, 3).reshape(H_KV, num_blocks * bs, D)[:, :seq_len].to(torch.float32)
         v = value_cache[physical].permute(1, 0, 2, 3).reshape(H_KV, num_blocks * bs, D)[:, :seq_len].to(torch.float32)
 
-        # GQA：同一 KV head 的 K/V 复制给 group 内的每个 query head
+        # GQA: the K/V of one KV head is replicated to every query head in the group
         if group > 1:
             k = k.repeat_interleave(group, dim=0)   # [H_Q, seq_len, D]
             v = v.repeat_interleave(group, dim=0)
@@ -54,9 +57,13 @@ def reference(query, key_cache, value_cache, block_tables, seq_lens, scale=None)
 def make_inputs(num_seqs: int, num_q_heads: int, num_kv_heads: int,
                 head_size: int, block_size: int, max_seq_len: int,
                 dtype: str = "float16", seed: int = 0, seq_lens=None):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description.
 
-    seq_lens 可显式指定（用于精确构造边界案例）；缺省时在 [1, max_seq_len] 均匀采样。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    `seq_lens` may be given explicitly (to construct boundary cases exactly); when
+    omitted it is sampled uniformly from [1, max_seq_len].
     """
     import torch
 
@@ -66,13 +73,14 @@ def make_inputs(num_seqs: int, num_q_heads: int, num_kv_heads: int,
     if seq_lens is None:
         seq_lens = torch.randint(1, max_seq_len + 1, (num_seqs,), generator=gen, dtype=torch.int32)
     else:
-        if len(seq_lens) == 1 and num_seqs > 1:   # 单值广播到整个 batch
+        if len(seq_lens) == 1 and num_seqs > 1:   # a single value broadcasts over the whole batch
             seq_lens = seq_lens * num_seqs
         seq_lens = torch.tensor(seq_lens, dtype=torch.int32)
         assert len(seq_lens) == num_seqs and int(seq_lens.max()) <= max_seq_len
     max_blocks_per_seq = (max_seq_len + block_size - 1) // block_size
 
-    # 物理块池大于实际用量：未引用槽位是"垃圾数据"，用于检验掩码正确性
+    # The physical block pool is larger than what is actually used: unreferenced
+    # slots hold "garbage data", which exercises the masking.
     num_blocks = num_seqs * max_blocks_per_seq + 8
     perm = torch.randperm(num_blocks, generator=gen)
     block_tables = perm[: num_seqs * max_blocks_per_seq].reshape(num_seqs, max_blocks_per_seq).to(torch.int32)
