@@ -124,12 +124,78 @@ HIP 那 20 道的基线状况与 hipDNN 基线探针的结论一致：hipDNN 在
 ## 5. 引用这些数字时的注意事项
 
 1. **加速比的分母必须说明**：在线数字的分母是 `torch_eager`，不是 aiter。
-2. **6 道题的 aiter 基线是 MI 系列 fallback tuner 配置**（未针对 DCU 调优），
-   其 aiter 数值不等于 aiter 在 DCU 上的最好成绩：
-   `1014_hstu_attention`、`1017_mha`、`4001_batched_gemm_a8w8`、
-   `4004_batched_gemm_bf16`、`4006_gemm_a16w16`、`4008_gemm_a16w4`。
-3. **2 道题没有离线终审结果**（`1016_lean_atten_paged`、`2004_fused_qk_concat`，
+2. **「vs aiter」必须逐题看**：6 道题的 aiter 基线是 MI 系列 fallback tuner 配置
+   （未针对 DCU 调优），另有 3 道 aiter 配置本身比 PyTorch 还慢 —— 详见
+   **附录附 1**，不能只看聚合中位数。
+3. **HIP 那 20 道的分母含义分三档**（conv 族即 MIOpen / 纯 ATen / 未验证）——
+   详见 **附录附 2**。
+4. **2 道题没有离线终审结果**（`1016_lean_atten_paged`、`2004_fused_qk_concat`，
    离线工具侧崩溃），它们的在线结果是 436.91x 与 26.68x。
+
+---
+
+## 附：基线补充说明（读「vs aiter」这些数字前请先看这节）
+
+### 附 1. 为什么有些 aiter 基线「不可靠」
+
+aiter 是官方实现，但**它的实测数值不一定等于 aiter 在 DCU 上的最好成绩**。本轮实际遇到三种情况：
+
+**(a) 掉进 MI 系列 fallback tuner 配置 —— 6 道**
+
+`1014_hstu_attention`、`1017_mha`、`4001_batched_gemm_a8w8`、`4004_batched_gemm_bf16`、
+`4006_gemm_a16w16`、`4008_gemm_a16w4`（`4008` 仅部分 case）。
+
+aiter 的调优表里没有这些算子在 DCU 上的专用配置，回落到了 MI 系列 GPU 的 tuner 配置。
+后果：**aiter 数值本身偏离其应有水平，方向因题而异** —— 有的题因此把生成实现的
+「vs aiter」抬得虚高，有的题则相反。所以这 6 道在离线终审里被单独打了
+`aiter_is_mi_fallback` 标记，引用其「vs aiter」必须同时标注。
+
+**(b) aiter 配置本身比 PyTorch 还慢 —— 3 道（实测，aiter 相对 eager 的加速比）**
+
+| 题 | aiter 相对 eager | 含义 |
+|---|---|---|
+| `4006_gemm_a16w16` | **0.11x**（0.11–0.18） | aiter 比 PyTorch 慢约 9 倍 |
+| `3002_moe_align_block_size` | **0.19x**（0.05–0.75） | 慢约 5 倍 |
+| `4001_batched_gemm_a8w8` | **0.37x**（0.29–2.20） | 慢约 3 倍 |
+
+这类分母上算出的「vs aiter」会异常高（如 `4006` 的 10.49x），**不能当作「超过官方实现」的证据**。
+
+作为对照，aiter 强的一侧确实很强：`1014` 42.09x、`1002` 38.67x、`1016` 28.25x、
+`4005` 20.83x（aiter 相对 eager，同机实测）。**同是"aiter 分母"，强弱可差三个数量级**，
+所以「vs aiter」这个指标必须逐题看，不能只看聚合中位数。
+
+**(c) 根本没有 aiter 基线 —— 33 道**
+
+原因有两类：aiter 里没有可对位的实现（主要是 hipDNN 样例覆盖的算子），
+或采集不到（如 `1019_mha_onekernel_bwd`，DTK 版 aiter 的 onekernel bwd 报
+`PassManager::run failed`，shared memory 81920 超出 DCU 上限 65536，非配置问题）。
+这 33 道只能给 `torch_eager` 口径。
+
+### 附 2. HIP 那 20 道的 `torch_eager` 就是 MIOpen（不是"弱基线"）
+
+这 20 道源自 hipDNN 样例，本应补 hipDNN 分母，但 hipDNN 在当前环境不可用（见第 4 节）。
+不过**它们的 `torch_eager` 分母并不弱** —— 因为 torch 在 DCU 上对 conv 族就是走 MIOpen：
+
+```
+ldd libtorch_hip.so                          -> libMIOpen.so.1            ✓
+torch.backends.cudnn.is_available()          = True（DCU 上即 MIOpen 后端） ✓
+profile F.conv2d(16,16,16,16 / 16,16,3,3)    -> winograd_fwd_2d_fp32_3x3_s1_16x16x4
+                                                 （MIOpen 的 Winograd 内核）  ✓
+```
+
+所以对 conv 族，**`torch_eager` 就是 vendor 库（MIOpen）实现**，其加速比含金量等同于
+"对官方库的加速比"。20 道按分母含义分三档：
+
+| 档 | 题 | `torch_eager` 分母的含义 |
+|---|---|---|
+| **conv 族，即 vendor 库分母** | 4 道：`5001_conv2d_fwd`、`5002_conv2d_bwd`、`5008_conv_bias_act`、`5009_conv_depthtospace` | 走 MIOpen → **就是 vendor 实现，不弱** |
+| **纯 ATen，偏弱** | 9 道：`5003`、`5004`（deform conv）、`5005`、`5006`、`5007`（spconv）、`6001`（adamw）、`8001`（cumsum）、`8002`（gather）、`8003`（scatter_nd） | torch 无 MIOpen 路径 → 纯 ATen，偏弱 |
+| **未验证，不作断言** | 7 道：`1031`、`1032`（deform attention）、`2010`–`2014`（batchnorm/groupnorm/instancenorm） | 未探针确认是否走 MIOpen |
+
+**引用这 20 道的加速比时必须注明属于哪一档**：conv 族那 4 道的数字含金量最高
+（分母已是 vendor 库），纯 ATen 那 9 道会系统性偏高。
+
+> 依据：`benchmark/tools/hipdnn_baseline_probe.md`（2026-10-15 的实测探针）。
 
 ---
 
