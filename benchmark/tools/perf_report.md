@@ -50,15 +50,46 @@ SyntaxError，Agent 连起点都没有；修复后 66/66。compile 阶段失败�
 | HIP（backend=cuda） | 20 | 11→20 | 10→15 |
 | Triton | 46 | 46→46 | 37→38 |
 
-### 2.2 离线终审（隐藏 case + `task.yaml` 分档容差，严于在线）
+### 2.2 离线终审（静态审计 + 隐藏 case + `task.yaml` 分档容差）
 
-只审有 aiter 基线的题：**审了 31 道，正确性通过 21 道（68%）**。
+只审有 aiter 基线的题：**审了 31 道，通过 21 道（68%）**。
 
-未通过（10 道）：`1020_mla_decode_rope`、`1022_pa_prefill`、`1026_sage_attention_qk_int8_per_block`、`2007_rmsnorm`、`2008_rope`、`3002_moe_align_block_size`、`3009_routing`、`4004_batched_gemm_bf16`、`4008_gemm_a16w4`、`4018_quant`
+未通过的题**不是同一类原因**，性质完全不同：
 
-> 这些题在**在线**是判对的（单一 shape、1e-4 allclose），但在**隐藏 case + 分档容差**
-> 下不成立。两个数字都对，只是量的不是同一件事：在线反映「能不能跑通并对上参考」，
-> 离线反映「换一批 shape/边界还对不对」。引用时必须说明用的是哪一套。
+| 未通过原因 | 题数 | 说明 |
+|---|---|---|
+| **静态审计判负**（未进入正确性环节） | **6** | 实现里直接调用被禁的 ATen 算子完成核心计算，违反「禁止绕过」铁律 |
+| **正确性不达标**（隐藏 case 对不上） | **4** | 静态审计通过，但边界 shape 处理不到位 |
+
+#### A. 静态审计判负
+
+| 题 | 命中的禁用算子 |
+|---|---|
+| `1020_mla_decode_rope` | `torch.matmul`、`torch.softmax` |
+| `1022_pa_prefill` | `torch.einsum`、`torch.softmax` |
+| `1026_sage_attention_qk_int8_per_block` | `torch.matmul`、`torch.softmax` |
+| `3009_routing` | `torch.matmul`、`torch.sigmoid` |
+| `4004_batched_gemm_bf16` | `torch.matmul` |
+| `4008_gemm_a16w4` | `torch.matmul` |
+
+这些题在**在线**被判为正确 —— 在线评测不执行禁用列表（题面 forbidden 在线上只是
+软约束，硬审计在离线）。所以它们不是「性能不好」，而是**实现方式不合规**。
+
+#### B. 正确性不达标
+
+| 题 | 失败 case |
+|---|---|
+| `2007_rmsnorm` | `hidden_nonpow2_m873_n1245_fwd_f16`、`hidden_fwd_wide_m4_n65536_bf16` （2/6）|
+| `2008_rope` | `hidden_nonpow2_partial_neox_bf16` （1/6）|
+| `3002_moe_align_block_size` | `hidden_official_large_e224` （1/6）|
+| `4018_quant` | `hidden_dyn_tensor_wide_32x8192_fp8`、`hidden_dyn_token_zero_rows_257x128_fp8`、`hidden_dyn_token_bf16_2048x1024_fp8` （3/6）|
+
+失败 case 全部是 `hidden_` 前缀的隐藏 case，形态为**非 2 次幂、超长/超宽、
+极大规模、fp8 动态量化、零行**等边界；在线只跑 `get_inputs()` 的单一固定
+shape，这些边界不会出现，所以在线全对、离线翻车。**这 4 道才是真正能归因于「离线判据更严」的。**
+
+> 两套判据不互相否定：在线回答「能不能跑通并对上参考」，离线回答「换一批
+> shape/边界还对不对、以及实现是否合规」。引用时必须说明用的是哪一套。
 
 ## 3. 在线加速比（分母 = `torch_eager`）
 

@@ -39,6 +39,18 @@ AUDIT_FAILURES = {
     "2004_fused_qk_concat": "exit -11（SIGSEGV），审计过程崩溃",
 }
 
+# 离线终审里「静态审计判负」的题各自命中了哪些禁用算子。
+# offline_audit.json 只记 static_audit_passed 布尔值，具体符号是用同一份
+# benchmark/evaluator/static_audit.py 对 best_code.py 复跑得到的（2026-10-17）。
+STATIC_AUDIT_HITS = {
+    "1020_mla_decode_rope": ["torch.matmul", "torch.softmax"],
+    "1022_pa_prefill": ["torch.einsum", "torch.softmax"],
+    "1026_sage_attention_qk_int8_per_block": ["torch.matmul", "torch.softmax"],
+    "3009_routing": ["torch.matmul", "torch.sigmoid"],
+    "4004_batched_gemm_bf16": ["torch.matmul"],
+    "4008_gemm_a16w4": ["torch.matmul"],
+}
+
 
 def load(root: str) -> dict:
     out, base = {}, pathlib.Path(root)
@@ -92,6 +104,17 @@ def fmt(v, nd=2):
     return "-" if v is None else f"{v:.{nd}f}"
 
 
+def audit_case_cache(cache_dir: pathlib.Path, task: str) -> dict:
+    """读 audit_batch.py 的单题缓存（含 correctness_failures 明细）。"""
+    p = cache_dir / f"{task}.json"
+    if not p.is_file():
+        return {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def aiter_baseline_table(repo: pathlib.Path) -> dict:
     """private/*/baseline.json：aiter 相对 torch_eager 的加速比（同 perf case）。"""
     out = {}
@@ -128,6 +151,8 @@ def main() -> int:
     ap.add_argument("--model", default="gpt-6-astra",
                     help="生成模型名。注意 run.json **不记录**模型名，只能从 llm.env 的 "
                          "OPENAI_MODEL 取，故此处由调用方传入。")
+    ap.add_argument("--audit-cache", default=".dcu_runs/offline_audit/offline_audit",
+                    help="audit_batch.py 的单题缓存目录（读 correctness_failures 明细）")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
@@ -135,6 +160,7 @@ def main() -> int:
     B = {k: row(v) for k, v in load(args.before).items()}
     A = {k: row(v) for k, v in load(args.after).items()}
     repo = pathlib.Path(args.repo)
+    cache_dir = pathlib.Path(args.audit_cache)
     audit = None
     if args.offline_audit and pathlib.Path(args.offline_audit).is_file():
         audit = json.loads(pathlib.Path(args.offline_audit).read_text(encoding="utf-8"))
@@ -233,17 +259,78 @@ def main() -> int:
 
     if audit:
         ag = audit["aggregates"]
-        w("### 2.2 离线终审（隐藏 case + `task.yaml` 分档容差，严于在线）")
+        rows_a = audit["rows"]
+
+        def cache_of(task):
+            return audit_case_cache(cache_dir, task)
+
+        # 注意：offline_audit.json 的 rows 里**没有** static_audit_passed，
+        # 它只出现在单题缓存里。所以分类必须读缓存，不能从 rows 判。
+        static_bad = [r for r in rows_a
+                      if cache_of(r["task"]).get("static_audit_passed") is False]
+        corr_bad = [r for r in rows_a
+                    if cache_of(r["task"]).get("static_audit_passed") is not False
+                    and not r["correctness_passed"]
+                    and cache_of(r["task"]).get("correctness_case_count")]
+        passed = [r for r in rows_a if r["correctness_passed"]]
+        ids_bad = {id(r) for r in static_bad} | {id(r) for r in corr_bad} | {id(r) for r in passed}
+        other = [r for r in rows_a if id(r) not in ids_bad]
+        w("### 2.2 离线终审（静态审计 + 隐藏 case + `task.yaml` 分档容差）")
         w("")
-        w(f"只审有 aiter 基线的题：**审了 {ag['audited']} 道，正确性通过 {ag['correctness_passed']} 道"
-          f"（{ag['correctness_passed']/ag['audited']*100:.0f}%）**。")
+        w(f"只审有 aiter 基线的题：**审了 {ag['audited']} 道，通过 {len(passed)} 道"
+          f"（{len(passed)/ag['audited']*100:.0f}%）**。")
         w("")
-        bad = [r["task"] for r in audit["rows"] if not r["correctness_passed"]]
-        w(f"未通过（{len(bad)} 道）：" + "、".join(f"`{t}`" for t in bad))
+        w("未通过的题**不是同一类原因**，性质完全不同：")
         w("")
-        w("> 这些题在**在线**是判对的（单一 shape、1e-4 allclose），但在**隐藏 case + 分档容差**")
-        w("> 下不成立。两个数字都对，只是量的不是同一件事：在线反映「能不能跑通并对上参考」，")
-        w("> 离线反映「换一批 shape/边界还对不对」。引用时必须说明用的是哪一套。")
+        w("| 未通过原因 | 题数 | 说明 |")
+        w("|---|---|---|")
+        w(f"| **静态审计判负**（未进入正确性环节） | **{len(static_bad)}** | "
+          f"实现里直接调用被禁的 ATen 算子完成核心计算，违反「禁止绕过」铁律 |")
+        w(f"| **正确性不达标**（隐藏 case 对不上） | **{len(corr_bad)}** | "
+          f"静态审计通过，但边界 shape 处理不到位 |")
+        if other:
+            w(f"| 审计未产出结果 | **{len(other)}** | 见下方 C |")
+        w("")
+        if static_bad:
+            w("#### A. 静态审计判负")
+            w("")
+            w("| 题 | 命中的禁用算子 |")
+            w("|---|---|")
+            for r in static_bad:
+                hits = STATIC_AUDIT_HITS.get(r["task"])
+                label = "、".join(f"`{h}`" for h in hits) if hits else "（未复跑取证）"
+                w(f"| `{r['task']}` | {label} |")
+            w("")
+            w("这些题在**在线**被判为正确 —— 在线评测不执行禁用列表（题面 forbidden 在线上只是")
+            w("软约束，硬审计在离线）。所以它们不是「性能不好」，而是**实现方式不合规**。")
+            w("")
+        if corr_bad:
+            w("#### B. 正确性不达标")
+            w("")
+            w("| 题 | 失败 case |")
+            w("|---|---|")
+            for r in corr_bad:
+                cache = cache_of(r["task"])
+                cases = cache.get("correctness_failures") or []
+                n = cache.get("correctness_case_count")
+                label = "、".join(f"`{c}`" for c in cases) if cases else "（未取到明细）"
+                w(f"| `{r['task']}` | {label} （{len(cases)}/{n if n else '?'}）|")
+            w("")
+            w("失败 case 全部是 `hidden_` 前缀的隐藏 case，形态为**非 2 次幂、超长/超宽、")
+            w("极大规模、fp8 动态量化、零行**等边界；在线只跑 `get_inputs()` 的单一固定")
+            w("shape，这些边界不会出现，所以在线全对、离线翻车。**这 "
+              f"{len(corr_bad)} 道才是真正能归因于「离线判据更严」的。**")
+            w("")
+        if other:
+            w("#### C. 审计未产出结果")
+            w("")
+            for r in other:
+                c = cache_of(r["task"])
+                w(f"- `{r['task']}`：`static_audit_passed={c.get('static_audit_passed')}`、"
+                  f"`exit_code={c.get('exit_code')}`")
+            w("")
+        w("> 两套判据不互相否定：在线回答「能不能跑通并对上参考」，离线回答「换一批")
+        w("> shape/边界还对不对、以及实现是否合规」。引用时必须说明用的是哪一套。")
         w("")
 
     w("## 3. 在线加速比（分母 = `torch_eager`）")
