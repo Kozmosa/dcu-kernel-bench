@@ -1,51 +1,60 @@
-# 4004_batched_gemm_bf16 — batch 维 bf16×bf16 GEMM（可选 bias）的 model_class
-# （KernelBench 兼容）题目文件。
+# 4004_batched_gemm_bf16 -- model_class (KernelBench compatible) task file for
+# the batch-dimension bf16 x bf16 GEMM (optional bias).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=4004, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=4004, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """batch 维 bf16 GEMM：对 batch 内每个矩阵独立计算 x[b] @ weight[b]^T。
+    """Batch-dimension bf16 GEMM: computes x[b] @ weight[b]^T independently for
+    every matrix in the batch.
 
-    数学定义（对 batch 内每个 b 独立，B/M/N/K >= 1）：
-      acc[b, m, n] = sum_k x[b, m, k] * weight[b, n, k]    （float32 累加）
-      out[b, m, n] = acc[b, m, n] + bias[b, 0, n]          （可选 bias）
-    weight 以行主 (B, N, K) 存放，计算等价于转置 GEMM（每个输出通道对应
-    weight 的一行）。bias 融合顺序遵循 GEMM kernel 惯例：float32 累加结果
-    先 cast 到输入 dtype（bfloat16），再加 bias（bfloat16 算术），最后 cast
-    到输出 dtype。无 bias 时直接 cast。边界行为：B/M/N/K 任意 >= 1（含
-    1×1×1 最小规模），维度允许非 2 次幂；K 不整除 tile 大小时由 kernel 内
-    掩码补零处理尾部，数学结果不变。
+    Mathematical definition (independent per b in the batch, B/M/N/K >= 1):
+      acc[b, m, n] = sum_k x[b, m, k] * weight[b, n, k]    (float32 accumulation)
+      out[b, m, n] = acc[b, m, n] + bias[b, 0, n]          (optional bias)
+    weight is stored row-major as (B, N, K), so the computation is equivalent to a
+    transposed GEMM (each output channel corresponds to one row of weight). The
+    bias fusion order follows GEMM kernel convention: the float32 accumulated
+    result is first cast to the input dtype (bfloat16), bias is then added
+    (bfloat16 arithmetic), and finally the result is cast to the output dtype. With
+    no bias it is cast directly. Boundary behaviour: B/M/N/K may be any value >= 1
+    (including the minimal 1x1x1 size) and the dimensions may be
+    non-powers-of-two; when K does not divide the tile size, the kernel masks the
+    tail with zeros, which does not change the mathematical result.
 
-    输入输出规格：
-      x      bfloat16  (B, M, K)  激活矩阵
-      weight bfloat16  (B, N, K)  权重矩阵（行主，转置 GEMM 语义）
-      bias   bfloat16  (B, 1, N)  可选；use_bias=False 时传入占位张量并被忽略
-      out    输出 dtype (B, M, N) dtype 由 __init__ 的 out_dtype 指定
-                            （bfloat16 / float16）
+    Input/output specification:
+      x      bfloat16  (B, M, K)  the activation matrix
+      weight bfloat16  (B, N, K)  the weight matrix (row-major, transposed-GEMM semantics)
+      bias   bfloat16  (B, 1, N)  optional; when use_bias=False a placeholder tensor is
+                                  passed and ignored
+      out    output dtype (B, M, N), where the dtype is set by __init__'s out_dtype
+                                  (bfloat16 / float16)
 
-    实现约束（违规判负）：
-      - 核心计算（bf16 GEMM 的乘累加与 bias 融合）必须在提交文件内完成，
-        禁止调用 torch.matmul / torch.bmm / torch.mm / torch.addmm /
-        torch.baddbmm / torch.einsum / F.linear / functional.linear /
-        aiter。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间累加用 float32；bias 分支按上述融合顺序；输出 cast 到 out_dtype。
-      - 评测器会把全部输入 cast 成 fp32 后传入 forward；输入值（小整数码值
-        与 bfloat16 可表示值）在 fp32 中均精确表示，入口处
-        .to(torch.bfloat16) 无损恢复。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (the bf16 GEMM multiply-accumulate and the bias fusion)
+        must be completed inside the submitted file; calling torch.matmul /
+        torch.bmm / torch.mm / torch.addmm / torch.baddbmm / torch.einsum /
+        F.linear / functional.linear / aiter is forbidden.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Accumulate intermediates in float32; the bias branch follows the fusion
+        order above; cast the output to out_dtype.
+      - The evaluator casts all inputs to fp32 before calling forward; the input
+        values (small integer codes and values representable in bfloat16) are all
+        exactly representable in fp32, so .to(torch.bfloat16) at the entry point
+        recovers them losslessly.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：TN 布局（x 行主 (B,M,K)、weight 行主 (B,N,K)）、无 splitK、
-    无任何量化成分（纯 bf16 输入、无 scale 反量化）。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: TN layout (x row-major (B,M,K), weight row-major (B,N,K)), no
+    split-K, no quantization component at all (pure bf16 inputs, no scale
+    dequantization).
     """
 
     def __init__(self, use_bias: bool = True, out_dtype: str = "bfloat16"):
@@ -54,33 +63,37 @@ class Model(nn.Module):
         self.out_dtype = getattr(torch, out_dtype)
 
     def forward(self, x, weight, bias):
-        # 评测器把全部输入 cast 成 fp32；bfloat16 值域 fp32 精确表示，无损恢复
+        # The evaluator casts every input to fp32; the bfloat16 value range is
+        # exactly representable in fp32, so it is recovered losslessly.
         x = x.to(torch.bfloat16)
         weight = weight.to(torch.bfloat16)
-        # 单行条件（forward 语句需可被逐条提取重排，避免 if/else 复合块）
+        # Single-statement form (forward statements must be extractable and
+        # reorderable one by one, so avoid an if/else compound block).
         bias = bias.to(torch.bfloat16) if self.use_bias else None
 
         B, M, K = x.shape
         N = weight.shape[1]
-        assert K == weight.shape[2], "x 与 weight 的 K 维必须一致"
+        assert K == weight.shape[2], "x and weight must agree on the K dimension"
 
-        # bf16 提升到 float32 后做 GEMM，累加全程 float32
+        # Promote bf16 to float32 and run the GEMM; the whole accumulation is float32
         acc = torch.matmul(x.to(torch.float32), weight.to(torch.float32).transpose(1, 2))
 
         if bias is not None:
-            # 与 GEMM kernel 的融合顺序一致：先 cast 到输入 dtype 再加 bias
+            # Matches the GEMM kernel fusion order: cast to the input dtype first,
+            # then add the bias.
             acc = acc.to(x.dtype) + bias
         return acc.to(self.out_dtype)
 
 
 def get_init_inputs():
-    return [True, "bfloat16"]   # use_bias；out_dtype
+    return [True, "bfloat16"]   # use_bias; out_dtype
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性。值域量级与生成器
-    # make_inputs 保持一致（randint(-20,20)、rand*10）。
+    # Fixed shape family; the random part consumes the global RNG -- the
+    # evaluator calls this function after set_seed, so multiple correctness trials
+    # therefore see diverse inputs. The value ranges match the generator
+    # make_inputs (randint(-20,20), rand*10).
     b, m, n, k = 8, 128, 256, 512
 
     x = torch.randint(-20, 20, (b, m, k), dtype=torch.bfloat16)
@@ -91,11 +104,15 @@ def get_inputs():
 
 def make_inputs(b: int, m: int, n: int, k: int, use_bias: bool = True,
                 out_dtype: str = "bfloat16", seed: int = 0):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description.
 
-    消费顺序固定：x → weight → bias，全部来自同一 torch.Generator(seed)，
-    同 seed 下逐位可复现。out_dtype 仅描述输出 dtype（Model 构造参数），
-    不参与输入生成——输入恒为 bfloat16。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    The consumption order is fixed: x -> weight -> bias, all from the same
+    torch.Generator(seed), so the same seed reproduces inputs bit-for-bit.
+    out_dtype only describes the output dtype (a Model construction parameter) and
+    does not participate in input generation -- inputs are always bfloat16.
     """
     gen = torch.Generator().manual_seed(seed)
 
