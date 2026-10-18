@@ -135,7 +135,7 @@ HIP 那 20 道的基线状况与 hipDNN 基线探针的结论一致：hipDNN 在
 
 ---
 
-## 附：aiter 基线为什么没覆盖剩下的题
+## 附 1：aiter 基线为什么没覆盖剩下的题
 
 66 道里 33 道有 aiter 基线。剩下 33 道中 **20 道是 hipDNN 来源题**（其基线口径见第 4 节），
 按要求不计入本节；因此这里只说明**其余 13 道**：
@@ -157,6 +157,35 @@ HIP 那 20 道的基线状况与 hipDNN 基线探针的结论一致：hipDNN 在
 
 （HIP 那 20 道的分母说明 —— 尤其 conv 族的 `torch_eager` 即 MIOpen —— 见第 4 节，
 详细三档表在 `perf_report.md` 第 5.2 节。）
+
+## 附 2：对原框架的改动
+
+本轮结果是在**改动过的** PyramidKernel 与 KernelBench 上跑出来的，共 5 处，全部是修复
+harness 缺陷（不改题目数学语义、不改评分判据）：
+
+**PyramidKernel**（3 个提交，仅 1 个文件 `pyramidkernel/core/loader.py`，+201 / −18）
+
+| 提交 | 改动 | 不改的后果 |
+|---|---|---|
+| `ea649d6` | CUDA 脚手架的 `extra_cuda_cflags` 去掉 `--use_fast_math`，改为按平台条件化 | DCU 的 `dcc` 不认该 nvcc 专有开关，全部 HIP 题编译必失败 |
+| `77b7453` | 修多行签名截断与语句块缩进错乱（`ast.get_source_segment` 只把首行切到 `col_offset`） | 7 道题的脚手架从根节点起就是非法 Python |
+| `9f9549f` | 脚手架补齐 `Model` 的辅助成员方法与模块级定义（求引用闭包、保留装饰器） | 3 道 root 报 `AttributeError: 'ModelNew' object has no attribute ...`、2 道报 `NameError` |
+
+**KernelBench**（无独立 git 仓库，以补丁形式保存在 `benchmark/tools/kernelbench_*.patch`）
+
+| 文件 | 改动 | 不改的后果 |
+|---|---|---|
+| `src/kernelbench/eval.py` | 正确性检查的 `no_grad` → `enable_grad` | 3 道反向题的参考实现用 `torch.autograd.grad`，被 `no_grad` 冲掉后 root 直接报错 |
+| `src/kernelbench/timing.py` | 参考计时路径的 `no_grad` → `enable_grad` | 4 道反向题测不出参考时间 → `speedup` 恒为 None |
+
+**影响**：修复前 66 道里 **13 道的 root 基线不合法**（按各自最初的失败签名统计：7 脚手架语法错
++ 3 autograd + 1 缺辅助方法 + 2 缺模块级定义；归因有重叠 —— `5004`/`5009` 是在修好脚手架语法错
+之后才暴露出缺辅助方法/模块级定义），4 道反向题拿不到加速比。修复后 **root 基线 53/66 → 66/66**、
+`best 正确` 57/66 → **66/66**、`有 speedup` 57/66 → **66/66**。
+
+> 两个 `enable_grad` 改动的安全性：无 `requires_grad` 张量时 PyTorch 不建图，对 62 道前向题
+> 零开销；反绕过仍由离线 `static_audit` 负责（线上 forbidden 本就是软约束）。
+> 根因与验证细节见 `harness_fixes.md`。
 
 ---
 
