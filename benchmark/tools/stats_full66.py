@@ -155,7 +155,16 @@ def main() -> int:
                     help="audit_batch.py 的单题缓存目录（读 correctness_failures 明细）")
     ap.add_argument("--repo", default=".")
     ap.add_argument("--out", required=True)
+    # 报告措辞：默认沿用"修复前 / 修复后"（harness 缺陷修复那次对比）；换实验时用
+    # 这组参数改写标题、两列表头与数据源说明，避免数字对但标签错。
+    ap.add_argument("--title", default="66 道生成评测性能统计（双基线，2026-10-17）")
+    ap.add_argument("--context", default="五个 harness 缺陷修复后的全量 66 道结果。")
+    ap.add_argument("--before-label", default="修复前")
+    ap.add_argument("--after-label", default="修复后")
+    ap.add_argument("--before-path", default="runs/dcukb_final")
+    ap.add_argument("--after-path", default="runs/dcukb_full_fixed")
     args = ap.parse_args()
+    BL, AL = args.before_label, args.after_label
 
     B = {k: row(v) for k, v in load(args.before).items()}
     A = {k: row(v) for k, v in load(args.after).items()}
@@ -196,15 +205,15 @@ def main() -> int:
     L = []
     w = L.append
 
-    w("# 66 道生成评测性能统计（双基线，2026-10-17）")
+    w(f"# {args.title}")
     w("")
-    w("五个 harness 缺陷修复后的全量 66 道结果。数据源：")
+    w(f"{args.context}数据源：")
     w("")
     w(f"- 生成模型：`{args.model}`（取自 `llm.env` 的 `OPENAI_MODEL`；**run.json 未记录模型名**）")
-    w(f"- 修复前在线：`runs/dcukb_final`（{AB['n']} 道）")
-    w(f"- 修复后在线：`runs/dcukb_full_fixed`（{AA['n']} 道，16 片并行，10:08–11:53）")
+    w(f"- {BL}在线：`{args.before_path}`（{AB['n']} 道）")
+    w(f"- {AL}在线：`{args.after_path}`（{AA['n']} 道，16 片并行）")
     if audit:
-        w(f"- 修复后离线终审：`offline_audit.json`（审 {audit['aggregates']['audited']} 道有 aiter 基线的题）")
+        w(f"- {AL}离线终审：`offline_audit.json`（审 {audit['aggregates']['audited']} 道有 aiter 基线的题）")
     w("")
     w("## 0. 口径：三套数字不可混比")
     w("")
@@ -221,15 +230,15 @@ def main() -> int:
 
     w("## 1. 编译率（在线）")
     w("")
-    w("| 指标 | 修复前 | 修复后 |")
+    w(f"| 指标 | {BL} | {AL} |")
     w("|---|---|---|")
     w(f"| root 脚手架编译通过（= 框架给出的起点可用） | **{AB['root_compile']}/{AB['n']}** | **{AA['root_compile']}/{AA['n']}** |")
     w(f"| best 节点编译通过 | {AB['best_compile']}/{AB['n']} | {AA['best_compile']}/{AA['n']} |")
     w(f"| compile 阶段失败次数（合计，含 Agent 自己写坏） | {AB['compile_fails']} | {AA['compile_fails']} |")
     w(f"| runtime 阶段失败次数（合计） | {AB['runtime_fails']} | {AA['runtime_fails']} |")
     w("")
-    w("root 脚手架编译率衡量 **harness 质量**：修复前 7 道因脚手架多行签名截断直接")
-    w("SyntaxError，Agent 连起点都没有；修复后 66/66。compile 阶段失败次数不归零是")
+    w("root 脚手架编译率衡量 **harness 质量**：脚手架坏掉的题 Agent 连起点都没有。")
+    w("compile 阶段失败次数不归零是")
     w("正常的 —— 那是 Agent 尝试里自己写坏的补丁，属生成侧信号。")
     w("")
 
@@ -237,14 +246,14 @@ def main() -> int:
     w("")
     w("### 2.1 在线（KernelBench 口径）")
     w("")
-    w("| 指标 | 修复前 | 修复后 |")
+    w(f"| 指标 | {BL} | {AL} |")
     w("|---|---|---|")
     w(f"| best 正确 | {AB['best_correct']}/{AB['n']}（{AB['best_correct']/AB['n']*100:.1f}%） | **{AA['best_correct']}/{AA['n']}（{AA['best_correct']/AA['n']*100:.1f}%）** |")
     w(f"| └ 非 root 真解 | {AB['real']}（{AB['real']/AB['n']*100:.1f}%） | **{AA['real']}（{AA['real']/AA['n']*100:.1f}%）** |")
     w(f"| └ 仅 root（Agent 未改写） | {AB['rootonly']} | {AA['rootonly']} |")
     w(f"| 有 speedup 可比 | {AB['has_speedup']}/{AB['n']} | {AA['has_speedup']}/{AA['n']} |")
     w("")
-    w("按 backend（修复后）：")
+    w(f"按 backend（{AL}）：")
     w("")
     w("| backend | 题数 | best 正确（前→后） | 真解（前→后） |")
     w("|---|---|---|---|")
@@ -337,7 +346,7 @@ def main() -> int:
     w("")
     w("统计口径：只看**真解**（best 非 root 且 correct）。")
     w("")
-    w("| 指标 | 修复前 | 修复后 |")
+    w(f"| 指标 | {BL} | {AL} |")
     w("|---|---|---|")
     for label, key in [("样本数 n", "n"), ("中位数", "median"), ("均值", "mean"),
                        ("P25", "p25"), ("P75", "p75"), ("最大", "max"), ("最小", "min")]:
@@ -363,7 +372,7 @@ def main() -> int:
                   if r["best_correct"] and not r["is_root"] and isinstance(r["speedup"], (int, float))])
     ba = buckets([r["speedup"] for r in A.values()
                   if r["best_correct"] and not r["is_root"] and isinstance(r["speedup"], (int, float))])
-    w("| 区间 | 修复前 | 修复后 |")
+    w(f"| 区间 | {BL} | {AL} |")
     w("|---|---|---|")
     for label in ["0–1x", "1–2x", "2–5x", "5–10x", "10–100x", "≥100x"]:
         w(f"| {label} | {bb.get(label, 0)} | {ba.get(label, 0)} |")
@@ -373,7 +382,7 @@ def main() -> int:
         [(k, A[k]["speedup"]) for k in A
          if A[k]["best_correct"] and not A[k]["is_root"] and isinstance(A[k]["speedup"], (int, float))],
         key=lambda kv: -kv[1])
-    w("Top 10（修复后，在线口径）：")
+    w(f"Top 10（{AL}，在线口径）：")
     w("")
     w("| # | 题 | 在线 speedup |")
     w("|---|---|---|")
@@ -440,7 +449,7 @@ def main() -> int:
             w("> `by_impl.*.cases` 逐 case 核对。")
             w("")
 
-    w("## 5. 只有 `torch_eager` 基线的题（含 HIP 那 20 道）")
+    w(f"## 5. 只有 `torch_eager` 基线的题（含 HIP 那 {len(hip_ids)} 道）")
     w("")
     w(f"66 道里有 **{len(no_aiter)} 道没有 aiter 基线**（`baseline.json` 的 impls 只有")
     w(f"`torch_eager`），因此只能给 `torch_eager` 口径。其中 **{len(hip_ids)} 道是 HIP track")
@@ -455,8 +464,8 @@ def main() -> int:
         for t in unaudited:
             w(f"| `{t}` | {AUDIT_FAILURES.get(t, '未记录')} |")
         w("")
-        w("这两道已用 `--tasks ... --force` 定向重试，**可复现地失败**（`2004_fused_qk_concat`")
-        w("是 SIGSEGV）。属离线终审工具侧的待修项，与生成质量无关。它们的在线结果（分母")
+        w("这几道属离线终审工具侧的待修项（不是生成质量差），定向重试同样失败。")
+        w("它们的在线结果（分母")
         w("eager）是：")
         w("")
         for t in unaudited:
@@ -471,7 +480,7 @@ def main() -> int:
     w("")
     w("### 5.1 为什么 HIP 题没有 aiter / hipDNN 基线")
     w("")
-    w("这 20 道题源自 `opendtk/hipdnn_samples`（准入记录见 `benchmark/sources/`）。按 AGENTS.md，")
+    w(f"这 {len(hip_ids)} 道题源自 `opendtk/hipdnn_samples`（准入记录见 `benchmark/sources/`）。按 AGENTS.md，")
     w("**闭源 hipDNN 库只作性能基线、不作题源**，本应给它们补 hipDNN 分母。但")
     w("`hipdnn_baseline_probe.md` 的实测结论是：")
     w("")
@@ -482,7 +491,7 @@ def main() -> int:
     w("")
     w("aiter 侧同样没有对等算子可作分母（hipDNN 样例覆盖的 deform conv / spconv /")
     w("depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里都没有")
-    w("可直接对位的实现）。**所以这 20 道的基线状况与 hipDNN 探针的结论完全一致：只有")
+    w(f"可直接对位的实现）。**所以这 {len(hip_ids)} 道的基线状况与 hipDNN 探针的结论完全一致：只有")
     w("`torch_eager` 一个分母。**")
     w("")
     w("### 5.2 但这不代表分母一定弱 —— 分三档看")
@@ -504,7 +513,7 @@ def main() -> int:
     w(f"| **探针未覆盖** | {len(rest)} 道：" + "、".join(f"`{t}`" for t in rest) +
       " | 未验证是否走 MIOpen，**不作断言** |")
     w("")
-    w("引用这 20 道的 speedup 时必须注明分母含义：conv 族（5001/5002/5008/5009）的 eager")
+    w(f"引用这 {len(hip_ids)} 道的 speedup 时必须注明分母含义：conv 族（5001/5002/5008/5009）的 eager")
     w("分母已经是 vendor 库，其加速比含金量高于其余各道。")
     w("")
 
@@ -522,10 +531,11 @@ def main() -> int:
           f"{audit['aggregates']['aiter_mean_speedup']:.2f}x、最大 "
           f"{audit['aggregates']['aiter_max_speedup']:.2f}x；其中 "
           f"{audit['aggregates']['mi_fallback_count']} 道是 MI 兜底基线、引用须标注。")
-    w(f"5. **在线加速比**（vs eager）：真解中位 "
+    _n = 5 if audit else 3
+    w(f"{_n}. **在线加速比**（vs eager）：真解中位 "
       f"{fmt(AB['dist']['median'] if AB['dist'] else None)}x → "
       f"{fmt(AA['dist']['median'] if AA['dist'] else None)}x。")
-    w(f"6. **基线覆盖**：{len(no_aiter)} 道无 aiter 基线（含 HIP 全部 {len(hip_ids)} 道），"
+    w(f"{_n + 1}. **基线覆盖**：{len(no_aiter)} 道无 aiter 基线（含 HIP 全部 {len(hip_ids)} 道），"
       f"只能给 eager 口径；HIP 的 conv 族 eager 分母即 MIOpen。")
     w("")
 
