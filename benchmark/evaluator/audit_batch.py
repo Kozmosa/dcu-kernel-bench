@@ -180,8 +180,11 @@ def main() -> int:
                     help="任务清单（缺省用 kernelbench_compat/manifest_dcukb.yaml）")
     ap.add_argument("--impl", default="aiter", help="作为主指标汇报的基线实现（默认 aiter）")
     ap.add_argument("--tasks", default="", help="只审这些题（逗号分隔）")
+    ap.add_argument("--only-with-baseline", action="store_true",
+                    help="只审有主指标基线的题（旧行为）。默认**全审**：正确性检查不需要"
+                         "基线，跳过没有 aiter 的题会白丢那 33 道题的隐藏 case 覆盖")
     ap.add_argument("--include-no-aiter", action="store_true",
-                    help="连没有 aiter 基线的题也审（只能得到 torch_eager 口径）")
+                    help="（兼容旧脚本，已无作用：现在默认就包含没有 aiter 基线的题）")
     ap.add_argument("--limit", type=int, default=0, help="最多审几题（0=不限）")
     ap.add_argument("--timeout", type=int, default=1800, help="单题超时秒数")
     ap.add_argument("--skip-perf", action="store_true", help="只做正确性，不计时")
@@ -200,16 +203,20 @@ def main() -> int:
     if only:
         pairs = [p for p in pairs if p[0] in only]
 
-    plan, skipped = [], []
+    plan, skipped, no_headline = [], [], []
     for task, dirname in pairs:
         sub = run_root / dirname / "best_code.py"
         if not sub.exists():
             skipped.append((task, "无 best_code.py（该题没跑或未产出）"))
             continue
         impls = baseline_impls(task)
-        if args.impl not in impls and not args.include_no_aiter:
+        # 正确性阶段与基线无关：没有主指标基线的题照样要审隐藏 case，只是拿不到
+        # 该 impl 的 speedup（分母只剩 baseline.json 里实际有的那些 impl）。
+        if args.only_with_baseline and args.impl not in impls:
             skipped.append((task, f"无 {args.impl} 基线（impls={sorted(impls) or '空'}）"))
             continue
+        if args.impl not in impls:
+            no_headline.append(task)
         plan.append((task, dirname, sub))
 
     if args.limit:
