@@ -263,6 +263,10 @@ def main() -> int:
 
     # ---- 汇总 ----
     rows = [r for r in results if r.get("ok")]
+    # 没吐出 JSON 报告的任务**不是"未审"**：那是提交实现在隐藏 case 上崩了
+    # （编译失败 / 共享内存超限 / 后端 pass crash），必须计入失败，否则
+    # 「审了 30 道、通过 25 道」会把 3 道真实失败藏成"工具侧问题"。
+    failed = [r for r in results if not r.get("ok")]
     summary = {
         "run_root": str(run_root),
         "headline_impl": args.impl,
@@ -283,12 +287,26 @@ def main() -> int:
             "torch_eager_mean_speedup": eager.get("mean_speedup"),
             "measurement_impls": sorted(r["by_impl"].keys()),
         })
+    for r in sorted(failed, key=lambda x: x["task"]):
+        tail = " ".join((r.get("tail") or "").split())
+        summary["rows"].append({
+            "task": r["task"],
+            "correctness_passed": False,
+            "aiter_mean_speedup": None,
+            "aiter_case_count": None,
+            "aiter_is_mi_fallback": False,
+            "torch_eager_mean_speedup": None,
+            "measurement_impls": [],
+            "failure_reason": r.get("reason"),
+            "failure_tail": tail[-400:],
+        })
 
     sp = [x["aiter_mean_speedup"] for x in summary["rows"]
           if isinstance(x.get("aiter_mean_speedup"), (int, float))]
     summary["aggregates"] = {
-        "audited": len(rows),
-        "correctness_passed": sum(1 for r in rows if r["correctness_passed"]),
+        "audited": len(results),
+        "correctness_passed": sum(1 for r in summary["rows"] if r["correctness_passed"]),
+        "crashed": len(failed),
         f"{args.impl}_measured": len(sp),
         f"{args.impl}_mean_speedup": (sum(sp) / len(sp)) if sp else None,
         f"{args.impl}_median_speedup": statistics.median(sp) if sp else None,

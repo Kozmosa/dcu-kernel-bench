@@ -280,12 +280,17 @@ def main() -> int:
         # 它只出现在单题缓存里。所以分类必须读缓存，不能从 rows 判。
         static_bad = [r for r in rows_a
                       if cache_of(r["task"]).get("static_audit_passed") is False]
+        # 提交实现在隐藏 case 上崩溃/编译失败（终审拿不到 JSON 报告）：这是**失败**，
+        # 不是「没审到」。判据是 rows 里带 failure_reason（audit_batch 现在会写）。
+        crashed = [r for r in rows_a if r.get("failure_reason")]
         corr_bad = [r for r in rows_a
                     if cache_of(r["task"]).get("static_audit_passed") is not False
                     and not r["correctness_passed"]
+                    and not r.get("failure_reason")
                     and cache_of(r["task"]).get("correctness_case_count")]
         passed = [r for r in rows_a if r["correctness_passed"]]
-        ids_bad = {id(r) for r in static_bad} | {id(r) for r in corr_bad} | {id(r) for r in passed}
+        ids_bad = ({id(r) for r in static_bad} | {id(r) for r in corr_bad}
+                   | {id(r) for r in crashed} | {id(r) for r in passed})
         other = [r for r in rows_a if id(r) not in ids_bad]
         w("### 2.2 离线终审（静态审计 + 隐藏 case + `task.yaml` 分档容差）")
         w("")
@@ -300,8 +305,11 @@ def main() -> int:
           f"实现里直接调用被禁的 ATen 算子完成核心计算，违反「禁止绕过」铁律 |")
         w(f"| **正确性不达标**（隐藏 case 对不上） | **{len(corr_bad)}** | "
           f"静态审计通过，但边界 shape 处理不到位 |")
+        if crashed:
+            w(f"| **提交实现在隐藏 case 上跑不起来** | **{len(crashed)}** | "
+              f"编译失败 / 共享内存超限 / 后端 pass crash，见下方 C |")
         if other:
-            w(f"| 审计未产出结果 | **{len(other)}** | 见下方 C |")
+            w(f"| 审计未产出结果（无明细） | **{len(other)}** | 见下方 C |")
         w("")
         if static_bad:
             w("#### A. 静态审计判负")
@@ -333,8 +341,28 @@ def main() -> int:
             w("shape，这些边界不会出现，所以在线全对、离线翻车。**这 "
               f"{len(corr_bad)} 道才是真正能归因于「离线判据更严」的。**")
             w("")
+        if crashed:
+            w("#### C. 提交实现在隐藏 case 上跑不起来")
+            w("")
+            w("| 题 | 崩溃原因 |")
+            w("|---|---|")
+            for r in crashed:
+                tail = " ".join((r.get("failure_tail") or "").split())
+                tail = tail.replace("|", "\\|")
+                w(f"| `{r['task']}` | `{tail[-220:]}` |" if tail else
+                  f"| `{r['task']}` | {r.get('failure_reason')} |")
+            w("")
+            w("这类**不算「离线判据更严」**，而是实现根本没在隐藏 shape 上跑通：在线只跑")
+            w("`get_inputs()` 的单一固定 shape，隐藏 case 的 `head_size=256`、`head_size=96`")
+            w("（非 2 次幂）、`k=131/n=53/m=1` 这类边界直接把它打崩。")
+            w("")
+            w("归因提示：`RuntimeError: PassManager::run failed` 发生在 DCU triton 后端的")
+            w("`make_ttgir` pass 里（不是提交代码里），同一签名也出现在 1019 的 aiter 基线采集，")
+            w("因此这一条**既可能是提交实现生成了该后端处理不了的 IR，也可能是后端限制**；")
+            w("另外两条（共享内存超限、`tl.arange` 非 2 次幂）责任明确在实现侧。")
+            w("")
         if other:
-            w("#### C. 审计未产出结果")
+            w("#### D. 审计未产出结果（无明细）")
             w("")
             for r in other:
                 c = cache_of(r["task"])

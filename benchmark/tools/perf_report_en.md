@@ -5,7 +5,7 @@
 - 生成模型：`gpt-6-astra`（取自 `llm.env` 的 `OPENAI_MODEL`；**run.json 未记录模型名**）
 - 中文题面在线：`runs/dcukb_full_fixed (10-17)`（66 道）
 - 英文题面在线：`runs/dcukb_en_1019_1027 (10-19)`（66 道，16 片并行）
-- 英文题面离线终审：`offline_audit.json`（审 30 道有 aiter 基线的题）
+- 英文题面离线终审：`offline_audit.json`（审 33 道有 aiter 基线的题）
 
 ## 0. 口径：三套数字不可混比
 
@@ -52,7 +52,7 @@ compile 阶段失败次数不归零是
 
 ### 2.2 离线终审（静态审计 + 隐藏 case + `task.yaml` 分档容差）
 
-只审有 aiter 基线的题：**审了 30 道，通过 25 道（83%）**。
+只审有 aiter 基线的题：**审了 33 道，通过 25 道（76%）**。
 
 未通过的题**不是同一类原因**，性质完全不同：
 
@@ -60,6 +60,7 @@ compile 阶段失败次数不归零是
 |---|---|---|
 | **静态审计判负**（未进入正确性环节） | **5** | 实现里直接调用被禁的 ATen 算子完成核心计算，违反「禁止绕过」铁律 |
 | **正确性不达标**（隐藏 case 对不上） | **0** | 静态审计通过，但边界 shape 处理不到位 |
+| **提交实现在隐藏 case 上跑不起来** | **3** | 编译失败 / 共享内存超限 / 后端 pass crash，见下方 C |
 
 #### A. 静态审计判负
 
@@ -73,6 +74,23 @@ compile 阶段失败次数不归零是
 
 这些题在**在线**被判为正确 —— 在线评测不执行禁用列表（题面 forbidden 在线上只是
 软约束，硬审计在离线）。所以它们不是「性能不好」，而是**实现方式不合规**。
+
+#### C. 提交实现在隐藏 case 上跑不起来
+
+| 题 | 崩溃原因 |
+|---|---|
+| `1016_lean_atten_paged` | `tOfResources(self.metadata.shared, max_shared, "shared memory") triton.runtime.errors.OutOfResources: out of resource: shared memory, Required: 98304, Hardware limit: 65536. Reducing block sizes or `num_stages` may help.` |
+| `1022_pa_prefill` | `EAD_SIZE: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, HAS_ALIBI: tl.constexpr, ): pid_m = tl.program_id(0) h = tl.program_id(1) rows = pid_m * BLOCK_M + tl.arange(0, BLOCK_M) d = tl.arange(0, HEAD_SIZE) ^` |
+| `4004_batched_gemm_bf16` | `ir(src, metadata, options) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.11/site-packages/triton/backends/hcu/compiler.py", line 265, in make_ttgir pm.run(mod) RuntimeError: PassManager::run failed` |
+
+这类**不算「离线判据更严」**，而是实现根本没在隐藏 shape 上跑通：在线只跑
+`get_inputs()` 的单一固定 shape，隐藏 case 的 `head_size=256`、`head_size=96`
+（非 2 次幂）、`k=131/n=53/m=1` 这类边界直接把它打崩。
+
+归因提示：`RuntimeError: PassManager::run failed` 发生在 DCU triton 后端的
+`make_ttgir` pass 里（不是提交代码里），同一签名也出现在 1019 的 aiter 基线采集，
+因此这一条**既可能是提交实现生成了该后端处理不了的 IR，也可能是后端限制**；
+另外两条（共享内存超限、`tl.arange` 非 2 次幂）责任明确在实现侧。
 
 > 两套判据不互相否定：在线回答「能不能跑通并对上参考」，离线回答「换一批
 > shape/边界还对不对、以及实现是否合规」。引用时必须说明用的是哪一套。
@@ -152,6 +170,9 @@ Top 10（英文题面，在线口径）：
 | `3009_routing` | ✗ | - | - | 离线正确性未过 |
 | `4006_gemm_a16w16` | ✗ | - | - | MI 兜底†；离线正确性未过 |
 | `4008_gemm_a16w4` | ✗ | - | - | MI 兜底†；离线正确性未过 |
+| `1016_lean_atten_paged` | ✗ | - | - | 离线正确性未过 |
+| `1022_pa_prefill` | ✗ | - | - | 离线正确性未过 |
+| `4004_batched_gemm_bf16` | ✗ | - | - | 离线正确性未过 |
 
 汇总（aiter 有测值的 25 道）：**aiter 中位 1.08x、均值 1.28x、最大 2.98x**。
 
@@ -195,23 +216,6 @@ aiter 在 DCU 上能达到的最好成绩**，因此由它导出的加速比不�
 `torch_eager`），因此只能给 `torch_eager` 口径。其中 **20 道是 HIP track
 （`backend=cuda`）**，全部落在这一类。
 
-另有 **3 道有 aiter 基线但离线终审跑不出结果**（不是没有基线，也不要
-据此推断它们性能差）：
-
-| 题 | 失败原因 |
-|---|---|
-| `1016_lean_atten_paged` | exit 1，未产出 JSON 报告 |
-| `1022_pa_prefill` | 未记录 |
-| `4004_batched_gemm_bf16` | 未记录 |
-
-这几道属离线终审工具侧的待修项（不是生成质量差），定向重试同样失败。
-它们的在线结果（分母
-eager）是：
-
-- `1016_lean_atten_paged`：在线 best 正确 True，speedup 378.18x
-- `1022_pa_prefill`：在线 best 正确 True，speedup 1.90x
-- `4004_batched_gemm_bf16`：在线 best 正确 True，speedup 1.90x
-
 ### 5.1 为什么 HIP 题没有 aiter / hipDNN 基线
 
 这 20 道题源自 `opendtk/hipdnn_samples`（准入记录见 `benchmark/sources/`）。按 AGENTS.md，
@@ -247,7 +251,7 @@ depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里�
 
 1. **编译率**：root 脚手架 66→66/66，所有题都拿到了可跑的起点。
 2. **正确率（在线）**：best 正确 66→66/66（100.0%），真解 53→49。
-3. **正确率（离线终审）**：审 30 道有 aiter 基线的题，通过 25 道 —— 比在线严，两套都对但量的不是同一件事。
+3. **正确率（离线终审）**：审 33 道有 aiter 基线的题，通过 25 道 —— 比在线严，两套都对但量的不是同一件事。
 4. **对 aiter 的加速比**（离线）：中位 1.08x、均值 1.28x、最大 2.98x；其中 5 道是 MI 兜底基线、引用须标注。
 5. **在线加速比**（vs eager）：真解中位 5.61x → 7.33x。
 6. **基线覆盖**：33 道无 aiter 基线（含 HIP 全部 20 道），只能给 eager 口径；HIP 的 conv 族 eager 分母即 MIOpen。
@@ -255,7 +259,7 @@ depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里�
 
 ## 附录 A：本次运行的意外与处置（实验可信度）
 
-这份报告的数字不能被直接当成「只换了题面语言」的干净对照，下面是全部例外，逐条说明：
+这份报告的数字不能被直接当成「只换了题面语言」的干净对照，下面是全部例外：
 
 1. **10:19 的第一次启动是无效数据。** 本机到服务器的反向隧道在启动前已死，隧道断开不会让 batch
    报错退出：每题会把 provider 瞬时错误预算（每阶段 20 次）烧光，然后落在未改动的 root 节点上，
@@ -275,10 +279,17 @@ depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里�
    4 策略、10 次尝试全部 correct），14:34–15:16 跑完：12 个节点、`best=phase2_n5`、
    **4.93x（HIP 实现 vs `torch_eager`）**。所以本报告 HIP track 计 **20 道**，6001 计入 HIP；
    早前那份 Triton 结果（5.85x）作废。
-4. **离线终审有 3 道没跑出结果**（`1016_lean_atten_paged`、`1022_pa_prefill`、
-   `4004_batched_gemm_bf16`），所以 33 道有 aiter 基线的题里实际审了 30 道、通过 25 道。
-   这属于终审工具侧的问题（不是生成质量），它们只有在线（分母 `torch_eager`）口径可用。
+4. **离线终审的 33 道全部有结论，没有「未产出」的题。** 早一版报告把 3 道说成「终审工具侧问题
+   未产出结果」，这个归因是错的：`audit_batch.py` 把「拿不到 JSON 报告」的任务从 rows 里丢掉了，
+   于是它们既不算通过也不算失败。修正后这 3 道计入**失败**，真正的原因是提交实现在隐藏 case 上
+   跑不起来：`1016_lean_atten_paged` 共享内存 **98304 B > 65536 B**（`head_size=256` 的隐藏 case
+   撑爆 DCU 上限）、`1022_pa_prefill` 在 `head_size=96`（非 2 次幂）上 `tl.arange(0, HEAD_SIZE)`
+   直接**编译失败**、`4004_batched_gemm_bf16` 在 DCU triton 后端 `make_ttgir` 里崩
+   **`PassManager::run failed`**（该签名也在 1019 的 aiter 基线出现过，既可能是实现的 IR 触发后端
+   缺陷，也可能是后端限制）。所以离线口径是 **33 审 / 25 过（76%）**，其中 5 道是静态审计判负
+   （直接调用被禁的 `torch.matmul` 等）、3 道是隐藏 case 跑不起来、0 道是纯粹数值不达标。
 5. 因此严格说，本报告能支持的结论是：**在全部 66 道题上**（6001 为 HIP），
    题面语言从中文换成英文后，在线正确率不变（66/66）、真解数 53→49、在线加速比中位
-   5.61x→7.33x，离线隐藏 case 通过 21/31→25/30、对 aiter 中位 1.21x→1.08x。
+   5.61x→7.33x，离线隐藏 case 通过 21/33→25/33（两侧用同一套口径重算过：崩溃计失败）、
+   对 aiter 中位 1.21x→1.08x。
 
