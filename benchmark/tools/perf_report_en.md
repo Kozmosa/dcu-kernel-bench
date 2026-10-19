@@ -252,3 +252,30 @@ depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里�
 5. **在线加速比**（vs eager）：真解中位 5.61x → 7.33x。
 6. **基线覆盖**：33 道无 aiter 基线（含 HIP 全部 19 道），只能给 eager 口径；HIP 的 conv 族 eager 分母即 MIOpen。
 
+
+## 附录 A：本次运行的意外与处置（实验可信度）
+
+这份报告的数字不能被直接当成「换了题面语言」的干净对照，下面是全部例外，逐条说明：
+
+1. **10:19 的第一次启动是无效数据。** 本机到服务器的反向隧道在启动前已死，隧道断开不会让 batch
+   报错退出：每题会把 provider 瞬时错误预算（每阶段 20 次）烧光，然后落在未改动的 root 节点上，
+   写出 `attempt_count=0`、`best_node_id=root` 的 `run.json`，66 题「顺利跑完」但零尝试。
+   该批已隔离为 `runs/_voided_tunnel_down_1019`，**不计入本报告**。启动脚本此后加了硬前置：
+   `curl $OPENAI_BASE_URL/models` 不是 HTTP 200 就 `exit 3`，不启动。
+2. **11:44–11:51 本机关机，隧道随之中断约 45 分钟。** 受影响的是 3 道：
+   `4018_quant`、`8001_cumsum`（瞬时错误预算耗尽、提前收敛在 root）与 `6001_fused_adamw`
+   （所在 shard 未落盘）。三题于 12:40 单独重跑，均拿到 12 个节点、best 正确；
+   4018/8001 重跑后仍以 root 为最优（0.98x / 1.00x，属真实结果，不是中断残留）。
+3. **`6001_fused_adamw` 的 backend 在报告里是 Triton，而 manifest 声明的是 `cuda`（HIP）。**
+   首次补跑时漏掉了 `backend: cuda` 字段，得到的是 Triton 实现；随后两次 HIP 定向重跑
+   （13:07、13:38）都在约 10 分钟后进入 `hrtimer_nanosleep`、无 socket、无 CPU 增长、不产出
+   `run.json`，可复现地卡住（产物隔离为 `runs/_stalled_6001_hip_*`）。因此本报告把它算进
+   Triton track（HIP 计 19 道）。它的 5.85x 是 **Triton 实现 vs `torch_eager`**，
+   **不能**当作 HIP 与 aiter/hipDNN 的比较。
+4. **离线终审有 3 道没跑出结果**（`1016_lean_atten_paged`、`1022_pa_prefill`、
+   `4004_batched_gemm_bf16`），所以 33 道有 aiter 基线的题里实际审了 30 道、通过 25 道。
+   这属于终审工具侧的问题（不是生成质量），它们只有在线（分母 `torch_eager`）口径可用。
+5. 因此严格说，本报告能支持的结论是：**在全部 66 道题上**（6001 按 Triton 计），
+   题面语言从中文换成英文后，在线正确率不变（66/66）、真解数 53→49、在线加速比中位
+   5.61x→7.33x，离线隐藏 case 通过 21/31→25/30、对 aiter 中位 1.21x→1.08x。
+
