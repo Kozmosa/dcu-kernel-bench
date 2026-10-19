@@ -258,8 +258,11 @@ def main() -> int:
     w("| backend | 题数 | best 正确（前→后） | 真解（前→后） |")
     w("|---|---|---|---|")
     for be, label in (("cuda", "HIP（backend=cuda）"), ("triton", "Triton")):
-        kb = [k for k in B if B[k]["backend"] == be]
+        # 两列必须用**同一批**题：按 after 的 backend 归属取集合，再回查 before
+        # 里同名目录的结果。否则某个题的 backend 在两轮间变了，就会打印出
+        # 「20→19，总数 19」这种自相矛盾的行。
         ka = [k for k in A if A[k]["backend"] == be]
+        kb = [k for k in ka if k in B]
         w(f"| {label} | {len(ka)} | "
           f"{sum(1 for k in kb if B[k]['best_correct'])}→{sum(1 for k in ka if A[k]['best_correct'])} | "
           f"{sum(1 for k in kb if B[k]['best_correct'] and not B[k]['is_root'])}→"

@@ -25,8 +25,8 @@
 |---|---|---|
 | root 脚手架编译通过（= 框架给出的起点可用） | **66/66** | **66/66** |
 | best 节点编译通过 | 66/66 | 66/66 |
-| compile 阶段失败次数（合计，含 Agent 自己写坏） | 210 | 236 |
-| runtime 阶段失败次数（合计） | 46 | 34 |
+| compile 阶段失败次数（合计，含 Agent 自己写坏） | 210 | 229 |
+| runtime 阶段失败次数（合计） | 46 | 33 |
 
 root 脚手架编译率衡量 **harness 质量**：脚手架坏掉的题 Agent 连起点都没有。
 compile 阶段失败次数不归零是
@@ -47,8 +47,8 @@ compile 阶段失败次数不归零是
 
 | backend | 题数 | best 正确（前→后） | 真解（前→后） |
 |---|---|---|---|
-| HIP（backend=cuda） | 19 | 19→19 | 14→13 |
-| Triton | 47 | 47→47 | 39→36 |
+| HIP（backend=cuda） | 20 | 20→20 | 15→14 |
+| Triton | 46 | 46→46 | 38→35 |
 
 ### 2.2 离线终审（静态审计 + 隐藏 case + `task.yaml` 分档容差）
 
@@ -85,7 +85,7 @@ compile 阶段失败次数不归零是
 |---|---|---|
 | 样本数 n | 53 | 49 |
 | 中位数 | 5.61x | 7.33x |
-| 均值 | 72.26x | 75.55x |
+| 均值 | 72.26x | 75.53x |
 | P25 | 3.37x | 3.54x |
 | P75 | 37.16x | 34.17x |
 | 最大 | 858.02x | 900.66x |
@@ -95,8 +95,8 @@ compile 阶段失败次数不归零是
 |---|---|---|
 | 0–1x | 2 | 1 |
 | 1–2x | 9 | 7 |
-| 2–5x | 12 | 9 |
-| 5–10x | 9 | 14 |
+| 2–5x | 12 | 10 |
+| 5–10x | 9 | 13 |
 | 10–100x | 14 | 11 |
 | ≥100x | 7 | 7 |
 
@@ -189,10 +189,10 @@ aiter 在 DCU 上能达到的最好成绩**，因此由它导出的加速比不�
 > 56.0x，均值之比却是 45.6）。要互推请回到单题缓存 `offline_audit/<task>.json` 的
 > `by_impl.*.cases` 逐 case 核对。
 
-## 5. 只有 `torch_eager` 基线的题（含 HIP 那 19 道）
+## 5. 只有 `torch_eager` 基线的题（含 HIP 那 20 道）
 
 66 道里有 **33 道没有 aiter 基线**（`baseline.json` 的 impls 只有
-`torch_eager`），因此只能给 `torch_eager` 口径。其中 **19 道是 HIP track
+`torch_eager`），因此只能给 `torch_eager` 口径。其中 **20 道是 HIP track
 （`backend=cuda`）**，全部落在这一类。
 
 另有 **3 道有 aiter 基线但离线终审跑不出结果**（不是没有基线，也不要
@@ -214,7 +214,7 @@ eager）是：
 
 ### 5.1 为什么 HIP 题没有 aiter / hipDNN 基线
 
-这 19 道题源自 `opendtk/hipdnn_samples`（准入记录见 `benchmark/sources/`）。按 AGENTS.md，
+这 20 道题源自 `opendtk/hipdnn_samples`（准入记录见 `benchmark/sources/`）。按 AGENTS.md，
 **闭源 hipDNN 库只作性能基线、不作题源**，本应给它们补 hipDNN 分母。但
 `hipdnn_baseline_probe.md` 的实测结论是：
 
@@ -225,7 +225,7 @@ eager）是：
 
 aiter 侧同样没有对等算子可作分母（hipDNN 样例覆盖的 deform conv / spconv /
 depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里都没有
-可直接对位的实现）。**所以这 19 道的基线状况与 hipDNN 探针的结论完全一致：只有
+可直接对位的实现）。**所以这 20 道的基线状况与 hipDNN 探针的结论完全一致：只有
 `torch_eager` 一个分母。**
 
 ### 5.2 但这不代表分母一定弱 —— 分三档看
@@ -237,10 +237,10 @@ depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里�
 | 档 | 题 | `torch_eager` 分母的含义 |
 |---|---|---|
 | **conv 族：eager 即 vendor 库分母** | 4 道：`5001_conv2d_fwd`、`5002_conv2d_bwd`、`5008_conv_bias_act`、`5009_conv_depthtospace` | torch 走 MIOpen → eager 分母**就是 vendor 实现**，不弱 |
-| **纯 ATen** | 8 道：`5003_deform_conv2d_fwd`、`5004_deform_conv2d_bwd`、`5005_spconv_fprop`、`5006_spconv_bwd`、`5007_spconv_indice_pairs`、`8001_cumsum`、`8002_gather`、`8003_scatter_nd` | 探针明确列为无 MIOpen 路径 → eager 是纯 ATen，偏弱 |
+| **纯 ATen** | 9 道：`5003_deform_conv2d_fwd`、`5004_deform_conv2d_bwd`、`5005_spconv_fprop`、`5006_spconv_bwd`、`5007_spconv_indice_pairs`、`6001_fused_adamw`、`8001_cumsum`、`8002_gather`、`8003_scatter_nd` | 探针明确列为无 MIOpen 路径 → eager 是纯 ATen，偏弱 |
 | **探针未覆盖** | 7 道：`1031_deform_attention_fwd`、`1032_deform_attention_bwd`、`2010_batchnorm_fwd`、`2011_batchnorm_bwd`、`2012_groupnorm_fwd`、`2013_groupnorm_bwd`、`2014_instancenorm_fwd` | 未验证是否走 MIOpen，**不作断言** |
 
-引用这 19 道的 speedup 时必须注明分母含义：conv 族（5001/5002/5008/5009）的 eager
+引用这 20 道的 speedup 时必须注明分母含义：conv 族（5001/5002/5008/5009）的 eager
 分母已经是 vendor 库，其加速比含金量高于其余各道。
 
 ## 6. 结论
@@ -250,12 +250,12 @@ depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里�
 3. **正确率（离线终审）**：审 30 道有 aiter 基线的题，通过 25 道 —— 比在线严，两套都对但量的不是同一件事。
 4. **对 aiter 的加速比**（离线）：中位 1.08x、均值 1.28x、最大 2.98x；其中 5 道是 MI 兜底基线、引用须标注。
 5. **在线加速比**（vs eager）：真解中位 5.61x → 7.33x。
-6. **基线覆盖**：33 道无 aiter 基线（含 HIP 全部 19 道），只能给 eager 口径；HIP 的 conv 族 eager 分母即 MIOpen。
+6. **基线覆盖**：33 道无 aiter 基线（含 HIP 全部 20 道），只能给 eager 口径；HIP 的 conv 族 eager 分母即 MIOpen。
 
 
 ## 附录 A：本次运行的意外与处置（实验可信度）
 
-这份报告的数字不能被直接当成「换了题面语言」的干净对照，下面是全部例外，逐条说明：
+这份报告的数字不能被直接当成「只换了题面语言」的干净对照，下面是全部例外，逐条说明：
 
 1. **10:19 的第一次启动是无效数据。** 本机到服务器的反向隧道在启动前已死，隧道断开不会让 batch
    报错退出：每题会把 provider 瞬时错误预算（每阶段 20 次）烧光，然后落在未改动的 root 节点上，
@@ -266,16 +266,19 @@ depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里�
    `4018_quant`、`8001_cumsum`（瞬时错误预算耗尽、提前收敛在 root）与 `6001_fused_adamw`
    （所在 shard 未落盘）。三题于 12:40 单独重跑，均拿到 12 个节点、best 正确；
    4018/8001 重跑后仍以 root 为最优（0.98x / 1.00x，属真实结果，不是中断残留）。
-3. **`6001_fused_adamw` 的 backend 在报告里是 Triton，而 manifest 声明的是 `cuda`（HIP）。**
-   首次补跑时漏掉了 `backend: cuda` 字段，得到的是 Triton 实现；随后两次 HIP 定向重跑
-   （13:07、13:38）都在约 10 分钟后进入 `hrtimer_nanosleep`、无 socket、无 CPU 增长、不产出
-   `run.json`，可复现地卡住（产物隔离为 `runs/_stalled_6001_hip_*`）。因此本报告把它算进
-   Triton track（HIP 计 19 道）。它的 5.85x 是 **Triton 实现 vs `torch_eager`**，
-   **不能**当作 HIP 与 aiter/hipDNN 的比较。
+3. **`6001_fused_adamw` 一度是 Triton 结果，已用 HIP 重跑修正。**
+   该题 manifest 声明 `backend: cuda`（HIP）。12:40 的补跑清单漏写 `backend` 字段，于是先跑成了
+   Triton；随后两次 HIP 定向重跑被我误判为「卡死」而中止 —— 实际上默认日志级别下 batch 全程
+   静默，评测又丢在独立 worker 里跑（父进程用 `time.sleep` 轮询，表现为
+   `wchan=hrtimer_nanosleep`、0 socket、CPU 不涨），而 HIP 每次尝试都要过 hipcc 编译，
+   看起来就像死锁。用 `--verbose` 重跑后确认路径完全正常（root 评测 correct、deliberation
+   4 策略、10 次尝试全部 correct），14:34–15:16 跑完：12 个节点、`best=phase2_n5`、
+   **4.93x（HIP 实现 vs `torch_eager`）**。所以本报告 HIP track 计 **20 道**，6001 计入 HIP；
+   早前那份 Triton 结果（5.85x）作废。
 4. **离线终审有 3 道没跑出结果**（`1016_lean_atten_paged`、`1022_pa_prefill`、
    `4004_batched_gemm_bf16`），所以 33 道有 aiter 基线的题里实际审了 30 道、通过 25 道。
    这属于终审工具侧的问题（不是生成质量），它们只有在线（分母 `torch_eager`）口径可用。
-5. 因此严格说，本报告能支持的结论是：**在全部 66 道题上**（6001 按 Triton 计），
+5. 因此严格说，本报告能支持的结论是：**在全部 66 道题上**（6001 为 HIP），
    题面语言从中文换成英文后，在线正确率不变（66/66）、真解数 53→49、在线加速比中位
    5.61x→7.33x，离线隐藏 case 通过 21/31→25/30、对 aiter 中位 1.21x→1.08x。
 
