@@ -361,6 +361,32 @@ def main() -> int:
                 tail = " ".join((arows[t].get("failure_tail") or "").split())[-120:].replace("|", "\\|")
                 L.append(f"| `{t}` | `{tail}` |" if tail else f"| `{t}` | {arows[t].get('failure_reason')} |")
             L.append("")
+        # ---- 合规口径：在线 solved 再叠一道离线门槛 ----
+        has_cand = [r["alias"] for r in rows if r["best_speedup"]]
+        gated = [t for t in has_cand if t in passed]
+        dropped = [t for t in has_cand if t not in passed]
+        sp_on = [r["best_speedup"] for r in rows if r["alias"] in has_cand and r["best_speedup"]]
+        sp_gate = [r["best_speedup"] for r in rows if r["alias"] in gated and r["best_speedup"]]
+        L.append("### 加离线门槛后的口径（对外引用建议用这一栏）")
+        L.append("")
+        L.append("| 指标 | 只算在线 | **在线 ∩ 离线通过** |")
+        L.append("|---|---|---|")
+        L.append(f"| 算 solved 的题数 | {len(has_cand)}/{n} | **{len(gated)}/{n}** |")
+        if sp_on and sp_gate:
+            L.append(f"| 加速比中位 | {statistics.median(sp_on):.2f}x | "
+                     f"**{statistics.median(sp_gate):.2f}x** |")
+            L.append(f"| 加速比均值 | {statistics.mean(sp_on):.2f}x | "
+                     f"**{statistics.mean(sp_gate):.2f}x** |")
+            L.append(f"| 加速比几何平均 | {geomean(sp_on):.2f}x | **{geomean(sp_gate):.2f}x** |")
+            L.append(f"| 加速比最大 | {max(sp_on):.2f}x | {max(sp_gate):.2f}x |")
+        L.append("")
+        L.append(f"被门槛剔掉的 {len(dropped)} 道："
+                 + "、".join(f"`{t}`" for t in sorted(dropped)))
+        L.append("")
+        L.append("注意：`Success@K` / `First Correct Median` / `Refine Gain Median` **不能**这样加门槛——")
+        L.append("离线终审只审最终 `best_code.py`，不审每一次尝试；要按尝试门槛化就得把每个候选都拿去审计")
+        L.append("（约 66×12≈790 次，单题 1–2 分钟），代价过高，所以这三项保留在线口径并在结论里注明。")
+        L.append("")
         if with_impl:
             L.append(f"| 题 | vs {head} | vs eager | 备注 |")
             L.append("|---|---|---|---|")

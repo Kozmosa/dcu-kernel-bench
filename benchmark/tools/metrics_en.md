@@ -170,6 +170,22 @@ K 曲线（K = 每题允许的尝试次数上限）：
 | `1022_pa_prefill` | `d_m = tl.program_id(0) h = tl.program_id(1) rows = pid_m * BLOCK_M + tl.arange(0, BLOCK_M) d = tl.arange(0, HEAD_SIZE) ^` |
 | `3007_moe_op_silu_fused` | ` + rk av = tl.load(A + token[:, None]*A0 + kk[None, :]*A1, valid[:, None] & (kk[None, :] < K), other=0).to(tl.float32) ^` |
 
+### 加离线门槛后的口径（对外引用建议用这一栏）
+
+| 指标 | 只算在线 | **在线 ∩ 离线通过** |
+|---|---|---|
+| 算 solved 的题数 | 60/66 | **42/66** |
+| 加速比中位 | 6.39x | **7.35x** |
+| 加速比均值 | 64.94x | **40.00x** |
+| 加速比几何平均 | 8.01x | **8.79x** |
+| 加速比最大 | 900.66x | 900.66x |
+
+被门槛剔掉的 18 道：`1016_lean_atten_paged`、`1018_mha_fused_bwd`、`1020_mla_decode_rope`、`1022_pa_prefill`、`1031_deform_attention_fwd`、`1032_deform_attention_bwd`、`3004_moe_op_e2e`、`3007_moe_op_silu_fused`、`3009_routing`、`4006_gemm_a16w16`、`4007_gemm_a16w16_atomic`、`4010_gemm_a8w8_blockscale`、`5001_conv2d_fwd`、`5002_conv2d_bwd`、`5004_deform_conv2d_bwd`、`5006_spconv_bwd`、`5009_conv_depthtospace`、`8001_cumsum`
+
+注意：`Success@K` / `First Correct Median` / `Refine Gain Median` **不能**这样加门槛——
+离线终审只审最终 `best_code.py`，不审每一次尝试；要按尝试门槛化就得把每个候选都拿去审计
+（约 66×12≈790 次，单题 1–2 分钟），代价过高，所以这三项保留在线口径并在结论里注明。
+
 | 题 | vs aiter | vs eager | 备注 |
 |---|---|---|---|
 | `4001_batched_gemm_a8w8` | **3.69x** | 1.75x | MI 兜底† |
