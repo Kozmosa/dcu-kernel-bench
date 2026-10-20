@@ -294,8 +294,14 @@ def main() -> int:
         other = [r for r in rows_a if id(r) not in ids_bad]
         w("### 2.2 离线终审（静态审计 + 隐藏 case + `task.yaml` 分档容差）")
         w("")
-        w(f"只审有 aiter 基线的题：**审了 {ag['audited']} 道，通过 {len(passed)} 道"
-          f"（{len(passed)/ag['audited']*100:.0f}%）**。")
+        # 离线正确性不依赖基线：没有 aiter 分母的题也必须过隐藏 case，所以这里统计
+        # 的是**全量**审计结果；能不能给双基线是另一件事（看 measurement_impls）。
+        headline = audit.get("headline_impl") or "aiter"
+        has_impl = [r for r in rows_a if headline in (r.get("measurement_impls") or [])]
+        w(f"**{ag['audited']} 道全审**：通过 {len(passed)} 道"
+          f"（{len(passed)/ag['audited']*100:.0f}%）。其中 {len(has_impl)} 道有 "
+          f"`{headline}` 分母、可给双基线；其余 {ag['audited'] - len(has_impl)} 道只能给 "
+          f"`torch_eager` 口径。")
         w("")
         w("未通过的题**不是同一类原因**，性质完全不同：")
         w("")
@@ -485,6 +491,38 @@ def main() -> int:
     w(f"66 道里有 **{len(no_aiter)} 道没有 aiter 基线**（`baseline.json` 的 impls 只有")
     w(f"`torch_eager`），因此只能给 `torch_eager` 口径。其中 **{len(hip_ids)} 道是 HIP track")
     w("（`backend=cuda`）**，全部落在这一类。")
+    if audit:
+        # 这些题以前被 audit_batch 的「无 aiter 基线就跳过」直接丢掉了，等于离线零覆盖；
+        # 现在全审，所以这里给出它们自己的隐藏 case 结果与 eager 口径加速比。
+        by_task = {r["task"]: r for r in audit.get("rows") or []}
+        be_of = {}
+        for k, v in A.items():
+            be_of.setdefault(tid(k), v["backend"])
+        no_a = [t for t in sorted(no_aiter) if t in by_task]
+        ok_no_a = [t for t in no_a if by_task[t]["correctness_passed"]]
+        sp_no_a = [(t, by_task[t]["torch_eager_mean_speedup"]) for t in no_a
+                   if isinstance(by_task[t].get("torch_eager_mean_speedup"), (int, float))]
+        w("")
+        w(f"**这 {len(no_a)} 道现在也过离线终审**（正确性不依赖基线）：隐藏 case 通过 "
+          f"**{len(ok_no_a)}/{len(no_a)}**，其中 {len(sp_no_a)} 道能量出「生成实现 vs "
+          f"`torch_eager`」的离线加速比。")
+        w("")
+        w("| 题 | backend | 离线正确性 | vs eager（离线） | 备注 |")
+        w("|---|---|---|---|---|")
+        for t, sp_e in sorted(sp_no_a, key=lambda kv: -kv[1]):
+            w(f"| `{t}` | {be_of.get(t, '')} | ✓ | **{sp_e:.2f}x** |  |")
+        for t in no_a:
+            r = by_task[t]
+            if r["correctness_passed"]:
+                continue
+            note = "离线正确性未过"
+            if r.get("failure_reason"):
+                tail = " ".join((r.get("failure_tail") or "").split())[-120:].replace("|", "\\|")
+                note = f"跑不起来：`{tail}`" if tail else r["failure_reason"]
+            spx = r.get("torch_eager_mean_speedup")
+            w(f"| `{t}` | {be_of.get(t, '')} | ✗ | "
+              f"{f'{spx:.2f}x' if isinstance(spx, (int, float)) else '-'} | {note} |")
+        w("")
     if unaudited:
         w("")
         w(f"另有 **{len(unaudited)} 道有 aiter 基线但离线终审跑不出结果**（不是没有基线，也不要")
