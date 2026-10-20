@@ -17,7 +17,7 @@ import torch.nn as nn
 
 class Model(nn.Module):
     """Dense (padded 4D batch) FlashAttention forward: scaled dot-product attention
-    with online softmax, bottom-right-aligned causal mask, ALiBi positional bias,
+    with softmax, bottom-right-aligned causal mask, ALiBi positional bias,
     MHA/GQA, returning both the output and the per-row log-sum-exp (LSE).
 
     Mathematical definition (for batch element b, query head h, query position i,

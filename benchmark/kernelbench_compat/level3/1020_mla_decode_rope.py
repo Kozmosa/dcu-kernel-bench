@@ -52,13 +52,12 @@ class Model(nn.Module):
            attn_out[b, h, :] = sum_j p[h, j] * k_lat[b, j, :]
       3. k_pe_tokens[b, :] = the full rotated k_pe of the last token (r dims, for
          writing back to the cache).
-    softmax uses an online (numerically stable) implementation, intermediate
-    accumulation is float32, and the output is cast back to the input dtype.
+    softmax is numerically stable, intermediate accumulation is float32, and the
+    output is cast back to the input dtype.
     Boundary behaviour: seq_len_b >= 1 (when it equals 1 that token is "the last
-    token" and its k_pe takes part in the rotation); KV slicing in parallel
-    (num_kv_splits and the like) is only an implementation detail -- a sliced
-    online softmax with log-sum-exp merging is mathematically equivalent to the
-    full softmax and does not change the output; there is no logit cap, no causal
+    token" and its k_pe takes part in the rotation); how the KV reduction is
+    organized is only an implementation detail -- any implementation numerically
+    equivalent to the full softmax is acceptable; there is no logit cap, no causal
     mask (decode naturally attends the whole cache), and no quantization.
 
     Input/output specification:

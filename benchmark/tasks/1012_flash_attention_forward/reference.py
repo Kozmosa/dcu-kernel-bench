@@ -18,7 +18,7 @@ import torch.nn as nn
 class Model(nn.Module):
     """Variable-length (varlen) FlashAttention v2 forward pass: dense Q/K/V is
     segmented by cu_seqlens and each segment computes scaled dot-product attention
-    independently (online softmax semantics), supporting MHA/GQA and a causal
+    independently, supporting MHA/GQA and a causal
     mask.
 
     Mathematical definition: for segment b of the batch (let

@@ -60,9 +60,8 @@ class Model(nn.Module):
 
     Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
     Task scope: TN layout (x row-major (B,M,K), w row-major (B,N,K)), no split-K;
-    when K does not divide the tile size the kernel masks the tail. Block-wise
-    accumulation along K keeps float32 precision and agrees with the reference
-    fp32 GEMM within tolerance.
+    B/M/N/K are any values >= 1 with no alignment requirement; the accumulation
+    runs in float32 and must agree with the reference fp32 GEMM within tolerance.
     """
 
     def __init__(self, use_bias: bool = True, out_dtype: str = "bfloat16"):

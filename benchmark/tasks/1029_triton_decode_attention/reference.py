@@ -17,7 +17,7 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
-    """Two-stage flash decoding attention of the decode stage (single-token query), with paged KV.
+    """Decode-stage attention (single-token query) with paged KV.
 
     The KV cache is paged at page_size granularity: slot s of physical page p in
     key_cache / value_cache corresponds to flat slot number p * page_size + s.
@@ -34,17 +34,10 @@ class Model(nn.Module):
       out[b,h,:head_dim_v] = sum_l p[l] * value_flat[slot(b,l), h//group, :head_dim_v]
     where key_flat / value_flat is the [num_pages*page_size, H_KV, D] flat view of
     the page pool, scale defaults to 1/sqrt(head_dim_qk), and the softmax must be
-    numerically stable (online / blockwise max subtraction).
+    numerically stable.
 
-    Reference structure (not mandatory, but it is the key to high parallelism on
-    long sequences): two-stage split-KV -- stage1 cuts the KV length of each
-    sequence into num_kv_splits contiguous slices, each (batch, q_head, split)
-    parallel block runs an online softmax over its slice and produces partial
-    weighted V (acc/e_sum) and partial logsumexp (e_max + log(e_sum)) as two sets
-    of intermediates; stage2 performs a max reduction across slices and merges
-    them into the final output. num_kv_splits only affects the parallelism, not
-    the numerical result; any implementation that is equivalent within the
-    tolerance is acceptable.
+    Any implementation that is numerically equivalent within the tolerance is
+    acceptable; how the work is parallelized is **not** a scoring criterion.
 
     Boundary behaviour:
       - Only the first seq_lens[b] KV tokens participate in the computation;

@@ -19,7 +19,7 @@ class Model(nn.Module):
     """SageAttention2-style causal scaled dot-product attention forward:
     Q/K use per-block INT8 quantization, and P is multiplied against V in
     float16 (the dot within a block outputs float16, the accumulation across
-    blocks is float32) in an online softmax implementation (HND layout, MHA/GQA
+    blocks is float32) with softmax (HND layout, MHA/GQA
     in general).
 
     (1) Operator semantics (the acceptance ground truth): for batch b, query
@@ -54,7 +54,7 @@ class Model(nn.Module):
         the quantization of K folds no scale in; the per-block scale is
         max|x|/127, and int8 uses round-half-away-from-zero; qk =
         int8_dot(q,k) * (q_scale * k_scale) are the logits in the exp2 domain;
-        the online softmax is updated per KV block in the exp2 domain; P is cast
+        the softmax is updated per KV block in the exp2 domain; P is cast
         to float16 and dotted against the float16 V (the output within a block is
         float16), accumulating into a float32 acc; after the last block divide by
         the softmax denominator.

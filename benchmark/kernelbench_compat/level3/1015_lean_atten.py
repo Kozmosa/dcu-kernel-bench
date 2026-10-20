@@ -17,7 +17,7 @@ import torch.nn as nn
 
 class Model(nn.Module):
     """Attention forward pass over ragged batches with variable-length KV (Lean
-    Attention semantics: contiguous, non-paged KV, online softmax inside a single
+    Attention semantics: contiguous, non-paged KV, softmax inside a single
     kernel), covering both decode (independent KV lengths per batch entry) and
     prefill (square causal self-attention) forms, with MHA (Q/K/V head counts
     equal).

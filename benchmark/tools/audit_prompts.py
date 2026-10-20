@@ -84,6 +84,9 @@ PRESCRIPTION_PATTERNS = {
                 r"|double[- ]?buffer|software\s*pipelin|vectori[sz]ed\s+load|coalesc",
     "推荐做法": r"推荐用|建议使用|应当采用|最优做法"
                 r"|recommended\s+(?:to|approach)|it\s+is\s+advisable|best\s+practice|preferred\s+approach",
+    # 散文式题解：把做法整段写进题面。2026-10-20 从 2009/1020/1021/1029 清掉的就是这类。
+    "散文式题解": r"Target implementation shape|Reference structure|production implementation cuts"
+                  r"|rescaled partial sum|flash[- ]decoding|split[- ]KV|two-stage split|online softmax",
 }
 
 

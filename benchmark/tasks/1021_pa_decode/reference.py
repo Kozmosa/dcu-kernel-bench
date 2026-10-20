@@ -36,24 +36,18 @@ class Model(nn.Module):
       logits[l] = scale * <query[s,h,:], key_cache[bt[s,l//bs], h_kv, l%bs, :]>
       p = softmax(logits[0:seq_lens[s]])
       out[s,h,:] = sum_l p[l] * value_cache[bt[s,l//bs], h_kv, l%bs, :]
-    softmax is a numerically stable online implementation over the whole
+    softmax is a numerically stable reduction over the whole
     [0, seq_lens[s]) interval.
 
     This task is in the long-context regime: the block-table capacity max_seq_len
-    (16384 in the fixed family) far exceeds 8192, so a single sequence's KV cannot
-    be processed efficiently by one compute unit in one pass. The production
-    implementation cuts the KV sequence into 1024-token splits computed in
-    parallel (flash-decoding style split-KV: per-split online softmax yields the
-    local max logit m_p, the exponential sum l_p and the partial output o_p, then
-    the splits are merged with log-sum-exp: M = max_p m_p,
-    out = sum_p exp(m_p-M)*l_p*o_p / sum_p exp(m_p-M)*l_p), which is
-    mathematically exactly equivalent to the full softmax; splitting is only a
-    means to gain parallelism and is not a scoring criterion, so the
-    implementation path is free. Core boundary cases: partially filled tail split
-    (seq_len not a multiple of 1024), seq_len exactly a multiple of the split
-    length, wildly different sequence lengths within one batch (as short as 1),
-    and tail-block slot masking -- positions beyond seq_len must not contribute
-    any probability mass.
+    (16384 in the fixed family) far exceeds 8192, so a single sequence's KV can be
+    long. How the work is parallelized is **not** a scoring criterion -- any
+    implementation that is numerically equivalent to the full softmax within the
+    tolerance is acceptable, and the implementation path is free. Core boundary
+    cases: partially filled tail blocks (seq_len not a multiple of the block
+    size), seq_len exactly a multiple of the block size, wildly different
+    sequence lengths within one batch (as short as 1), and tail-block slot
+    masking -- positions beyond seq_len must not contribute any probability mass.
 
     Input/output specification:
       query       [num_seqs, num_q_heads, head_size], fp16/bf16
@@ -76,7 +70,7 @@ class Model(nn.Module):
 
     Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
     Task scope: single-token decode, non-quantized KV, no ALiBi, no sliding
-    window; the long-context (max(seq_lens) > 8192) split two-pass regime.
+    window; the long-context regime (max(seq_lens) > 8192).
     """
 
     def __init__(self, head_size: int, scale=None):

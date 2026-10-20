@@ -27,8 +27,7 @@ class Model(nn.Module):
     (bfloat16 arithmetic), and finally the result is cast to the output dtype. With
     no bias it is cast directly. Boundary behaviour: B/M/N/K may be any value >= 1
     (including the minimal 1x1x1 size) and the dimensions may be
-    non-powers-of-two; when K does not divide the tile size, the kernel masks the
-    tail with zeros, which does not change the mathematical result.
+    non-powers-of-two, with no alignment requirement on any of them.
 
     Input/output specification:
       x      bfloat16  (B, M, K)  the activation matrix

@@ -76,7 +76,7 @@ class Model(nn.Module):
       dk[b,hk,j,:]   = k_int8[b,hk,j,:] * k_scale[b,hk,j//64]
       logit[b,h,i,j] = <dq[b,h,i,:], dk[b,h//g,j,:]> / log2(e)
       (divide by log2(e): the quantization stage already folded the softmax scale
-         and log2(e) into q_scale, and the source kernel runs the online softmax
+         and log2(e) into q_scale, and the softmax
          in base 2, so everything is converted back to the natural-log domain
          here)
       positions where attn_mask[i,j] is False get logit = -inf (bool mask,

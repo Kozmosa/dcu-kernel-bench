@@ -14,7 +14,7 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
-    """2D row-wise softmax (the numerically stable online two-pass form).
+    """2D row-wise softmax.
 
     For each row (the last dimension) of an (M, N) input, independently:
         m[i]     = max_j x[i, j]
@@ -23,20 +23,12 @@ class Model(nn.Module):
     Rows are completely independent, and after per-row normalization the elements
     of every row sum to 1. The reference implementation does max / exp / sum
     entirely in float32 and casts the output back to the input dtype.
-    Target implementation shape (the computation organization with the same
-    semantics as the task statement): inside a single Triton kernel, scan each row
-    in blocks twice -- the first pass (online) maintains the running maximum m and
-    the rescaled partial sum
-    s <- s * exp(m_old - m_new) + sum_block exp(x - m_new), and the second pass
-    writes out exp(x - m) / s; rows longer than a single block are handled with a
-    blocked loop.
 
     Boundary behaviour: N is any positive integer -- when N=1 the row's output is
-    always 1; non-power-of-two N and very long rows (N beyond a single block's
-    limit -- counting a 64KB shared buffer, 65536/element_size = 32768 elements for
-    fp16/bf16) must all be handled with masking / a blocked loop, and out-of-range
-    elements at the row tail must not participate in the max and sum reductions;
-    the inputs are ordinary randn magnitude (no inf/NaN).
+    always 1; non-power-of-two N and very long rows (longer than a single block's
+    capacity) must still give exact results, and out-of-range elements at the row
+    tail must not participate in the max and sum reductions; the inputs are
+    ordinary randn magnitude (no inf/NaN).
 
     Input/output specification:
         x   float16 / bfloat16 (M, N), contiguous, M >= 1, N >= 1
