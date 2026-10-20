@@ -1,7 +1,33 @@
 # 题目级指标（.dcu_runs\en66）
 
-- accepted_tasks = **66**；候选口径 = **排除 root**（root 是框架直通脚手架，不是 Agent 产出）
+- accepted_tasks = **66**（solved = 60）
+- 候选口径：**排除 root**（root 是框架直通脚手架，不算 Agent 产出）
 - 参考 baseline（speedup 分母）：`torch_eager`
+- 数据来源：英文题面全量跑 runs/dcukb_en_1019_1027（66 道，16 分片）+ 3 道补跑 + 6001 的 HIP 重跑
+
+## 简要描述
+- **能编译**：66/66 道题至少产出一个可编译候选，脚手架不是瓶颈。
+- **能写对**：Correct Rate 60/66（90.9%）；6 道始终没写出正确实现：`1026_sage_attention_qk_int8_per_block`、`1027_sage_attention_qk_int8_per_block_causal`、`2013_groupnorm_bwd`、`4008_gemm_a16w4`、`4009_gemm_a8w8`、`4017_group_quant_int8`。
+- **收敛速度**：首次 correct 的中位尝试序号 2.0，Success@1 26/66、Success@5 56/66。
+- **跑得比 baseline 快**：Fast1@all 50/66（75.8%）；solved 题 best speedup 几何平均 7.82x、中位 6.39x、最好 900.66x；另有 10 道虽写对但整个预算内没跑赢 eager。
+- **精修收益有限**：Refine Gain 中位 1.13x —— 第一次写对之后，剩下的尝试只能再提升这么多，难点在「第一次对不对」。
+
+## 指标定义
+
+| 指标 | 定义 |
+|---|---|
+| Compile Rate | 题目级：至少产出 1 个 `compile_ok` 候选的题目数 / accepted_tasks |
+| Correct Rate | 题目级：至少产出 1 个 `correct` 候选的题目数 / accepted_tasks |
+| Success@K | 每题 K 次尝试内至少出现 1 个 correct 候选的题目比例 |
+| Fast1@K | 每题 K 次尝试内至少出现 1 个 correct 且快于参考 baseline（speedup > 1）的候选的题目比例 |
+| Geomean Speedup | 每题 best correct 候选 speedup 的几何平均（只在 solved tasks 上算） |
+| Median Speedup | 每题 best correct 候选 speedup 的中位数 |
+| Best Speedup | 所有题里最高的 best correct speedup |
+| Mean Speedup | 每题 best correct 候选 speedup 的算术平均 |
+| First Correct Median | 每个 solved task 第一次出现 correct 的尝试序号的中位数 |
+| Refine Gain Median | 每题（最终 best correct speedup / 第一次 correct 的 speedup）的中位数 |
+
+两点口径说明：**① root 不在候选池内**（否则 Correct Rate 恒为 100%）；**② best = 所有 correct 候选里的最大 speedup**，与框架按 score 挑的 `best_node_id` 可能不同，逐题明细最后一列给出 champion 供对照。
 
 | 指标 | 值 |
 |---|---|

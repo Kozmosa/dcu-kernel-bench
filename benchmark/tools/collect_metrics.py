@@ -147,6 +147,7 @@ def main() -> int:
     ap.add_argument("--include-root", action="store_true",
                     help="把 root 直通脚手架也算作候选（默认不算，因为不是 Agent 产出）")
     ap.add_argument("--k", default="1,5,10", help="Success@K / Fast1@K 的 K 列表")
+    ap.add_argument("--note", default="", help="一句话标注这批 run.json 的来源（写进报告开头）")
     args = ap.parse_args()
 
     tasks = load_tasks(args.run_root)
@@ -171,11 +172,33 @@ def main() -> int:
 
     L = []
     w = L.append
+    refs = {r["reference"] for r in rows}
     w(f"# 题目级指标（{args.run_root}）")
     w("")
-    w(f"- accepted_tasks = **{n}**；候选口径 = {'包含 root' if args.include_root else '**排除 root**（root 是框架直通脚手架，不是 Agent 产出）'}")
-    refs = {r["reference"] for r in rows}
+    w(f"- accepted_tasks = **{n}**（solved = {sum(1 for r in rows if r['correct'])}）")
+    w(f"- 候选口径：{'包含 root' if args.include_root else '**排除 root**（root 是框架直通脚手架，不算 Agent 产出）'}")
     w(f"- 参考 baseline（speedup 分母）：{', '.join(f'`{x}`' for x in sorted(refs))}")
+    if args.note:
+        w(f"- 数据来源：{args.note}")
+    w("")
+    w("## 指标定义")
+    w("")
+    w("| 指标 | 定义 |")
+    w("|---|---|")
+    w("| Compile Rate | 题目级：至少产出 1 个 `compile_ok` 候选的题目数 / accepted_tasks |")
+    w("| Correct Rate | 题目级：至少产出 1 个 `correct` 候选的题目数 / accepted_tasks |")
+    w("| Success@K | 每题 K 次尝试内至少出现 1 个 correct 候选的题目比例 |")
+    w("| Fast1@K | 每题 K 次尝试内至少出现 1 个 correct 且快于参考 baseline（speedup > 1）的候选的题目比例 |")
+    w("| Geomean Speedup | 每题 best correct 候选 speedup 的几何平均（只在 solved tasks 上算） |")
+    w("| Median Speedup | 每题 best correct 候选 speedup 的中位数 |")
+    w("| Best Speedup | 所有题里最高的 best correct speedup |")
+    w("| Mean Speedup | 每题 best correct 候选 speedup 的算术平均 |")
+    w("| First Correct Median | 每个 solved task 第一次出现 correct 的尝试序号的中位数 |")
+    w("| Refine Gain Median | 每题（最终 best correct speedup / 第一次 correct 的 speedup）的中位数 |")
+    w("")
+    w("两点口径说明：**① root 不在候选池内**（否则 Correct Rate 恒为 100%）；"
+      "**② best = 所有 correct 候选里的最大 speedup**，与框架按 score 挑的 `best_node_id` 可能不同，"
+      "逐题明细最后一列给出 champion 供对照。")
     w("")
     w("| 指标 | 值 |")
     w("|---|---|")
@@ -237,6 +260,29 @@ def main() -> int:
         w(f"| `{r['alias']}` | {r['backend']} | {r['attempts']} | {fc} | {ff} | "
           f"{bs_txt} | {r['best_node'] or '-'} | {ch_txt} |")
     w("")
+
+    # 简要描述（放在「指标定义」之前，自动生成以免和上面的数字脱节）
+    miss = [r["alias"] for r in rows if not r["correct"]]
+    slow = [r["alias"] for r in rows if r["correct"] and r["first_fast_idx"] is None]
+    desc = [f"- **能编译**：{sum(1 for r in rows if r['compile_ok'])}/{n} 道题至少产出一个可编译候选，"
+            f"脚手架不是瓶颈。"]
+    desc.append(f"- **能写对**：Correct Rate {sum(1 for r in rows if r['correct'])}/{n}"
+                f"（{sum(1 for r in rows if r['correct'])/n*100:.1f}%）"
+                f"{('；' + str(len(miss)) + ' 道始终没写出正确实现：' + '、'.join(f'`{a}`' for a in miss)) if miss else ''}。")
+    if first_idx:
+        desc.append(f"- **收敛速度**：首次 correct 的中位尝试序号 {statistics.median(first_idx):.1f}，"
+                    f"Success@1 {sum(1 for r in rows if r['first_correct_idx'] == 1)}/{n}、"
+                    f"Success@5 {sum(1 for r in rows if r['first_correct_idx'] is not None and r['first_correct_idx'] <= 5)}/{n}。")
+    if sp:
+        desc.append(f"- **跑得比 baseline 快**：Fast1@all {hit_all}/{n}"
+                    f"（{hit_all/n*100:.1f}%）；solved 题 best speedup 几何平均 {g:.2f}x、"
+                    f"中位 {statistics.median(sp):.2f}x、最好 {max(sp):.2f}x"
+                    f"{('；另有 ' + str(len(slow)) + ' 道虽写对但整个预算内没跑赢 eager') if slow else ''}。")
+    if gains:
+        desc.append(f"- **精修收益有限**：Refine Gain 中位 {statistics.median(gains):.2f}x —— 第一次写对之后，"
+                    f"剩下的尝试只能再提升这么多，难点在「第一次对不对」。")
+    idx = L.index("## 指标定义")
+    L[idx:idx] = ["## 简要描述"] + desc + [""]
 
     text = "\n".join(L) + "\n"
     if args.out:
