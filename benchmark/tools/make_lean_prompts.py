@@ -44,6 +44,52 @@ KEEP_START = re.compile(
 )
 
 
+MINIMAL_HEADINGS = re.compile(
+    r"^\s*(Input/output specification:|I/O specification:|Disallowed list:|"
+    r"Forbidden \(static audit|Target hardware)",
+    re.I,
+)
+MINIMAL_TAIL = ("Write the core computation in Triton inside the ModelNew anchor regions; "
+                "the ops listed above are forbidden. Hidden evaluation cases may use any "
+                "shape/dtype inside the domain stated above.")
+
+
+def minimal_docstring(doc: str) -> str:
+    """只留必要信息：摘要段 + I/O 契约 + 禁用列表 + 硬件，其余全删。
+
+    依据：语义已经由 scaffold 里的参考实现给出（root 代码就是 Model 本体），
+    数学推导、边界行为、打包协议、实现约束都是把代码再讲一遍。
+    保留 I/O 契约是因为 dtype/shape 域不全在 get_inputs() 里；保留禁用列表与硬件
+    是因为它们无法从代码推断，且直接决定判负。
+    """
+    lines = doc.splitlines()
+    blocks, cur = [], []
+    for line in lines:
+        if re.match(r"^\s*[A-Z][A-Za-z /-]{3,}:", line) or re.match(
+                r"^\s*(Mathematical definition|Boundary behaviour|Task scope:|"
+                r"Implementation constraints|Global-domain constraints|Notes|"
+                r"Isolated evaluator|Reference:)", line, re.I):
+            if cur:
+                blocks.append(cur)
+            cur = [line]
+        else:
+            cur.append(line)
+    if cur:
+        blocks.append(cur)
+
+    kept = []
+    for b in blocks:
+        head = b[0].strip()
+        if not kept and not re.match(r"^\s*[A-Z][A-Za-z /-]{3,}:", head):
+            kept.append(b)                       # 开头的摘要段
+            continue
+        if MINIMAL_HEADINGS.match(head):
+            kept.append(b)
+    text = "\n".join("\n".join(b).rstrip() for b in kept)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip("\n")
+    return text + "\n\n" + MINIMAL_TAIL
+
+
 def trim_docstring(doc: str) -> str:
     """删掉 DROP 段落（数学定义 / I-O 规格），其余原样保留。"""
     lines = doc.splitlines()
@@ -98,12 +144,16 @@ def main() -> int:
     ap.add_argument("--out", required=True, type=pathlib.Path,
                     help="输出根目录（会建 tasks/ 与 kernelbench_compat/）")
     ap.add_argument("--write", action="store_true", help="真正写文件（否则只报告）")
+    ap.add_argument("--mode", choices=("lean", "minimal"), default="lean",
+                    help="lean=删数学/IO 段；minimal=只留摘要+IO契约+禁用+硬件")
+    ap.add_argument("--show", default="", help="打印某道题裁剪后的题面（dry-run 用）")
     args = ap.parse_args()
 
     out_tasks = args.out / "tasks"
     out_compat = args.out / "kernelbench_compat"
     total_before = total_after = 0
     kept = []
+    fell_back = []
     for task_dir in sorted(TASKS.iterdir()):
         ref = task_dir / "reference.py"
         if not task_dir.is_dir() or not ref.exists():
@@ -116,7 +166,15 @@ def main() -> int:
         doc = ast.get_docstring(model) or ""
         if not doc:
             continue
-        lean = trim_docstring(doc)
+        lean = trim_docstring(doc) if args.mode == "lean" else minimal_docstring(doc)
+        # 结构化题面（(1)(2)(3) 编号式、无可识别小标题）会被 minimal 砍空，
+        # 这类题退回 lean，避免发出近乎没有信息的题面
+        if args.mode == "minimal" and len(lean) < 400:
+            fell_back.append((task_dir.name, len(doc), len(lean)))
+            lean = trim_docstring(doc)
+        if args.show and task_dir.name.startswith(args.show):
+            print("=" * 20, task_dir.name, f"({len(doc)} -> {len(lean)} chars)")
+            print(lean)
         total_before += len(doc)
         total_after += len(lean)
         kept.append((task_dir.name, len(doc), len(lean)))
@@ -135,6 +193,9 @@ def main() -> int:
 
     for name, before, after in sorted(kept, key=lambda x: -(x[1] - x[2]))[:8]:
         print(f"  {name:44} {before:5} -> {after:5}  (-{before - after})")
+    if fell_back:
+        print(f"\n{len(fell_back)} 道结构化题面退回 lean（minimal 会砍空）："
+              + "、".join(f"{n}" for n, _, _ in fell_back))
     print(f"\n{len(kept)} 道题：docstring {total_before} -> {total_after} 字符"
           f"（-{(total_before - total_after) / total_before * 100:.1f}%）")
     if args.write:
