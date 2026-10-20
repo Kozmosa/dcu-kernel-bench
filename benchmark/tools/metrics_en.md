@@ -39,7 +39,7 @@
 | Fast1@1 | 26/66（39.4%） |
 | Fast1@5 | 43/66（65.2%） |
 | Fast1@10 | 50/66（75.8%） |
-| Fast1@all（整个预算内） | 50/66（75.8%） |
+| Fast1@all（entire budget） | 50/66（75.8%） |
 
 K 曲线（K = 每题允许的尝试次数上限）：
 
@@ -57,14 +57,14 @@ K 曲线（K = 每题允许的尝试次数上限）：
 | Median Speedup | **6.39x** |
 | Mean Speedup | 64.94x |
 | Best Speedup | **900.66x** |
-| First Correct Median（尝试序号） | **2.0** |
+| First Correct Median | **2.0** |
 | Refine Gain Median | **1.10x** |
 
-首次 correct 的尝试序号分布：1→29 道、2→18 道、3→5 道、4→3 道、5→1 道、6→2 道、8→1 道、9→1 道
+First Correct 分布（尝试序号→题数）：1→29、2→18、3→5、4→3、5→1、6→2、8→1、9→1
 
 ## 逐题明细
 
-| 题 | backend | 尝试数 | 首次 correct | 首次快于 baseline | best speedup（max correct） | best 节点 | 框架 champion |
+| 题 | backend | Attempts | First Correct | First Fast1 | Best Speedup | Best node | Framework champion |
 |---|---|---|---|---|---|---|---|
 | `7001_ctc_loss` | triton | 4 | 1 | 1 | 900.66x | n1 | 900.66x（n1） |
 | `1032_deform_attention_bwd` | cuda | 10 | 1 | 1 | 634.36x | phase2_n3 | 634.36x（phase2_n3） |
@@ -135,7 +135,7 @@ K 曲线（K = 每题允许的尝试次数上限）：
 
 ## 离线终审（隐藏 case + 静态审计，分母 = `aiter`）
 
-- **66 道全审，通过 43 道**
+- **Offline pass rate: 43/66**（66 道全审）
 - 未通过 23：静态判负 19、隐藏 case 跑不起来 3、数值不达标 1
 - `aiter` 有测值 25 道：中位 **1.29x**、均值 1.46x、最大 3.69x；MI 兜底基线 6 道（分母偏大，加速比偏高，引用须标注）
 
@@ -172,13 +172,15 @@ K 曲线（K = 每题允许的尝试次数上限）：
 
 ### 加离线门槛后的口径（对外引用建议用这一栏）
 
-| 指标 | 只算在线 | **在线 ∩ 离线通过** |
+| 指标 | online only | **online ∩ offline pass** |
 |---|---|---|
-| 算 solved 的题数 | 60/66 | **42/66** |
-| 加速比中位 | 6.39x | **7.35x** |
-| 加速比均值 | 64.94x | **40.00x** |
-| 加速比几何平均 | 8.01x | **8.79x** |
-| 加速比最大 | 900.66x | 900.66x |
+| Compile Rate | 66/66 | 66/66（离线不另设门槛） |
+| Correct Rate | 60/66 | **42/66** |
+| Geomean Speedup | 8.01x | **8.79x** |
+| Median Speedup | 6.39x | **7.35x** |
+| Mean Speedup | 64.94x | **40.00x** |
+| Best Speedup | 900.66x | 900.66x |
+| Success@K / First Correct Median / Refine Gain Median | 见上表 | 无法门槛化（见下） |
 
 被门槛剔掉的 18 道：`1016_lean_atten_paged`、`1018_mha_fused_bwd`、`1020_mla_decode_rope`、`1022_pa_prefill`、`1031_deform_attention_fwd`、`1032_deform_attention_bwd`、`3004_moe_op_e2e`、`3007_moe_op_silu_fused`、`3009_routing`、`4006_gemm_a16w16`、`4007_gemm_a16w16_atomic`、`4010_gemm_a8w8_blockscale`、`5001_conv2d_fwd`、`5002_conv2d_bwd`、`5004_deform_conv2d_bwd`、`5006_spconv_bwd`、`5009_conv_depthtospace`、`8001_cumsum`
 

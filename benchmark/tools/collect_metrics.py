@@ -238,7 +238,7 @@ def main() -> int:
         hit = sum(1 for r in rows if r["first_fast_idx"] is not None and r["first_fast_idx"] <= k)
         w(f"| Fast1@{k} | {pct(hit, n)} |")
     hit_all = sum(1 for r in rows if r["first_fast_idx"] is not None)
-    w(f"| Fast1@all（整个预算内） | {pct(hit_all, n)} |")
+    w(f"| Fast1@all（entire budget） | {pct(hit_all, n)} |")
     w("")
     w("K 曲线（K = 每题允许的尝试次数上限）：")
     w("")
@@ -263,7 +263,7 @@ def main() -> int:
     w(f"| Median Speedup | **{statistics.median(sp):.2f}x** |" if sp else "| Median Speedup | - |")
     w(f"| Mean Speedup | {statistics.mean(sp):.2f}x |" if sp else "| Mean Speedup | - |")
     w(f"| Best Speedup | **{max(sp):.2f}x** |" if sp else "| Best Speedup | - |")
-    w(f"| First Correct Median（尝试序号） | **{statistics.median(first_idx):.1f}** |"
+    w(f"| First Correct Median | **{statistics.median(first_idx):.1f}** |"
       if first_idx else "| First Correct Median | - |")
     w(f"| Refine Gain Median | **{statistics.median(gains):.2f}x** |" if gains else "| Refine Gain Median | - |")
     w("")
@@ -271,11 +271,11 @@ def main() -> int:
         dist = {}
         for i in first_idx:
             dist[i] = dist.get(i, 0) + 1
-        w("首次 correct 的尝试序号分布：" + "、".join(f"{k}→{v} 道" for k, v in sorted(dist.items())))
+        w("First Correct 分布（尝试序号→题数）：" + "、".join(f"{k}→{v}" for k, v in sorted(dist.items())))
         w("")
     w("## 逐题明细")
     w("")
-    w("| 题 | backend | 尝试数 | 首次 correct | 首次快于 baseline | best speedup（max correct） | best 节点 | 框架 champion |")
+    w("| 题 | backend | Attempts | First Correct | First Fast1 | Best Speedup | Best node | Framework champion |")
     w("|---|---|---|---|---|---|---|---|")
     for r in sorted(rows, key=lambda x: -(x["best_speedup"] or 0)):
         bs = r["best_speedup"]
@@ -332,7 +332,8 @@ def main() -> int:
                      if isinstance(arows[t].get(f"{head}_mean_speedup"), (int, float))]
         L.append(f"## 离线终审（隐藏 case + 静态审计，分母 = `{head}`）")
         L.append("")
-        L.append(f"- **{ag.get('audited', len(arows))} 道全审，通过 {len(passed)} 道**")
+        L.append(f"- **Offline pass rate: {len(passed)}/{ag.get('audited', len(arows))}**"
+                 f"（{ag.get('audited', len(arows))} 道全审）")
         L.append(f"- 未通过 {len(arows) - len(passed)}：静естатиc".replace("静естатиc", "静") )
         L[-1] = (f"- 未通过 {len(arows) - len(passed)}：静态判负 {len(static_bad)}、"
                  f"隐藏 case 跑不起来 {len(crashed)}、数值不达标 {len(corr_bad)}")
@@ -369,16 +370,20 @@ def main() -> int:
         sp_gate = [r["best_speedup"] for r in rows if r["alias"] in gated and r["best_speedup"]]
         L.append("### 加离线门槛后的口径（对外引用建议用这一栏）")
         L.append("")
-        L.append("| 指标 | 只算在线 | **在线 ∩ 离线通过** |")
+        L.append("| 指标 | online only | **online ∩ offline pass** |")
         L.append("|---|---|---|")
-        L.append(f"| 算 solved 的题数 | {len(has_cand)}/{n} | **{len(gated)}/{n}** |")
+        L.append(f"| Compile Rate | {sum(1 for r in rows if r['compile_ok'])}/{n} | "
+                 f"{sum(1 for r in rows if r['compile_ok'])}/{n}（离线不另设门槛） |")
+        L.append(f"| Correct Rate | {len(has_cand)}/{n} | **{len(gated)}/{n}** |")
         if sp_on and sp_gate:
-            L.append(f"| 加速比中位 | {statistics.median(sp_on):.2f}x | "
+            L.append(f"| Geomean Speedup | {geomean(sp_on):.2f}x | **{geomean(sp_gate):.2f}x** |")
+            L.append(f"| Median Speedup | {statistics.median(sp_on):.2f}x | "
                      f"**{statistics.median(sp_gate):.2f}x** |")
-            L.append(f"| 加速比均值 | {statistics.mean(sp_on):.2f}x | "
+            L.append(f"| Mean Speedup | {statistics.mean(sp_on):.2f}x | "
                      f"**{statistics.mean(sp_gate):.2f}x** |")
-            L.append(f"| 加速比几何平均 | {geomean(sp_on):.2f}x | **{geomean(sp_gate):.2f}x** |")
-            L.append(f"| 加速比最大 | {max(sp_on):.2f}x | {max(sp_gate):.2f}x |")
+            L.append(f"| Best Speedup | {max(sp_on):.2f}x | {max(sp_gate):.2f}x |")
+        L.append(f"| Success@K / First Correct Median / Refine Gain Median | "
+                 f"见上表 | 无法门槛化（见下） |")
         L.append("")
         L.append(f"被门槛剔掉的 {len(dropped)} 道："
                  + "、".join(f"`{t}`" for t in sorted(dropped)))
