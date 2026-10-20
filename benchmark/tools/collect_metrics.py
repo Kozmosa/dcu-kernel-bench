@@ -41,6 +41,29 @@ import statistics
 
 ROOT_NODE_IDS = ("root", "phase2_root")
 
+# 最高加速比那种"离谱"数字的成因备注（按题名索引；没有条目就走通用说明）。
+# 写在这里而不是手改 md，是为了重跑脚本时这段话不会丢。
+TOP_TASK_NOTES = {
+    "7001_ctc_loss": [
+        "分母是题面给的**朴素参考实现**：`_ctc_one` 对每个 batch 元素各跑一遍 Python 循环"
+        "（前向 `for t in range(1, tb)` + 反向再来一遍），每一步临时造 6~7 个张量、发 6~7 次 "
+        "kernel。在线 shape（T=500、N=4、tb≤200）下约 **1.1 万次 launch**，272 ms 几乎全是主机侧开销。",
+        "",
+        "生成的实现是一个 Triton kernel：一个 program 处理一个 batch 元素，状态维 S 放寄存器"
+        "（`tl.arange(0,B)`），**时间维递推写在 kernel 内部**，对数域三分支 logsumexp 手写"
+        "（`_ctc_lse3`），前向存 alpha、反向在同一 kernel 里算 gamma 并 `atomic_add` 写梯度 —— "
+        "整个 500 步递推只有 **1 次 launch**，0.30 ms。",
+        "",
+        "所以这 900x 的绝大部分来自**消除上万次 launch + Python 开销**，算法复杂度两边一样"
+        "（都是 O(T·S) 对数域 CTC），没有任何渐进优势。",
+        "",
+        "**引用时必须注明分母**：不能写成“比生产级 CTC 快 900 倍”。真正对位的生产实现是 "
+        "`torch.nn.functional.ctc_loss`，而它正是本题的禁用算子（所以不会出现在分母里）。"
+        "离线那 4319x 更是同一原因在更大 perf case（T=1024、N=16、C=32）上的放大：参考实现"
+        "成本 ∝ T·N，生成实现把 N 摊到多个 program、T 留在 kernel 内循环。",
+    ],
+}
+
 
 def attempt_order(node_id: str) -> tuple:
     """创建顺序：root=0，phase1 的 nK=K，phase2 的 phase2_nK 接在后面。"""
@@ -281,6 +304,40 @@ def main() -> int:
     if gains:
         desc.append(f"- **精修收益有限**：Refine Gain 中位 {statistics.median(gains):.2f}x —— 第一次写对之后，"
                     f"剩下的尝试只能再提升这么多，难点在「第一次对不对」。")
+    # 观察（数据驱动）+ 最高加速比成因（人工备注，key 为题名）
+    obs = []
+    if slow:
+        obs.append(f"- **Correct Rate {sum(1 for r in rows if r['correct'])}/{n} 但 Fast1@all 只有 "
+                   f"{hit_all}/{n}**：差出来的 {len(slow)} 道是「能写对、但整个预算内没跑赢 "
+                   f"`torch_eager`」（"
+                   + "、".join(f"`{a}`" for a in slow[:6]) +
+                   ("…" if len(slow) > 6 else "") +
+                   "）——这 10 道横跨 quant/GEMM、MoE、decode-attention 与 conv，"
+                   "共同点是 eager 分母本身已经是 ATen/MIOpen 的高度优化实现，生成实现很难超过。")
+    if gains:
+        obs.append(f"- **Refine Gain 中位只有 {statistics.median(gains):.2f}x**：一旦第一次写对，"
+                   f"后续尝试平均只再提升这么多。也就是说瓶颈在「第一次能不能写对」"
+                   f"（Success@1 {sum(1 for r in rows if r['first_correct_idx'] == 1)}/{n}），"
+                   f"而不是精修阶段——把预算从 10 次加到 20 次，预期收益有限。")
+    if obs:
+        L.append("## 两点观察")
+        L.append("")
+        L.extend(obs)
+        L.append("")
+
+    if sp:
+        top = max(solved, key=lambda r: r["best_speedup"] or 0)
+        L.append(f"## 最高加速比为什么这么高（`{top['alias']}` {top['best_speedup']:.2f}x）")
+        L.append("")
+        note = TOP_TASK_NOTES.get(top["alias"])
+        if note:
+            L.extend(note)
+        else:
+            L.append(f"`{top['alias']}` 的 best correct 候选比参考 baseline 快 "
+                     f"{top['best_speedup']:.2f}x；逐题明细里有它的节点与尝试序号，"
+                     f"可回到对应的 `best_code.py` 看具体实现。")
+        L.append("")
+
     idx = L.index("## 指标定义")
     L[idx:idx] = ["## 简要描述"] + desc + [""]
 

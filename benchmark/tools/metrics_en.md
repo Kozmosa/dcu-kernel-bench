@@ -133,3 +133,18 @@ K 曲线（K = 每题允许的尝试次数上限）：
 | `4009_gemm_a8w8` | triton | 10 | - | - | - | - | 0.99x（root） |
 | `4017_group_quant_int8` | triton | 10 | - | - | - | - | 1.00x（root） |
 
+## 两点观察
+
+- **Correct Rate 60/66 但 Fast1@all 只有 50/66**：差出来的 10 道是「能写对、但整个预算内没跑赢 `torch_eager`」（`1020_mla_decode_rope`、`2012_groupnorm_fwd`、`3004_moe_op_e2e`、`3009_routing`、`4006_gemm_a16w16`、`4007_gemm_a16w16_atomic`…）——这 10 道横跨 quant/GEMM、MoE、decode-attention 与 conv，共同点是 eager 分母本身已经是 ATen/MIOpen 的高度优化实现，生成实现很难超过。
+- **Refine Gain 中位只有 1.13x**：一旦第一次写对，后续尝试平均只再提升这么多。也就是说瓶颈在「第一次能不能写对」（Success@1 26/66），而不是精修阶段——把预算从 10 次加到 20 次，预期收益有限。
+
+## 最高加速比为什么这么高（`7001_ctc_loss` 900.66x）
+
+分母是题面给的**朴素参考实现**：`_ctc_one` 对每个 batch 元素各跑一遍 Python 循环（前向 `for t in range(1, tb)` + 反向再来一遍），每一步临时造 6~7 个张量、发 6~7 次 kernel。在线 shape（T=500、N=4、tb≤200）下约 **1.1 万次 launch**，272 ms 几乎全是主机侧开销。
+
+生成的实现是一个 Triton kernel：一个 program 处理一个 batch 元素，状态维 S 放寄存器（`tl.arange(0,B)`），**时间维递推写在 kernel 内部**，对数域三分支 logsumexp 手写（`_ctc_lse3`），前向存 alpha、反向在同一 kernel 里算 gamma 并 `atomic_add` 写梯度 —— 整个 500 步递推只有 **1 次 launch**，0.30 ms。
+
+所以这 900x 的绝大部分来自**消除上万次 launch + Python 开销**，算法复杂度两边一样（都是 O(T·S) 对数域 CTC），没有任何渐进优势。
+
+**引用时必须注明分母**：不能写成“比生产级 CTC 快 900 倍”。真正对位的生产实现是 `torch.nn.functional.ctc_loss`，而它正是本题的禁用算子（所以不会出现在分母里）。离线那 4319x 更是同一原因在更大 perf case（T=1024、N=16、C=32）上的放大：参考实现成本 ∝ T·N，生成实现把 N 摊到多个 program、T 留在 kernel 内循环。
+
