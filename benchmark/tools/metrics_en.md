@@ -133,6 +133,71 @@ K 曲线（K = 每题允许的尝试次数上限）：
 | `4009_gemm_a8w8` | triton | 10 | - | - | - | - | 0.99x（root） |
 | `4017_group_quant_int8` | triton | 10 | - | - | - | - | 1.00x（root） |
 
+## 离线终审（隐藏 case + 静态审计，分母 = `aiter`）
+
+- **66 道全审，通过 43 道**
+- 未通过 23：静态判负 19、隐藏 case 跑不起来 3、数值不达标 1
+- `aiter` 有测值 25 道：中位 **1.29x**、均值 1.46x、最大 3.69x；MI 兜底基线 6 道（分母偏大，加速比偏高，引用须标注）
+
+**为什么不能只看在线**：在线只跑 `get_inputs()` 的单一 shape、不执行禁用列表，
+所以在线的 60 道 solved 实现里，有 19 道把核心计算交给了被禁的算子、3 道换一批隐藏 shape 就崩、1 道数值对不上。离线才是判据的硬边。
+
+| 静态判负的题 |
+|---|
+| `1018_mha_fused_bwd` |
+| `1020_mla_decode_rope` |
+| `1026_sage_attention_qk_int8_per_block` |
+| `1027_sage_attention_qk_int8_per_block_causal` |
+| `1031_deform_attention_fwd` |
+| `1032_deform_attention_bwd` |
+| `2013_groupnorm_bwd` |
+| `3004_moe_op_e2e` |
+| `3009_routing` |
+| `4006_gemm_a16w16` |
+| `4007_gemm_a16w16_atomic` |
+| `4008_gemm_a16w4` |
+| `4009_gemm_a8w8` |
+| `4010_gemm_a8w8_blockscale` |
+| `5001_conv2d_fwd` |
+| `5002_conv2d_bwd` |
+| `5004_deform_conv2d_bwd` |
+| `5009_conv_depthtospace` |
+| `8001_cumsum` |
+
+| 隐藏 case 跑不起来的题 | 崩溃摘要 |
+|---|---|
+| `1016_lean_atten_paged` | `: out of resource: shared memory, Required: 98304, Hardware limit: 65536. Reducing block sizes or `num_stages` may help.` |
+| `1022_pa_prefill` | `d_m = tl.program_id(0) h = tl.program_id(1) rows = pid_m * BLOCK_M + tl.arange(0, BLOCK_M) d = tl.arange(0, HEAD_SIZE) ^` |
+| `3007_moe_op_silu_fused` | ` + rk av = tl.load(A + token[:, None]*A0 + kk[None, :]*A1, valid[:, None] & (kk[None, :] < K), other=0).to(tl.float32) ^` |
+
+| 题 | vs aiter | vs eager | 备注 |
+|---|---|---|---|
+| `4001_batched_gemm_a8w8` | **3.69x** | 1.75x | MI 兜底† |
+| `2002_add_swiglu` | **2.98x** | 11.42x |  |
+| `2007_rmsnorm` | **2.90x** | 5.27x |  |
+| `2006_norm` | **2.77x** | 12.15x |  |
+| `2004_fused_qk_concat` | **2.68x** | 3.14x |  |
+| `3002_moe_align_block_size` | **2.26x** | 1.12x |  |
+| `4004_batched_gemm_bf16` | **2.20x** | 1.25x | MI 兜底† |
+| `1024_prefill_attention` | **1.98x** | 9.43x |  |
+| `2005_moe_activation` | **1.59x** | 4.73x |  |
+| `1017_mha` | **1.58x** | 4.17x | MI 兜底† |
+| `2003_fused_mul_add` | **1.47x** | 3.04x |  |
+| `2009_softmax` | **1.34x** | 4.56x |  |
+| `3010_topk` | **1.29x** | 1.52x |  |
+| `3003_moe_op` | **1.06x** | 18.73x |  |
+| `1021_pa_decode` | **1.04x** | 17.39x |  |
+| `2008_rope` | **1.01x** | 4.13x |  |
+| `1015_lean_atten` | **0.92x** | 1.24x |  |
+| `1010_chunked_pa_prefill` | **0.77x** | 1.60x |  |
+| `4018_quant` | **0.69x** | 1.01x |  |
+| `1012_flash_attention_forward` | **0.66x** | 1.24x |  |
+| `4016_gemm_w8a8` | **0.57x** | 1.03x |  |
+| `1002_paged_attention` | **0.44x** | 11.97x |  |
+| `4017_group_quant_int8` | **0.40x** | 1.02x |  |
+| `4005_fused_mxfp4_quant` | **0.11x** | 2.25x |  |
+| `1014_hstu_attention` | **0.09x** | 4.06x | MI 兜底† |
+
 ## 两点观察
 
 - **Correct Rate 60/66 但 Fast1@all 只有 50/66**：差出来的 10 道是「能写对、但整个预算内没跑赢 `torch_eager`」（`1020_mla_decode_rope`、`2012_groupnorm_fwd`、`3004_moe_op_e2e`、`3009_routing`、`4006_gemm_a16w16`、`4007_gemm_a16w16_atomic`…）——这 10 道横跨 quant/GEMM、MoE、decode-attention 与 conv，共同点是 eager 分母本身已经是 ATen/MIOpen 的高度优化实现，生成实现很难超过。

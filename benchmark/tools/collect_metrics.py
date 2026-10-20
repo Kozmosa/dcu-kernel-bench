@@ -171,6 +171,10 @@ def main() -> int:
                     help="把 root 直通脚手架也算作候选（默认不算，因为不是 Agent 产出）")
     ap.add_argument("--k", default="1,5,10", help="Success@K / Fast1@K 的 K 列表")
     ap.add_argument("--note", default="", help="一句话标注这批 run.json 的来源（写进报告开头）")
+    ap.add_argument("--offline-audit", default="",
+                    help="audit_batch.py 产出的 offline_audit.json；给了就追加一节离线终审")
+    ap.add_argument("--audit-cache", default="",
+                    help="audit_batch.py 的单题缓存目录（读 static_audit_passed 判静态判负）")
     args = ap.parse_args()
 
     tasks = load_tasks(args.run_root)
@@ -304,6 +308,69 @@ def main() -> int:
     if gains:
         desc.append(f"- **精修收益有限**：Refine Gain 中位 {statistics.median(gains):.2f}x —— 第一次写对之后，"
                     f"剩下的尝试只能再提升这么多，难点在「第一次对不对」。")
+    # ---- 离线终审小节（可选）----
+    if args.offline_audit and pathlib.Path(args.offline_audit).is_file():
+        audit = json.loads(pathlib.Path(args.offline_audit).read_text(encoding="utf-8"))
+        arows = {r["task"]: r for r in audit.get("rows") or []}
+        cache_dir = pathlib.Path(args.audit_cache) if args.audit_cache else None
+
+        def _cache(t):
+            if cache_dir is None:
+                return {}
+            f = cache_dir / f"{t}.json"
+            return json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+
+        ag = audit.get("aggregates") or {}
+        head = audit.get("headline_impl") or "aiter"
+        static_bad = [t for t in arows if _cache(t).get("static_audit_passed") is False]
+        crashed = [t for t in arows if arows[t].get("failure_reason")]
+        corr_bad = [t for t in arows
+                    if not arows[t]["correctness_passed"]
+                    and t not in static_bad and t not in crashed]
+        passed = [t for t in arows if arows[t]["correctness_passed"]]
+        with_impl = [(t, arows[t][f"{head}_mean_speedup"]) for t in arows
+                     if isinstance(arows[t].get(f"{head}_mean_speedup"), (int, float))]
+        L.append(f"## 离线终审（隐藏 case + 静态审计，分母 = `{head}`）")
+        L.append("")
+        L.append(f"- **{ag.get('audited', len(arows))} 道全审，通过 {len(passed)} 道**")
+        L.append(f"- 未通过 {len(arows) - len(passed)}：静естатиc".replace("静естатиc", "静") )
+        L[-1] = (f"- 未通过 {len(arows) - len(passed)}：静态判负 {len(static_bad)}、"
+                 f"隐藏 case 跑不起来 {len(crashed)}、数值不达标 {len(corr_bad)}")
+        if with_impl:
+            vals = sorted(v for _, v in with_impl)
+            L.append(f"- `{head}` 有测值 {len(vals)} 道：中位 **{statistics.median(vals):.2f}x**、"
+                     f"均值 {statistics.mean(vals):.2f}x、最大 {max(vals):.2f}x；"
+                     f"MI 兜底基线 {ag.get('mi_fallback_count', 0)} 道（分母偏大，加速比偏高，引用须标注）")
+        L.append("")
+        L.append("**为什么不能只看在线**：在线只跑 `get_inputs()` 的单一 shape、不执行禁用列表，")
+        L.append(f"所以在线的 {sum(1 for r in rows if r['correct'])} 道 solved 实现里，有 "
+                 f"{len(static_bad)} 道把核心计算交给了被禁的算子、"
+                 f"{len(crashed)} 道换一批隐藏 shape 就崩、"
+                 f"{len(corr_bad)} 道数值对不上。离线才是判据的硬边。")
+        L.append("")
+        if static_bad:
+            L.append("| 静态判负的题 |")
+            L.append("|---|")
+            for t in sorted(static_bad):
+                L.append(f"| `{t}` |")
+            L.append("")
+        if crashed:
+            L.append("| 隐藏 case 跑不起来的题 | 崩溃摘要 |")
+            L.append("|---|---|")
+            for t in sorted(crashed):
+                tail = " ".join((arows[t].get("failure_tail") or "").split())[-120:].replace("|", "\\|")
+                L.append(f"| `{t}` | `{tail}` |" if tail else f"| `{t}` | {arows[t].get('failure_reason')} |")
+            L.append("")
+        if with_impl:
+            L.append(f"| 题 | vs {head} | vs eager | 备注 |")
+            L.append("|---|---|---|---|")
+            for t, v in sorted(with_impl, key=lambda kv: -kv[1]):
+                note = "MI 兜底†" if arows[t].get("aiter_is_mi_fallback") else ""
+                e = arows[t].get("torch_eager_mean_speedup")
+                L.append(f"| `{t}` | **{v:.2f}x** | {e:.2f}x | {note} |" if isinstance(e, (int, float))
+                         else f"| `{t}` | **{v:.2f}x** | - | {note} |")
+            L.append("")
+
     # 观察（数据驱动）+ 最高加速比成因（人工备注，key 为题名）
     obs = []
     if slow:
