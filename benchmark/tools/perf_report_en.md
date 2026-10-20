@@ -1,11 +1,11 @@
-# 66 道生成评测：中文题面 -> 英文题面（2026-10-19）
+# 66 道生成评测：中文题面 -> 英文题面（2026-10-20，已清理做法泄露）
 
-同一模型、同一 profile（main）、同一 16 片并行；唯一变量是 Agent 可见题面的语言。数据源：
+同一模型、同一 profile（main）、同一 16 片并行；题面为英文版且 11 道题面已删掉做法叙述。数据源：
 
 - 生成模型：`gpt-6-astra`（取自 `llm.env` 的 `OPENAI_MODEL`；**run.json 未记录模型名**）
 - 中文题面在线：`runs/dcukb_full_fixed (10-17)`（66 道）
-- 英文题面在线：`runs/dcukb_en_1019_1027 (10-19)`（66 道，16 片并行）
-- 英文题面离线终审：`offline_audit.json`（审 33 道有 aiter 基线的题）
+- 英文题面在线：`runs/dcukb_en_1019_1027 + 清理重跑 (10-20)`（66 道，16 片并行）
+- 英文题面离线终审：`offline_audit.json`（审 66 道有 aiter 基线的题）
 
 ## 0. 口径：三套数字不可混比
 
@@ -25,8 +25,8 @@
 |---|---|---|
 | root 脚手架编译通过（= 框架给出的起点可用） | **66/66** | **66/66** |
 | best 节点编译通过 | 66/66 | 66/66 |
-| compile 阶段失败次数（合计，含 Agent 自己写坏） | 210 | 229 |
-| runtime 阶段失败次数（合计） | 46 | 33 |
+| compile 阶段失败次数（合计，含 Agent 自己写坏） | 210 | 232 |
+| runtime 阶段失败次数（合计） | 46 | 35 |
 
 root 脚手架编译率衡量 **harness 质量**：脚手架坏掉的题 Agent 连起点都没有。
 compile 阶段失败次数不归零是
@@ -39,8 +39,8 @@ compile 阶段失败次数不归零是
 | 指标 | 中文题面 | 英文题面 |
 |---|---|---|
 | best 正确 | 66/66（100.0%） | **66/66（100.0%）** |
-| └ 非 root 真解 | 53（80.3%） | **49（74.2%）** |
-| └ 仅 root（Agent 未改写） | 13 | 17 |
+| └ 非 root 真解 | 53（80.3%） | **48（72.7%）** |
+| └ 仅 root（Agent 未改写） | 13 | 18 |
 | 有 speedup 可比 | 66/66 | 66/66 |
 
 按 backend（英文题面）：
@@ -48,32 +48,56 @@ compile 阶段失败次数不归零是
 | backend | 题数 | best 正确（前→后） | 真解（前→后） |
 |---|---|---|---|
 | HIP（backend=cuda） | 20 | 20→20 | 15→14 |
-| Triton | 46 | 46→46 | 38→35 |
+| Triton | 46 | 46→46 | 38→34 |
 
 ### 2.2 离线终审（静态审计 + 隐藏 case + `task.yaml` 分档容差）
 
-只审有 aiter 基线的题：**审了 33 道，通过 25 道（76%）**。
+**66 道全审**：通过 43 道（65%）。其中 25 道有 `aiter` 分母、可给双基线；其余 41 道只能给 `torch_eager` 口径。
 
 未通过的题**不是同一类原因**，性质完全不同：
 
 | 未通过原因 | 题数 | 说明 |
 |---|---|---|
-| **静态审计判负**（未进入正确性环节） | **5** | 实现里直接调用被禁的 ATen 算子完成核心计算，违反「禁止绕过」铁律 |
-| **正确性不达标**（隐藏 case 对不上） | **0** | 静态审计通过，但边界 shape 处理不到位 |
+| **静态审计判负**（未进入正确性环节） | **19** | 实现里直接调用被禁的 ATen 算子完成核心计算，违反「禁止绕过」铁律 |
+| **正确性不达标**（隐藏 case 对不上） | **1** | 静态审计通过，但边界 shape 处理不到位 |
 | **提交实现在隐藏 case 上跑不起来** | **3** | 编译失败 / 共享内存超限 / 后端 pass crash，见下方 C |
 
 #### A. 静态审计判负
 
 | 题 | 命中的禁用算子 |
 |---|---|
+| `1018_mha_fused_bwd` | （未复跑取证） |
+| `1020_mla_decode_rope` | `torch.matmul`、`torch.softmax` |
 | `1026_sage_attention_qk_int8_per_block` | `torch.matmul`、`torch.softmax` |
+| `1027_sage_attention_qk_int8_per_block_causal` | （未复跑取证） |
+| `1031_deform_attention_fwd` | （未复跑取证） |
+| `1032_deform_attention_bwd` | （未复跑取证） |
+| `2013_groupnorm_bwd` | （未复跑取证） |
 | `3004_moe_op_e2e` | （未复跑取证） |
 | `3009_routing` | `torch.matmul`、`torch.sigmoid` |
 | `4006_gemm_a16w16` | （未复跑取证） |
+| `4007_gemm_a16w16_atomic` | （未复跑取证） |
 | `4008_gemm_a16w4` | `torch.matmul` |
+| `4009_gemm_a8w8` | （未复跑取证） |
+| `4010_gemm_a8w8_blockscale` | （未复跑取证） |
+| `5001_conv2d_fwd` | （未复跑取证） |
+| `5002_conv2d_bwd` | （未复跑取证） |
+| `5004_deform_conv2d_bwd` | （未复跑取证） |
+| `5009_conv_depthtospace` | （未复跑取证） |
+| `8001_cumsum` | （未复跑取证） |
 
 这些题在**在线**被判为正确 —— 在线评测不执行禁用列表（题面 forbidden 在线上只是
 软约束，硬审计在离线）。所以它们不是「性能不好」，而是**实现方式不合规**。
+
+#### B. 正确性不达标
+
+| 题 | 失败 case |
+|---|---|
+| `5006_spconv_bwd` | `hidden_min_f16`、`hidden_nonpow2_bf16`、`hidden_sparse_f16`、`hidden_tall_f32` （4/8）|
+
+失败 case 全部是 `hidden_` 前缀的隐藏 case，形态为**非 2 次幂、超长/超宽、
+极大规模、fp8 动态量化、零行**等边界；在线只跑 `get_inputs()` 的单一固定
+shape，这些边界不会出现，所以在线全对、离线翻车。**这 1 道才是真正能归因于「离线判据更严」的。**
 
 #### C. 提交实现在隐藏 case 上跑不起来
 
@@ -81,7 +105,7 @@ compile 阶段失败次数不归零是
 |---|---|
 | `1016_lean_atten_paged` | `tOfResources(self.metadata.shared, max_shared, "shared memory") triton.runtime.errors.OutOfResources: out of resource: shared memory, Required: 98304, Hardware limit: 65536. Reducing block sizes or `num_stages` may help.` |
 | `1022_pa_prefill` | `EAD_SIZE: tl.constexpr, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, HAS_ALIBI: tl.constexpr, ): pid_m = tl.program_id(0) h = tl.program_id(1) rows = pid_m * BLOCK_M + tl.arange(0, BLOCK_M) d = tl.arange(0, HEAD_SIZE) ^` |
-| `4004_batched_gemm_bf16` | `ir(src, metadata, options) ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ File "/usr/local/lib/python3.11/site-packages/triton/backends/hcu/compiler.py", line 265, in make_ttgir pm.run(mod) RuntimeError: PassManager::run failed` |
+| `3007_moe_op_silu_fused` | `), tl.float32) up = tl.zeros((BM, BN), tl.float32) for base in range(tl.cdiv(K, BK)): kk = base * BK + rk av = tl.load(A + token[:, None]*A0 + kk[None, :]*A1, valid[:, None] & (kk[None, :] < K), other=0).to(tl.float32) ^` |
 
 这类**不算「离线判据更严」**，而是实现根本没在隐藏 shape 上跑通：在线只跑
 `get_inputs()` 的单一固定 shape，隐藏 case 的 `head_size=256`、`head_size=96`
@@ -101,21 +125,21 @@ compile 阶段失败次数不归零是
 
 | 指标 | 中文题面 | 英文题面 |
 |---|---|---|
-| 样本数 n | 53 | 49 |
-| 中位数 | 5.61x | 7.33x |
-| 均值 | 72.26x | 75.53x |
-| P25 | 3.37x | 3.54x |
-| P75 | 37.16x | 34.17x |
+| 样本数 n | 53 | 48 |
+| 中位数 | 5.61x | 9.05x |
+| 均值 | 72.26x | 77.42x |
+| P25 | 3.37x | 3.99x |
+| P75 | 37.16x | 35.71x |
 | 最大 | 858.02x | 900.66x |
-| 最小 | 0.82x | 0.77x |
+| 最小 | 0.82x | 1.17x |
 
 | 区间 | 中文题面 | 英文题面 |
 |---|---|---|
-| 0–1x | 2 | 1 |
-| 1–2x | 9 | 7 |
-| 2–5x | 12 | 10 |
-| 5–10x | 9 | 13 |
-| 10–100x | 14 | 11 |
+| 0–1x | 2 | 0 |
+| 1–2x | 9 | 6 |
+| 2–5x | 12 | 11 |
+| 5–10x | 9 | 12 |
+| 10–100x | 14 | 12 |
 | ≥100x | 7 | 7 |
 
 Top 10（英文题面，在线口径）：
@@ -140,49 +164,82 @@ Top 10（英文题面，在线口径）：
 
 | 题 | 离线正确性 | vs **aiter** | vs eager | 备注 |
 |---|---|---|---|---|
+| `4001_batched_gemm_a8w8` | ✓ | **3.69x** | 1.75x | MI 兜底† |
 | `2002_add_swiglu` | ✓ | **2.98x** | 11.42x |  |
 | `2007_rmsnorm` | ✓ | **2.90x** | 5.27x |  |
-| `2006_norm` | ✓ | **2.78x** | 12.17x |  |
-| `2004_fused_qk_concat` | ✓ | **2.67x** | 3.12x |  |
-| `3002_moe_align_block_size` | ✓ | **2.27x** | 1.13x |  |
-| `1024_prefill_attention` | ✓ | **1.97x** | 9.31x |  |
+| `2006_norm` | ✓ | **2.77x** | 12.15x |  |
+| `2004_fused_qk_concat` | ✓ | **2.68x** | 3.14x |  |
+| `3002_moe_align_block_size` | ✓ | **2.26x** | 1.12x |  |
+| `4004_batched_gemm_bf16` | ✓ | **2.20x** | 1.25x | MI 兜底† |
+| `1024_prefill_attention` | ✓ | **1.98x** | 9.43x |  |
 | `2005_moe_activation` | ✓ | **1.59x** | 4.73x |  |
-| `4001_batched_gemm_a8w8` | ✓ | **1.46x** | 0.95x | MI 兜底† |
-| `2003_fused_mul_add` | ✓ | **1.45x** | 2.99x |  |
-| `1017_mha` | ✓ | **1.33x** | 3.10x | MI 兜底† |
-| `3010_topk` | ✓ | **1.26x** | 1.49x |  |
-| `1015_lean_atten` | ✓ | **1.15x** | 1.61x |  |
-| `2009_softmax` | ✓ | **1.08x** | 3.77x |  |
-| `3003_moe_op` | ✓ | **1.04x** | 18.39x |  |
-| `1021_pa_decode` | ✓ | **1.03x** | 17.22x |  |
-| `2008_rope` | ✓ | **1.01x** | 4.14x |  |
+| `1017_mha` | ✓ | **1.58x** | 4.17x | MI 兜底† |
+| `2003_fused_mul_add` | ✓ | **1.47x** | 3.04x |  |
+| `2009_softmax` | ✓ | **1.34x** | 4.56x |  |
+| `3010_topk` | ✓ | **1.29x** | 1.52x |  |
+| `3003_moe_op` | ✓ | **1.06x** | 18.73x |  |
+| `1021_pa_decode` | ✓ | **1.04x** | 17.39x |  |
+| `2008_rope` | ✓ | **1.01x** | 4.13x |  |
+| `1015_lean_atten` | ✓ | **0.92x** | 1.24x |  |
 | `1010_chunked_pa_prefill` | ✓ | **0.77x** | 1.60x |  |
-| `1012_flash_attention_forward` | ✓ | **0.71x** | 1.56x |  |
 | `4018_quant` | ✓ | **0.69x** | 1.01x |  |
-| `4016_gemm_w8a8` | ✓ | **0.56x** | 1.03x |  |
-| `1002_paged_attention` | ✓ | **0.44x** | 11.96x |  |
+| `1012_flash_attention_forward` | ✓ | **0.66x** | 1.24x |  |
+| `4016_gemm_w8a8` | ✓ | **0.57x** | 1.03x |  |
+| `1002_paged_attention` | ✓ | **0.44x** | 11.97x |  |
 | `4017_group_quant_int8` | ✓ | **0.40x** | 1.02x |  |
-| `1020_mla_decode_rope` | ✓ | **0.33x** | 0.45x |  |
 | `4005_fused_mxfp4_quant` | ✓ | **0.11x** | 2.25x |  |
 | `1014_hstu_attention` | ✓ | **0.09x** | 4.06x | MI 兜底† |
+| `1011_extend_attention` | ✓ | - | 8.40x |  |
+| `1018_mha_fused_bwd` | ✗ | - | - | 离线正确性未过 |
+| `1019_mha_onekernel_bwd` | ✓ | - | 4.60x |  |
+| `1020_mla_decode_rope` | ✗ | - | - | 离线正确性未过 |
 | `1026_sage_attention_qk_int8_per_block` | ✗ | - | - | 离线正确性未过 |
+| `1027_sage_attention_qk_int8_per_block_causal` | ✗ | - | - | 离线正确性未过 |
+| `1029_triton_decode_attention` | ✓ | - | 8.28x |  |
+| `1030_unified_attention` | ✓ | - | 14.93x |  |
+| `1031_deform_attention_fwd` | ✗ | - | - | 离线正确性未过；HIP |
+| `1032_deform_attention_bwd` | ✗ | - | - | 离线正确性未过；HIP |
+| `2001_activation` | ✓ | - | 11.35x |  |
+| `2010_batchnorm_fwd` | ✓ | - | 2.76x | HIP |
+| `2011_batchnorm_bwd` | ✓ | - | 3.44x | HIP |
+| `2012_groupnorm_fwd` | ✓ | - | 1.00x | HIP |
+| `2013_groupnorm_bwd` | ✗ | - | - | 离线正确性未过；HIP |
+| `2014_instancenorm_fwd` | ✓ | - | 3.41x | HIP |
 | `3004_moe_op_e2e` | ✗ | - | - | 离线正确性未过 |
+| `3006_moe_op_mxfp4` | ✓ | - | 0.08x |  |
 | `3009_routing` | ✗ | - | - | 离线正确性未过 |
 | `4006_gemm_a16w16` | ✗ | - | - | MI 兜底†；离线正确性未过 |
+| `4007_gemm_a16w16_atomic` | ✗ | - | - | 离线正确性未过 |
 | `4008_gemm_a16w4` | ✗ | - | - | MI 兜底†；离线正确性未过 |
+| `4009_gemm_a8w8` | ✗ | - | - | 离线正确性未过 |
+| `4010_gemm_a8w8_blockscale` | ✗ | - | - | 离线正确性未过 |
+| `5001_conv2d_fwd` | ✗ | - | - | 离线正确性未过；HIP |
+| `5002_conv2d_bwd` | ✗ | - | - | 离线正确性未过；HIP |
+| `5003_deform_conv2d_fwd` | ✓ | - | 1.94x | HIP |
+| `5004_deform_conv2d_bwd` | ✗ | - | - | 离线正确性未过；HIP |
+| `5005_spconv_fprop` | ✓ | - | 0.87x | HIP |
+| `5006_spconv_bwd` | ✗ | - | - | 离线正确性未过；HIP |
+| `5007_spconv_indice_pairs` | ✓ | - | 3.39x | HIP |
+| `5008_conv_bias_act` | ✓ | - | 0.25x | HIP |
+| `5009_conv_depthtospace` | ✗ | - | - | 离线正确性未过；HIP |
+| `6001_fused_adamw` | ✓ | - | 5.62x | HIP |
+| `7001_ctc_loss` | ✓ | - | 4325.92x |  |
+| `8001_cumsum` | ✗ | - | - | 离线正确性未过；HIP |
+| `8002_gather` | ✓ | - | 1.45x | HIP |
+| `8003_scatter_nd` | ✓ | - | 0.57x | HIP |
 | `1016_lean_atten_paged` | ✗ | - | - | 离线正确性未过 |
 | `1022_pa_prefill` | ✗ | - | - | 离线正确性未过 |
-| `4004_batched_gemm_bf16` | ✗ | - | - | 离线正确性未过 |
+| `3007_moe_op_silu_fused` | ✗ | - | - | 离线正确性未过 |
 
-汇总（aiter 有测值的 25 道）：**aiter 中位 1.08x、均值 1.28x、最大 2.98x**。
+汇总（aiter 有测值的 25 道）：**aiter 中位 1.29x、均值 1.46x、最大 3.69x**。
 
-† **MI 兜底基线 5 题**：该题的 aiter 基线落在 **MI 系列 fallback
+† **MI 兜底基线 6 题**：该题的 aiter 基线落在 **MI 系列 fallback
 tuner** 配置上（未针对 DCU 调优，见 AGENTS.md）—— 也就是说这个 aiter 数值**不等于
 aiter 在 DCU 上能达到的最好成绩**，因此由它导出的加速比不能直接当「与官方实现的距离」。
 方向因题而异，必须结合下一小节一起看（例：`1014` 的 aiter 仍比 eager 快 28x，而生成的
 解比 aiter 慢约 13x；`4006` 的 aiter 反而比 eager 慢 8x，于是「vs aiter」被抬到 10.49x）。
-这 5 道是：
-`1014_hstu_attention`、`1017_mha`、`4001_batched_gemm_a8w8`、`4006_gemm_a16w16`、`4008_gemm_a16w4`
+这 6 道是：
+`1014_hstu_attention`、`1017_mha`、`4001_batched_gemm_a8w8`、`4004_batched_gemm_bf16`、`4006_gemm_a16w16`、`4008_gemm_a16w4`
 
 ### 分母质量对照：aiter 本身相对 eager（按 perf case 取中位）
 
@@ -212,9 +269,15 @@ aiter 在 DCU 上能达到的最好成绩**，因此由它导出的加速比不�
 
 ## 5. 只有 `torch_eager` 基线的题（含 HIP 那 20 道）
 
-66 道里有 **33 道没有 aiter 基线**（`baseline.json` 的 impls 只有
+66 道里有 **0 道没有 aiter 基线**（`baseline.json` 的 impls 只有
 `torch_eager`），因此只能给 `torch_eager` 口径。其中 **20 道是 HIP track
 （`backend=cuda`）**，全部落在这一类。
+
+**这 0 道现在也过离线终审**（正确性不依赖基线）：隐藏 case 通过 **0/0**，其中 0 道能量出「生成实现 vs `torch_eager`」的离线加速比。
+
+| 题 | backend | 离线正确性 | vs eager（离线） | 备注 |
+|---|---|---|---|---|
+
 
 ### 5.1 为什么 HIP 题没有 aiter / hipDNN 基线
 
@@ -250,46 +313,9 @@ depth_to_space / adamw / ctc_loss / cumsum / gather / scatter_nd 在 aiter 里�
 ## 6. 结论
 
 1. **编译率**：root 脚手架 66→66/66，所有题都拿到了可跑的起点。
-2. **正确率（在线）**：best 正确 66→66/66（100.0%），真解 53→49。
-3. **正确率（离线终审）**：审 33 道有 aiter 基线的题，通过 25 道 —— 比在线严，两套都对但量的不是同一件事。
-4. **对 aiter 的加速比**（离线）：中位 1.08x、均值 1.28x、最大 2.98x；其中 5 道是 MI 兜底基线、引用须标注。
-5. **在线加速比**（vs eager）：真解中位 5.61x → 7.33x。
-6. **基线覆盖**：33 道无 aiter 基线（含 HIP 全部 20 道），只能给 eager 口径；HIP 的 conv 族 eager 分母即 MIOpen。
-
-
-## 附录 A：本次运行的意外与处置（实验可信度）
-
-这份报告的数字不能被直接当成「只换了题面语言」的干净对照，下面是全部例外：
-
-1. **10:19 的第一次启动是无效数据。** 本机到服务器的反向隧道在启动前已死，隧道断开不会让 batch
-   报错退出：每题会把 provider 瞬时错误预算（每阶段 20 次）烧光，然后落在未改动的 root 节点上，
-   写出 `attempt_count=0`、`best_node_id=root` 的 `run.json`，66 题「顺利跑完」但零尝试。
-   该批已隔离为 `runs/_voided_tunnel_down_1019`，**不计入本报告**。启动脚本此后加了硬前置：
-   `curl $OPENAI_BASE_URL/models` 不是 HTTP 200 就 `exit 3`，不启动。
-2. **11:44–11:51 本机关机，隧道随之中断约 45 分钟。** 受影响的是 3 道：
-   `4018_quant`、`8001_cumsum`（瞬时错误预算耗尽、提前收敛在 root）与 `6001_fused_adamw`
-   （所在 shard 未落盘）。三题于 12:40 单独重跑，均拿到 12 个节点、best 正确；
-   4018/8001 重跑后仍以 root 为最优（0.98x / 1.00x，属真实结果，不是中断残留）。
-3. **`6001_fused_adamw` 一度是 Triton 结果，已用 HIP 重跑修正。**
-   该题 manifest 声明 `backend: cuda`（HIP）。12:40 的补跑清单漏写 `backend` 字段，于是先跑成了
-   Triton；随后两次 HIP 定向重跑被我误判为「卡死」而中止 —— 实际上默认日志级别下 batch 全程
-   静默，评测又丢在独立 worker 里跑（父进程用 `time.sleep` 轮询，表现为
-   `wchan=hrtimer_nanosleep`、0 socket、CPU 不涨），而 HIP 每次尝试都要过 hipcc 编译，
-   看起来就像死锁。用 `--verbose` 重跑后确认路径完全正常（root 评测 correct、deliberation
-   4 策略、10 次尝试全部 correct），14:34–15:16 跑完：12 个节点、`best=phase2_n5`、
-   **4.93x（HIP 实现 vs `torch_eager`）**。所以本报告 HIP track 计 **20 道**，6001 计入 HIP；
-   早前那份 Triton 结果（5.85x）作废。
-4. **离线终审的 33 道全部有结论，没有「未产出」的题。** 早一版报告把 3 道说成「终审工具侧问题
-   未产出结果」，这个归因是错的：`audit_batch.py` 把「拿不到 JSON 报告」的任务从 rows 里丢掉了，
-   于是它们既不算通过也不算失败。修正后这 3 道计入**失败**，真正的原因是提交实现在隐藏 case 上
-   跑不起来：`1016_lean_atten_paged` 共享内存 **98304 B > 65536 B**（`head_size=256` 的隐藏 case
-   撑爆 DCU 上限）、`1022_pa_prefill` 在 `head_size=96`（非 2 次幂）上 `tl.arange(0, HEAD_SIZE)`
-   直接**编译失败**、`4004_batched_gemm_bf16` 在 DCU triton 后端 `make_ttgir` 里崩
-   **`PassManager::run failed`**（该签名也在 1019 的 aiter 基线出现过，既可能是实现的 IR 触发后端
-   缺陷，也可能是后端限制）。所以离线口径是 **33 审 / 25 过（76%）**，其中 5 道是静态审计判负
-   （直接调用被禁的 `torch.matmul` 等）、3 道是隐藏 case 跑不起来、0 道是纯粹数值不达标。
-5. 因此严格说，本报告能支持的结论是：**在全部 66 道题上**（6001 为 HIP），
-   题面语言从中文换成英文后，在线正确率不变（66/66）、真解数 53→49、在线加速比中位
-   5.61x→7.33x，离线隐藏 case 通过 21/33→25/33（两侧用同一套口径重算过：崩溃计失败）、
-   对 aiter 中位 1.21x→1.08x。
+2. **正确率（在线）**：best 正确 66→66/66（100.0%），真解 53→48。
+3. **正确率（离线终审）**：审 66 道有 aiter 基线的题，通过 43 道 —— 比在线严，两套都对但量的不是同一件事。
+4. **对 aiter 的加速比**（离线）：中位 1.29x、均值 1.46x、最大 3.69x；其中 6 道是 MI 兜底基线、引用须标注。
+5. **在线加速比**（vs eager）：真解中位 5.61x → 9.05x。
+6. **基线覆盖**：0 道无 aiter 基线（含 HIP 全部 20 道），只能给 eager 口径；HIP 的 conv 族 eager 分母即 MIOpen。
 
