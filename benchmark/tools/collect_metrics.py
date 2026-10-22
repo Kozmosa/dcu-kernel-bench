@@ -25,7 +25,7 @@
   4. 题目目录名形如 `<alias>_l<level>_p<problem_id>`，alias 按 `_l` 切分还原。
 
 用法：
-    python benchmark/tools/collect_metrics.py --run-root .dcu_runs/en66 --out benchmark/tools/metrics_en.md
+    python benchmark/tools/collect_metrics.py --run-root .dcu_runs/en66 --out benchmark/tools/metrics.md
     python benchmark/tools/collect_metrics.py --run-root <root> --csv metrics.csv --include-root
 """
 

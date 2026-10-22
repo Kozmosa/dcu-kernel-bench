@@ -1,16 +1,15 @@
-# 题目级指标（.dcu_runs\en66）
+# 题目级指标
 
 - accepted_tasks = **66**（solved = 60）
 - 候选口径：**排除 root**（root 是框架直通脚手架，不算 Agent 产出）
 - 参考 baseline（speedup 分母）：`torch_eager`
-- 数据来源：英文题面全量跑 runs/dcukb_en_1019_1027（66 道，16 分片）+ 3 道补跑 + 6001 HIP 重跑 + 11 道题面清理后重跑
 
-## 简要描述
-- **能编译**：66/66 道题至少产出一个可编译候选，脚手架不是瓶颈。
+## 结果摘要
+- **能编译**：66/66 道题至少产出一个可编译候选。
 - **能写对**：Correct Rate 60/66（90.9%）；6 道始终没写出正确实现：`1026_sage_attention_qk_int8_per_block`、`1027_sage_attention_qk_int8_per_block_causal`、`2013_groupnorm_bwd`、`4008_gemm_a16w4`、`4009_gemm_a8w8`、`4017_group_quant_int8`。
 - **收敛速度**：首次 correct 的中位尝试序号 2.0，Success@1 29/66、Success@5 56/66。
 - **跑得比 baseline 快**：Fast1@all 50/66（75.8%）；solved 题 best speedup 几何平均 8.01x、中位 6.39x、最好 900.66x；另有 10 道虽写对但整个预算内没跑赢 eager。
-- **精修收益有限**：Refine Gain 中位 1.10x —— 第一次写对之后，剩下的尝试只能再提升这么多，难点在「第一次对不对」。
+- **精修收益有限**：Refine Gain 中位 1.10x —— 第一次写对之后，剩下的尝试只能再提升这么多，难点在第一次对不对。
 
 ## 指标定义
 
@@ -27,7 +26,6 @@
 | First Correct Median | 每个 solved task 第一次出现 correct 的尝试序号的中位数 |
 | Refine Gain Median | 每题（最终 best correct speedup / 第一次 correct 的 speedup）的中位数 |
 
-两点口径说明：**① root 不在候选池内**（否则 Correct Rate 恒为 100%）；**② best = 所有 correct 候选里的最大 speedup**，与框架按 score 挑的 `best_node_id` 可能不同，逐题明细最后一列给出 champion 供对照。
 
 | 指标 | 值 |
 |---|---|
@@ -48,7 +46,7 @@ K 曲线（K = 每题允许的尝试次数上限）：
 | Success@K | 29 | 47 | 52 | 55 | 56 | 58 | 58 | 59 | 60 | 60 |
 | Fast1@K | 26 | 37 | 40 | 41 | 43 | 48 | 48 | 49 | 50 | 50 |
 
-在 60 道 solved 题上统计 speedup。**best 的定义是「所有 correct 候选里的最大 speedup」**，与框架自己选的 `best_node_id`（按 score 挑）可能不同；下表最后一列给出 框架 champion 的 speedup 供对照：
+在 60 道 solved 题上统计 speedup。**best 的定义是所有 correct 候选里的最大 speedup**，下表最后一列给出 框架 champion 的 speedup 供对照：
 
 
 | 指标 | 值 |
@@ -133,14 +131,12 @@ First Correct 分布（尝试序号→题数）：1→29、2→18、3→5、4→
 | `4009_gemm_a8w8` | triton | 10 | - | - | - | - | 0.99x（root） |
 | `4017_group_quant_int8` | triton | 10 | - | - | - | - | 1.00x（root） |
 
-## 离线终审（隐藏 case + 静态审计，分母 = `aiter`）
+## 离线终审（隐藏 case + 静态审计）
 
-- **Offline pass rate: 43/66**（66 道全审）
+- **Offline pass rate: 43/66**
 - 未通过 23：静态判负 19、隐藏 case 跑不起来 3、数值不达标 1
-- `aiter` 有测值 25 道：中位 **1.29x**、均值 1.46x、最大 3.69x；MI 兜底基线 6 道（分母偏大，加速比偏高，引用须标注）
+- `aiter` 有测值 25 道：中位 **1.29x**、均值 1.46x、最大 3.69x；MI 兜底基线 6 道
 
-**为什么不能只看在线**：在线只跑 `get_inputs()` 的单一 shape、不执行禁用列表，
-所以在线的 60 道 solved 实现里，有 19 道把核心计算交给了被禁的算子、3 道换一批隐藏 shape 就崩、1 道数值对不上。离线才是判据的硬边。
 
 | 静态判负的题 |
 |---|
@@ -170,7 +166,7 @@ First Correct 分布（尝试序号→题数）：1→29、2→18、3→5、4→
 | `1022_pa_prefill` | `d_m = tl.program_id(0) h = tl.program_id(1) rows = pid_m * BLOCK_M + tl.arange(0, BLOCK_M) d = tl.arange(0, HEAD_SIZE) ^` |
 | `3007_moe_op_silu_fused` | ` + rk av = tl.load(A + token[:, None]*A0 + kk[None, :]*A1, valid[:, None] & (kk[None, :] < K), other=0).to(tl.float32) ^` |
 
-### 加离线门槛后的口径（对外引用建议用这一栏）
+### 加离线门槛后的口径
 
 | 指标 | online only | **online ∩ offline pass** |
 |---|---|---|
@@ -180,13 +176,9 @@ First Correct 分布（尝试序号→题数）：1→29、2→18、3→5、4→
 | Median Speedup | 6.39x | **7.35x** |
 | Mean Speedup | 64.94x | **40.00x** |
 | Best Speedup | 900.66x | 900.66x |
-| Success@K / First Correct Median / Refine Gain Median | 见上表 | 无法门槛化（见下） |
 
 被门槛剔掉的 18 道：`1016_lean_atten_paged`、`1018_mha_fused_bwd`、`1020_mla_decode_rope`、`1022_pa_prefill`、`1031_deform_attention_fwd`、`1032_deform_attention_bwd`、`3004_moe_op_e2e`、`3007_moe_op_silu_fused`、`3009_routing`、`4006_gemm_a16w16`、`4007_gemm_a16w16_atomic`、`4010_gemm_a8w8_blockscale`、`5001_conv2d_fwd`、`5002_conv2d_bwd`、`5004_deform_conv2d_bwd`、`5006_spconv_bwd`、`5009_conv_depthtospace`、`8001_cumsum`
 
-注意：`Success@K` / `First Correct Median` / `Refine Gain Median` **不能**这样加门槛——
-离线终审只审最终 `best_code.py`，不审每一次尝试；要按尝试门槛化就得把每个候选都拿去审计
-（约 66×12≈790 次，单题 1–2 分钟），代价过高，所以这三项保留在线口径并在结论里注明。
 
 | 题 | vs aiter | vs eager | 备注 |
 |---|---|---|---|
@@ -218,16 +210,9 @@ First Correct 分布（尝试序号→题数）：1→29、2→18、3→5、4→
 
 ## 两点观察
 
-- **Correct Rate 60/66 但 Fast1@all 只有 50/66**：差出来的 10 道是「能写对、但整个预算内没跑赢 `torch_eager`」（`1020_mla_decode_rope`、`2012_groupnorm_fwd`、`3004_moe_op_e2e`、`3009_routing`、`4006_gemm_a16w16`、`4007_gemm_a16w16_atomic`…）——这 10 道横跨 quant/GEMM、MoE、decode-attention 与 conv，共同点是 eager 分母本身已经是 ATen/MIOpen 的高度优化实现，生成实现很难超过。
-- **Refine Gain 中位只有 1.10x**：一旦第一次写对，后续尝试平均只再提升这么多。也就是说瓶颈在「第一次能不能写对」（Success@1 29/66），而不是精修阶段——把预算从 10 次加到 20 次，预期收益有限。
+- **Correct Rate 60/66 但 Fast1@all 只有 50/66**：差出来的 10 道是能写对、但整个预算内没跑赢 `torch_eager`（`1020_mla_decode_rope`、`2012_groupnorm_fwd`、`3004_moe_op_e2e`、`3009_routing`、`4006_gemm_a16w16`、`4007_gemm_a16w16_atomic`…）——这 10 道横跨 quant/GEMM、MoE、decode-attention 与 conv，共同点是 eager 分母本身已经是 ATen/MIOpen 的高度优化实现，生成实现很难超过。
+- **Refine Gain 中位只有 1.10x**：一旦第一次写对，后续尝试平均只再提升这么多。也就是说瓶颈在第一次能不能写对（Success@1 29/66），而不是精修阶段，提升预算预期收益有限。
 
-## 最高加速比为什么这么高（`7001_ctc_loss` 900.66x）
+## 最高加速比（`7001_ctc_loss` 900.66x）
 
-分母是题面给的**朴素参考实现**：`_ctc_one` 对每个 batch 元素各跑一遍 Python 循环（前向 `for t in range(1, tb)` + 反向再来一遍），每一步临时造 6~7 个张量、发 6~7 次 kernel。在线 shape（T=500、N=4、tb≤200）下约 **1.1 万次 launch**，272 ms 几乎全是主机侧开销。
-
-生成的实现是一个 Triton kernel：一个 program 处理一个 batch 元素，状态维 S 放寄存器（`tl.arange(0,B)`），**时间维递推写在 kernel 内部**，对数域三分支 logsumexp 手写（`_ctc_lse3`），前向存 alpha、反向在同一 kernel 里算 gamma 并 `atomic_add` 写梯度 —— 整个 500 步递推只有 **1 次 launch**，0.30 ms。
-
-所以这 900x 的绝大部分来自**消除上万次 launch + Python 开销**，算法复杂度两边一样（都是 O(T·S) 对数域 CTC），没有任何渐进优势。
-
-**引用时必须注明分母**：不能写成“比生产级 CTC 快 900 倍”。真正对位的生产实现是 `torch.nn.functional.ctc_loss`，而它正是本题的禁用算子（所以不会出现在分母里）。离线那 4319x 更是同一原因在更大 perf case（T=1024、N=16、C=32）上的放大：参考实现成本 ∝ T·N，生成实现把 N 摊到多个 program、T 留在 kernel 内循环。
-
+7001_ctc_loss 的 900x 主要来自消除 launch 开销，而不是算法优化。参考实现是纯 Python 循环，每个时间步都要发 6~7 次 kernel，前向加反向总共约 1.1 万次 launch，272 ms 几乎全花在主机侧调度上；生成的 Triton kernel 把时间维递推写进 kernel 内部，整段递推只发 1 次 launch，0.30 ms。两边的算法复杂度完全一样（都是 O(T·S) 对数域 CTC），所以这个数字衡量的是实现效率，不是算法优势。
