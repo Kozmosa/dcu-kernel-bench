@@ -12,6 +12,7 @@
 2. **禁止绕过**：生成实现的核心计算必须在提交文件中完成，禁止调用 MIOpen / rocBLAS / hipBLASLt / hipDNN / ATen 完成核心计算（`static_audit.py` 强制检查）。
 3. **统一接口**：同一入口形态的任务共用同一结构——callable 任务共用 Starter（Agent 只补全 kernel 与 launch）；model_class 任务共用框架生成的 `ModelNew` scaffold（Agent 只在锚点区域内编辑）。
 4. **环境一致**：官方基线与生成实现必须在同一机器、同一 `environment.yaml` 锁定环境下比较。
+5. **题面全英文、且不写做法**：`Model` docstring 是唯一 Agent 可见上下文，必须**零 CJK**（`tests/test_prompt_english.py` 回归）且**不含实现路线**——数学定义/IO 契约/边界/禁用/硬件可以写，`online softmax`、`split-KV`、`two-pass`、"Target implementation shape"、"Reference structure" 这类做法叙述不行（`audit_prompts.py` 的 C 类「散文式题解」规则检查）。理由：语义已由 scaffold 里的参考实现给出，写做法等于给答案、会污染该题分数。
 
 ## 目录结构
 
@@ -22,6 +23,8 @@
 | `benchmark/sources/` | ✅ | 准入审核记录 |
 | `benchmark/evaluator/` | ✅ | 评测管线脚本（static_audit.py / audit_model_class.py / run_eval.py 骨架） |
 | `benchmark/kernelbench_compat/` | ✅ | model_class 形态的框架寻题镜像树（`level{N}/<id>_*.py`，与 tasks 侧 reference.py 逐字节一致，测试强制） |
+| `benchmark/tools/` | ✅ | 工具与报告：`dcukb.py`（收集/准入/镜像）、`audit_prompts.py`（题面审计：后端口径/溯源泄漏/做法暴露）、`collect_metrics.py`（题目级指标：Compile/Correct Rate、Success@K、Fast1@K、Geomean/Median/Mean/Best Speedup、First Correct/Refine Gain Median，可叠加离线门槛）、`metrics.md`（**指标报告，唯一对外口径**）、`make_lean_prompts.py`（题面裁剪变体生成器，供 prompt 长度对照实验） |
+| `tests/test_prompt_english.py` | ✅ | 题面守卫：`Model` docstring 与题目源码零 CJK（含注释/assert 消息），`task.yaml` 与 case JSON 不在此列（不进 Agent 上下文） |
 | `third_party/` | submodule | 外部仓库（aiter 等）以 git submodule 注册，**不 vendor 源码**；勿 `git add -f` 子仓内容 |
 | `operator_catalog.yaml` | ✅ | 全量算子登记与准入状态 |
 | `environment.yaml` | ✅ | 硬件/软件版本锁定 |
@@ -59,11 +62,24 @@
 
 真机（BW / gfx936，DTK 26.04）已验证（2026-10-01）：测试 26/26 绿；原生路径 quick 冒烟全部节点 correct（mock provider + 真评测器 + cuda_event 计时）；**Triton 3.3.0+das.opt1.dtk2604.torch290 已安装并验证 JIT**（vecadd + tl.dot fp16 矩阵乘）；**首个真 LLM 端到端完成**（GLM-5.3-flash 经 CC Switch 反向隧道，1002 任务 speedup 17.35x，含 debug 修复环路），访问与部署细节见 `../notes/曙光环境访问.md`。
 
+## 全量评测结果（2026-10-20，英文题面）
+
+一轮完整评测的现状，**对外引用一律以此为准**（报告：`benchmark/tools/metrics.md`，由 `collect_metrics.py` 生成）：
+
+- **配置**：66 道 model_class、16 分片、`main` profile、模型 `gpt-6-astra`（hejuapi，经反向隧道）。**每配置只跑了一次**，逐题数字含采样噪声，聚合指标才可比。
+- **题面**：全英文；11 道（`1012`/`1015`/`1017`/`1020`/`1021`/`1026`/`1027`/`1029`/`2009`/`4001`/`4004`）额外删掉了做法/题解段落（见铁律 5）。删完后这些题**没有掉分**（`1021` 7.49x→9.17x、`1012` 9.01x→19.93x、`4001` 2.40x→4.03x）。
+- **在线**（KernelBench 语义，分母 `torch_eager`，排除 root 候选）：Compile Rate 66/66、Correct Rate 60/66、Success@1 29/66、Success@5 56/66、Fast1@all 50/66、Geomean 8.01x、Median 6.39x、Mean 64.94x、Best 900.66x、First Correct Median 2.0、Refine Gain Median 1.10x。
+- **离线终审（66 道全审）**：**Offline pass rate 43/66**；未过 23 = 静态判负 19（实现直接调 `torch.matmul`/`torch.softmax`/`torch.mm`/`F.linear`/`conv2d`/`autograd`/`cumsum` 等）+ 隐藏 case 跑不起来 3（`1016` 共享内存 96KB>64KB、`1022` `head_size=96` 非 2 次幂、`3007` 编译失败）+ 数值不达标 1（`5006` 8 例错 4）。`aiter` 有测值 25 道，中位 1.29x。
+- **加离线门槛**（在线 ∩ 离线通过）：Correct Rate 42/66、Geomean 8.79x、Median 7.35x、Mean 40.00x、Best 900.66x。**对外引用建议用这一栏**；`Success@K`/`First Correct`/`Refine Gain` 无法门槛化（终审只审最终 `best_code.py`）。
+- **统计口径修复（重要）**：`audit_batch.py` 原先只审有 `aiter` 基线的 33 道、且把崩溃任务从汇总里丢掉，导致「30 审 / 25 过」这种失真口径。现在：① 默认**全审 66 道**（正确性不依赖基线）；② 崩溃计入失败（`aggregates.crashed`）；③ 报告里崩溃/静态判负/数值不达标分三类列名。
+- **数据位置**：在线 `runs/dcukb_en_1019_1027`（+ 3 道补跑 + `6001` 的 HIP 重跑 + 11 道清理后重跑）→ `.dcu_runs/en66`；离线 → `.dcu_runs/offline_audit_clean`。
+- **已知缺口**：12 道 aiter 源题无 `aiter` 分母（见「基线覆盖现状」）；离线 3 道崩溃属实现侧；无重复运行，逐题 delta 不可单独归因。
+
 ## 本分支相对上游 main 的增量（`main-merge`）
 
 基座 = `origin/main` @ `5d940d8`（**68 道题 = 66 道 model_class + 2 道 callable**，号段 `0/1/2/3/4/5/6/7/8`xxx）。本分支在其上**以加工具、测试、适配器与基线资产为主**。基座曾对齐两次：`bd991d0`（上游自行修掉 `1017`/`1019` 的多值输出）与 `5d940d8`（上游新准入 21 道 hipDNN 样例题）。
 
-> **分叉面（不夸大）**：**算子数学语义与上游一致**，但**不是零改动**。对上游文件的改动只有：① `2001_activation/reference.py` 1 行 device bugfix（`torch.zeros` 缺 `device=`，在 DCU 上 device mismatch）；② `4017`/`4018`/`4005` 加分段容差（`reference.output_segments()` + `task.yaml` 的 `tolerance_segments`）；③ `3004_moe_op_e2e/task.yaml` 加 `max_mismatch_frac: 5.0e-3`；④ `audit_model_class.py` 换成功能超集。②③ 改的是**判据**不是数学，但也属于题目定义的一部分。
+> **分叉面（不夸大）**：**算子数学语义与上游一致**，但**不是零改动**。对上游文件的改动只有：① 三处 device bugfix：`2001_activation`（`torch.zeros` 缺 `device=`）、`5003_deform_conv2d_fwd`、`7001_ctc_loss`（`Model.forward` 里补 `dev = xf.device` / `dev = logp_b.device`，否则中间张量落在 CPU，DCU 上 device mismatch）；② `4017`/`4018`/`4005` 加分段容差（`reference.output_segments()` + `task.yaml` 的 `tolerance_segments`）；③ `3004_moe_op_e2e/task.yaml` 加 `max_mismatch_frac: 5.0e-3`；④ `audit_model_class.py` 换成功能超集。②③ 改的是**判据**不是数学，但也属于题目定义的一部分。
 
 | 增量 | 作用 |
 |---|---|
@@ -76,9 +92,10 @@
 | `benchmark/private/<id>/baseline.json`（**45 道已实测 / 66 道 model_class**） | DCU 真机（BW / gfx936，DTK 26.04）采集的性能基线：旧 45 道**全部至少一种基线**（27 道 `aiter`+`torch_eager` 双基线、18 道仅 `torch_eager`）；新增 21 道仍是 **placeholder**。`record_baseline.py --impl {aiter,eager}` 按 impl **合并**写入（不覆盖另一种），`stage_perf` 带回 `impl`/`baseline_us`/`speedup`——**报加速比必须说明分母是哪个 impl**（例：`1017_mha` aiter 57 ms vs `torch_eager` 180 ms，相差 3.2x） |
 | `audit_model_class.py` 的**分段容差** | `task.yaml` 的 `tolerance_segments` + `reference.output_segments()`，解"同一张量里不同段量级差几个数量级、单一 atol/rtol 表达不了"（样板 `4017`/`4018`/`4005`）；`max_mismatch_frac` 在分段与全局两条路径都生效，缺省 0 即等价于原 `allclose` |
 
+- **基线覆盖现状（2026-10-20 全量终审口径）**：33 道有 `aiter` 基线、其中 **25 道能测出数值**；其余 33 道只有 `torch_eager`。无 `aiter` 分母的 33 道分三类：**20 道 hipDNN 样例题**（hipDNN 在 DTK 26.04 上出不了基线，aiter 也无对位算子）、**12 道 aiter 源 Triton 题**（11 道有 `aiter_impl.py` 但采集时跑不通：`4007` 缺 `BW200-GEMM-A16W16-ATOMIC.json` tuner 配置、`1019` 是 shared memory 81920 > 65536 的硬件限制、其余是 autotune 配置/arch 分支问题）、**1 道 `7001_ctc_loss`**（hipDNN 源、aiter 无对位）。**补基线的方向**：造 `4007` 的 tuner JSON、修那 10 道的 autotune 配置。
 - `record_baseline.py` 的适配器契约是 `run(inputs, init_kwargs: dict, device)`（按名取参）。**上游一个 `aiter_impl.py` 都没有、全部 `baseline.json` 都是 placeholder**，本分支补齐 44 个适配器，并在真机采到旧 45 道题的实测基线（新增 21 道待采）。两个已知天花板：`1019_mha_onekernel_bwd` 的 aiter 基线**不可得**（DTK 版 aiter 的 onekernel bwd 报 `PassManager::run failed`，shared memory 81920 > 65536 超出 DCU 上限，非配置问题）；`1014/1017/4001/4004/4006` 全部 + `4008` 部分 case 的 aiter 基线落在 **MI 系列 fallback tuner 配置**上（未针对 DCU 调优 → 性能次优 → **这些题的 speedup 会偏高**，引用时须标注）。
 - 本地跑全部测试（本机无 pytest，驱动自带垫片）：
-  `PYTHONPATH=../PyramidKernel <venv-python> .dcu_runs/run_all_tests.py` → **297 项断言全绿**（对齐 `5d940d8` 后从 213 增长，上游新增 `test_hipdnn_batch.py` 84 项）。
+  `PYTHONPATH=../PyramidKernel <python> .dcu_runs/run_all_tests.py` → 本机可跑的 5 个套件 **100 项断言全绿**（`compat_mirrors` 3 + `prompt_english` 3 + `static_audit` 5 + `case_files` 5 + `hipdnn_batch` 84；后两者需要 `pyyaml`，Windows 侧缺它时改在 WSL 的 `python3` 下跑）。**需 torch 的套件**（`test_reference_case_contract` / `test_1002_model_class` / `test_reference_*`）只能在装了 DTK torch 的真机上跑。
 
 ### 迁移时发现的上游缺陷（3 类，均已消解）
 
@@ -94,6 +111,6 @@
 ## 环境注意
 
 - 真机评测依赖 DTK ≥ 25.04（Triton track 的硬要求）、hipcc、DTK 版 PyTorch。
-- 开发 venv 在 WSL 侧 `~/.venvs/dcu-kernel-bench`（Python 3.13，torch CPU + pytest + pyramidkernel editable + kernelbench 依赖）。**不要把 venv 放回 `/mnt/e`**：NTFS 挂载上的 `.venv` 已两次被清空 `bin/` 与 `site-packages/`（原因未查明）。跑测试：`wsl -e bash -lc "cd /mnt/e/Code/agent-kernel-dcu/dcu-kernel-bench && $HOME/.venvs/dcu-kernel-bench/bin/python -m pytest -q"`。
+- 开发 venv 曾放在 WSL 侧 `~/.venvs/dcu-kernel-bench`（torch CPU + pytest），**现已不存在**（目录被清空），当前实际做法：Windows 用 `C:\Python314\python.exe`（有 numpy、无 torch、无 pyyaml），WSL 用系统 `python3`（有 pyyaml、无 torch）。要跑需 torch 的套件，只能上真机。**不要把 venv 放回 `/mnt/e`**：NTFS 挂载上的 `.venv` 已两次被清空 `bin/` 与 `site-packages/`（原因未查明）。
 - `third_party/aiter` 是独立 git 仓库。Windows 下它有两个文件名带冒号、无法 checkout 的 Triton autotune JSON，已用 sparse-checkout 排除并设 `core.protectNTFS=false`——**不要在该仓库内执行 `git reset --hard`**。
 - 网络：GitHub 直连不通，境外资源走代理 127.0.0.1:16888 或 ghfast.top 镜像；developer.sourcefind.cn / download.sourcefind.cn 直连。
