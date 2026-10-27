@@ -1,0 +1,68 @@
+From ea649d68082d30546fe6ed5b1ec39075c7ee9638 Mon Sep 17 00:00:00 2001
+From: agent <agent@local>
+Date: Fri, 16 Oct 2026 15:42:25 +0800
+Subject: [PATCH 1/6] =?UTF-8?q?fix(cuda):=20=E5=8E=BB=E6=8E=89=20DCU/dcc?=
+ =?UTF-8?q?=20=E4=B8=8D=E8=AE=A4=E7=9A=84=20--use=5Ffast=5Fmath=EF=BC=8C?=
+ =?UTF-8?q?=E6=94=B9=E4=B8=BA=E6=8C=89=E5=B9=B3=E5=8F=B0=E6=9D=A1=E4=BB=B6?=
+ =?UTF-8?q?=E5=8C=96?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+后端 backend=cuda 生成的脚手架里，_pyramidkernel_get_extension() 硬编码了
+extra_cuda_cflags=['-O3', '--use_fast_math']。--use_fast_math 是 nvcc 专有开关，
+海光 DCU 的 dcc 直接拒绝：
+
+    dcc: error: unsupported option '--use_fast_math'
+    [1/3] /opt/dtk/bin/hipcc ... cuda.hip -o cuda.cuda.o
+    FAILED: cuda.cuda.o
+
+该段 helper 在锚点区之外（Agent 改不到），所以会让 backend=cuda 的所有题在
+「实现完 kernel、第一次调用扩展」时必然编译失败——实测在 8001_cumsum 的 HIP
+端到端冒烟里复现。
+
+改为：
+
+    extra_cuda_cflags=['-O3'] + ([] if getattr(torch.version, 'hip', None)
+                                 else ['--use_fast_math'])
+
+即 ROCm/HIP 下不加该 flag（dcc 不认，且 fast-math 会放松 IEEE 语义，对以容差判定
+正确性的 benchmark 有风险——部分题 atol=rtol=0 或要求严格 fp32 累加），CUDA 下
+行为完全不变。
+
+为此在 _ensure_cuda_imports 的 required 里补上 "import torch"，保证脚手架里
+torch 一定可用（原先只保证 hashlib 与 load_inline）。
+
+验证：用 KernelBenchLoader 以 backend=cuda 生成 8001_cumsum / 5001_conv2d_fwd 的
+脚手架——无无条件 --use_fast_math、锚点 user_helpers/cuda_cpp/cuda_cu/init_body/
+forward_stmt_1 齐全、不含 triton、py_compile 通过。
+---
+ pyramidkernel/core/loader.py | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/pyramidkernel/core/loader.py b/pyramidkernel/core/loader.py
+index 3baddff..087d3fe 100644
+--- a/pyramidkernel/core/loader.py
++++ b/pyramidkernel/core/loader.py
+@@ -265,7 +265,11 @@ class KernelBenchLoader:
+             "            cuda_sources=_pyramidkernel_strip_anchor_markers(CUDA_CU_SRC),",
+             "            functions=None,",
+             "            extra_cflags=['-O3'],",
+-            "            extra_cuda_cflags=['-O3', '--use_fast_math'],",
++            # DCU（ROCm/HIP）的 dcc 不认 nvcc 专有的 --use_fast_math，会直接编译失败：
++            #   dcc: error: unsupported option '--use_fast_math'
++            # 且 fast-math 会放松 IEEE 语义，对以容差判定正确性的 benchmark 有风险
++            # （部分题 atol=rtol=0 或要求严格 fp32 累加），所以 ROCm 下不加该 flag。
++            "            extra_cuda_cflags=['-O3'] + ([] if getattr(torch.version, 'hip', None) else ['--use_fast_math']),",
+             "            with_cuda=True,",
+             "            verbose=False,",
+             "        )",
+@@ -363,7 +367,7 @@ class KernelBenchLoader:
+     @staticmethod
+     def _ensure_cuda_imports(imports: str) -> str:
+         lines = [line for line in imports.splitlines() if line.strip()]
+-        required = ["import hashlib", "from torch.utils.cpp_extension import load_inline"]
++        required = ["import hashlib", "import torch", "from torch.utils.cpp_extension import load_inline"]
+         existing = {line.strip() for line in lines}
+         for line in required:
+             if line not in existing:
