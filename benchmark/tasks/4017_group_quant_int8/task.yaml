@@ -40,18 +40,29 @@ shape:
 tolerance:
   float32:  {atol: 1.0e-6, rtol: 1.0e-6}
   compare: >
-    输出为单个一维 float32 张量（码字段 + scale 段两段打包）：码字段是
-    [-127,127] 内整数，任何偏差 >= 1，远超容差，等效精确匹配；scale 段与
-    reference 同为确定性 fp32 算术。
+    输出为单个一维 float32 张量（码字段 + scale 段两段打包），**两段各用各的容差**
+    （见下方 tolerance_segments）：码字段允许 ±1 个码字、但失配元素比例必须 <= 1%；
+    scale 段仍为 1e-6。
   note: >
     本题输出 dtype 为 float32（无 fp16/bf16 浮点输出，不适用 2.0e-2 档）。
-    容差收紧为 1e-6 的依据：reference 与合规候选的中间算术同为 fp32（absmax
-    精确、scale 为单次 fp32 除法），码字段整数偏差 >= 1 必为语义错误；
-    scale 段 1e-6 覆盖倒数乘法等 1-2 ulp 算术变体。官方测试对码字用
-    atol=1、scale 用 1e-3，那是 fp16-native 参考与 kernel 之间的偏差预算，
-    本评测集参考即 fp32 确定性算术，按验收规范收紧。在线（搜索循环内）由
-    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为
-    fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+    scale 段收紧为 1e-6：reference 与合规候选的中间算术同为 fp32（absmax 精确、
+    scale 为单次 fp32 除法），1e-6 覆盖倒数乘法等 1-2 ulp 算术变体。
+    **码字段允许 ±1（2026-10 修正，实测证据）**：原先要求"任何偏差 >= 1 即语义错误"
+    的前提不成立——组内 absmax 元素本应量化为 ±127，但 absmax/(absmax/127) 在 fp32
+    下不严格等于 127，向零截断后会落到 ±126。aiter 官方 Triton kernel 与
+    PyTorch reference 在此处因除法舍入不同而相差 1 个码字，实测失配占
+    (4096x7168 gs128) 0.068% / (8192x4096 bf16) 0.067%，且差值恒为 1（无 >= 2 者）。
+    若坚持 1e-6，一个写法正确的 Triton 实现同样会失败（它与 Triton 的除法一致、
+    而非与 PyTorch 的除法一致），本题将不可解。故把码字段放宽到 ±1，**且不设失配
+    预算（max_mismatch_frac 缺省 0）**：实测差值恒为 1、无一元素超过 1，无需额外
+    放宽；任何偏差 >= 2 仍直接判失败。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与模型
+    统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 输出两段的边界由 reference.output_segments() 给出（码字段在前、scale 段在后）
+tolerance_segments:
+  - {name: codes,  atol: 1.0,     rtol: 1.0e-6}
+  - {name: scales, atol: 1.0e-6,  rtol: 1.0e-6}
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）；标准列表中 attention /
 # GEMM / softmax 类捷径与本纯量化算子无关，按题裁剪，保留 aiter 并加量化 ATen 捷径

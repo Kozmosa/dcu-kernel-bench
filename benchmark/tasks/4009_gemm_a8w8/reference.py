@@ -1,56 +1,66 @@
-# 4009_gemm_a8w8 — 2D 8bit 量化 GEMM（int8 / fp8 激活 × 权重，per-token ×
-# per-channel 标量 scale 反量化，可选 bias）的 model_class（KernelBench 兼容）
-# 题目文件。
+# 4009_gemm_a8w8 -- model_class (KernelBench compatible) task file for the 2D
+# 8-bit quantized GEMM (int8 / fp8 activation x weight, per-token x per-channel
+# scalar-scale dequantization, optional bias).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=4009, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=4009, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """8bit 量化 GEMM：int8 / fp8 激活 × 同 dtype 权重，外乘 scale 反量化。
+    """8-bit quantized GEMM: int8 / fp8 activations x same-dtype weights, with an
+    outer-product scale applied for dequantization.
 
-    数学定义：给定量化激活 x (M, K)、量化权重 w (N, K)（行主存放，输出通道
-    为行，等价转置 GEMM）、per-token scale x_scale (M, 1) float32、
-    per-channel scale w_scale (1, N) float32、可选 bias (1, N) float32：
-      acc[m, n] = sum_k x[m, k] * w[n, k]                （float32 累加）
-      out[m, n] = acc[m, n] * x_scale[m, 0] * w_scale[0, n]（外乘反量化）
-      out[m, n] = out[m, n] + bias[0, n]                 （use_bias=True 时，
-                                                    反量化结果在 float32 域相加）
-    最后 cast 到 out_dtype 输出。数值由量化码字与 scale 共同决定：
-    反量化元素 = 码字 × (x_scale 与 w_scale 外积) 对应位置乘积。
+    Mathematical definition: given the quantized activation x (M, K), the quantized
+    weight w (N, K) (row-major with output channels as rows, i.e. transposed-GEMM
+    semantics), the per-token scale x_scale (M, 1) float32, the per-channel scale
+    w_scale (1, N) float32, and an optional bias (1, N) float32:
+      acc[m, n] = sum_k x[m, k] * w[n, k]                (float32 accumulation)
+      out[m, n] = acc[m, n] * x_scale[m, 0] * w_scale[0, n]  (outer-product dequantization)
+      out[m, n] = out[m, n] + bias[0, n]                 (when use_bias=True, the
+                                                     dequantized result is added in float32)
+    Finally the result is cast to out_dtype. The numeric value is determined jointly
+    by the quantization code words and the scales: a dequantized element equals the
+    code word times the corresponding position of the outer product of x_scale and
+    w_scale.
 
-    输入输出规格：
-      x        in_dtype   (M, K)  行主激活码字；in_dtype ∈ {int8, fp8e4m3,
-                          fp8e5m2}（e4m3 = 4bit 指数 3bit 尾数，e5m2 = 5bit
-                          指数 2bit 尾数），由 __init__ 的 in_dtype 指定
-      w        in_dtype   (N, K)  行主权重码字（输出通道为行）
+    Input/output specification:
+      x        in_dtype   (M, K)  row-major activation code words; in_dtype in
+                          {int8, fp8e4m3, fp8e5m2} (e4m3 = 4-bit exponent, 3-bit
+                          mantissa; e5m2 = 5-bit exponent, 2-bit mantissa), set by
+                          __init__'s in_dtype
+      w        in_dtype   (N, K)  row-major weight code words (output channels as rows)
       x_scale  float32    (M, 1)  per-token scale
       w_scale  float32    (1, N)  per-channel scale
-      bias     float32    (1, N)  use_bias=False 时为占位张量，被忽略
-      out      out_dtype  (M, N)  out_dtype ∈ {bfloat16, float16}；M/N/K >= 1，
-                          允许非 2 次幂与 K 不整除 tile（尾部由掩码补零）
+      bias     float32    (1, N)  a placeholder tensor when use_bias=False, ignored
+      out      out_dtype  (M, N)  out_dtype in {bfloat16, float16}; M/N/K >= 1,
+                          non-powers-of-two allowed and K may not divide the tile
+                          (the tail is zero-padded by masking)
 
-    实现约束（违规判负）：
-      - 核心计算（8bit GEMM 累加与反量化）必须在提交文件内完成，禁止调用
-        torch.matmul / torch.bmm / torch.mm / torch.addmm / torch.einsum /
-        torch._int_mm / torch._scaled_mm / F.linear / functional.linear。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间累加用 float32；反量化与加 bias 在 float32 域完成后 cast 到
-        out_dtype。
-      - 评测器会把全部输入 cast 成 fp32 后传入 forward：int8 / fp8 码字与
-        scale 均可被 fp32 精确表示，入口处 .to(in_dtype) 无损恢复量化码字。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (the 8-bit GEMM accumulation and the dequantization)
+        must be completed inside the submitted file; calling torch.matmul /
+        torch.bmm / torch.mm / torch.addmm / torch.einsum / torch._int_mm /
+        torch._scaled_mm / F.linear / functional.linear is forbidden.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Accumulate intermediates in float32; dequantization and the bias add are
+        completed in the float32 domain before casting to out_dtype.
+      - The evaluator casts all inputs to fp32 before calling forward: int8 / fp8
+        code words and the scales are all exactly representable in fp32, so
+        .to(in_dtype) at the entry point recovers the quantization code words
+        losslessly.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：2D GEMM（无 batch 维）、x 行主 (M,K) / w 行主 (N,K)、标量
-    （per-token × per-channel）scale；不含 128×128 分块 scale、batch 维与
-    输出缓冲预分配变体。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: 2D GEMM (no batch dimension), x row-major (M,K) / w row-major
+    (N,K), scalar (per-token x per-channel) scales; excluding 128x128 blocked
+    scales, a batch dimension, and output-buffer preallocation variants.
     """
 
     def __init__(self, in_dtype="fp8e4m3", out_dtype="bfloat16", use_bias=True):
@@ -64,8 +74,8 @@ class Model(nn.Module):
         self.use_bias = bool(use_bias)
 
     def forward(self, x, w, x_scale, w_scale, bias):
-        # 评测器把全部输入 cast 成 fp32；量化码字无损恢复回 in_dtype，
-        # scale 恢复回 float32
+        # The evaluator casts every input to fp32; the quantization code words are
+        # recovered losslessly back to in_dtype and the scales back to float32.
         x = x.to(self.in_dtype)
         w = w.to(self.in_dtype)
         x_scale = x_scale.to(torch.float32)
@@ -73,12 +83,14 @@ class Model(nn.Module):
 
         M, K = x.shape
         N = w.shape[0]
-        assert K == w.shape[1], "x 与 w 的 K 维必须一致"
+        assert K == w.shape[1], "x and w must agree on the K dimension"
 
-        # 码字提升 float32 后做 GEMM（x @ w^T），累加全程 float32
+        # Promote the code words to float32 and run the GEMM (x @ w^T); the whole
+        # accumulation is float32
         acc = torch.matmul(x.to(torch.float32), w.to(torch.float32).t())
 
-        # (M,1) x (1,N) 外积为 (M,N) 反量化矩阵后相乘
+        # The (M,1) x (1,N) outer product forms the (M,N) dequantization matrix,
+        # which is then multiplied in.
         out = acc * torch.matmul(x_scale, w_scale)
 
         if self.use_bias:
@@ -87,13 +99,14 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    return ["fp8e4m3", "bfloat16", True]   # in_dtype；out_dtype；use_bias
+    return ["fp8e4m3", "bfloat16", True]   # in_dtype; out_dtype; use_bias
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性。量化方式与 make_inputs
-    # 一致：行 absmax 对齐码字值域上限后 cast。
+    # Fixed shape family; the random part consumes the global RNG -- the evaluator
+    # calls this function after set_seed, so multiple correctness trials therefore
+    # see diverse inputs. The quantization scheme matches make_inputs: scale each
+    # row by its absmax onto the code-word range limit, then cast.
     m, n, k = 256, 512, 1024
     qmax = torch.finfo(torch.float8_e4m3fn).max
 
@@ -110,11 +123,17 @@ def get_inputs():
 def make_inputs(m: int, n: int, k: int, in_dtype: str = "fp8e4m3",
                 out_dtype: str = "bfloat16", use_bias: bool = True,
                 seed: int = 0):
-    """按公开/隐藏/性能案例描述生成输入。仅在评测端运行（CPU 生成，评测器
-    搬运到设备）。量化路径与官方测试生成器一致：行 absmax 缩放到码字值域
-    上限后 cast 到 in_dtype。消费顺序固定：x → w → bias，全部来自同一
-    torch.Generator(seed)，同 seed 下逐位可复现。use_bias 只控制 Model 的
-    bias 生效开关，bias 张量始终生成（use_bias=False 时被 forward 忽略）。
+    """Generate inputs from a public/hidden/performance case description.
+
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    The quantization path matches the official test generator: scale each row by
+    its absmax onto the code-word range limit and then cast to in_dtype. The
+    consumption order is fixed: x -> w -> bias, all from the same
+    torch.Generator(seed), so the same seed reproduces inputs bit-for-bit.
+    use_bias only controls whether the Model's bias takes effect; the bias tensor
+    is always generated (and ignored by forward when use_bias=False).
     """
     gen = torch.Generator().manual_seed(seed)
     quant = {"fp8e4m3": torch.float8_e4m3fn, "fp8e5m2": torch.float8_e5m2,

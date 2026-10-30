@@ -1,16 +1,20 @@
-"""0001_vecadd — 独立 PyTorch 参考实现（语义唯一依据）。
+"""0001_vecadd -- standalone PyTorch reference implementation (the sole
+semantic authority).
 
-评测器以本文件生成的输出为 expected。
+The evaluator uses the output produced by this file as `expected`.
 """
 
 
 def reference(a, b):
-    """out = a + b，逐元素加法。"""
+    """out = a + b, an element-wise addition."""
     return a + b
 
 
 def make_inputs(n: int, dtype: str = "float32", seed: int = 0):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行。"""
+    """Generate inputs from a public/hidden case description.
+
+    Runs on the evaluation side only.
+    """
     import torch
 
     gen = torch.Generator().manual_seed(seed)

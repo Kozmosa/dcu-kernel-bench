@@ -1,67 +1,85 @@
-# 3002_moe_align_block_size — MoE grouped GEMM 调度前置（token 按 expert
-# 分桶 + block_size 对齐排布）的 model_class（KernelBench 兼容）题目文件。
+# 3002_moe_align_block_size -- the scheduling prologue of MoE grouped GEMM
+# (tokens bucketized per expert and laid out aligned to block_size), as a
+# model_class (KernelBench-compatible) task file.
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=3002, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=3002, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """MoE grouped GEMM 的调度前置：token 按 expert 分桶并按 block_size 对齐排布。
+    """Scheduling prologue of MoE grouped GEMM: tokens bucketized per expert and
+    laid out aligned to block_size.
 
-    输入 topk_ids（[num_tokens, top_k]，元素为专家编号 ∈ [0, num_experts)，
-    行内允许重复）是路由器为每个 token 选出的专家。记展平下标
-    i = t * top_k + j（t 为 token 行号、j 为列号），N = num_tokens * top_k，
-    E = num_experts，B = block_size。对每个专家 e：
-        T_e = { i : topk_ids 展平后第 i 个元素 == e }（按 i 升序）
-        n_blocks_e = ceil(|T_e| / B)        # e 占用的对齐块数
-        padded_e   = n_blocks_e * B         # e 对齐后的槽位数
-    产出 grouped GEMM 调度三件套：
-        sorted_token_ids  长度 L1 = N + E*(B-1)：按 e = 0..E-1 依次存放 T_e
-          的全部下标（升序），随后 padded_e - |T_e| 个填充哨兵 N；缓冲区末尾
-          [S, L1) 也为哨兵 N，其中 S = sum_e padded_e
-        expert_ids        长度 L2 = ceil(L1/B)：按 e = 0..E-1 依次写 n_blocks_e
-          个 e（共占前 S/B 个位置），尾部 [S/B, L2) 填 -1 哨兵
-        num_tokens_post_pad  标量 S（填充后总槽位数，恒为 B 的倍数）
-    grouped GEMM 以 sorted_token_ids 中每 B 个连续槽位为一个 M-tile、以
-    expert_ids 为该 tile 的专家编号取权重、跳过值为哨兵 N 的填充槽位，
-    num_tokens_post_pad 给出有效总长度。本题为该调度前置本身，不含 GEMM。
-    边界行为：|T_e| = 0 的专家占 0 块、不产生任何 sorted 条目与 expert 条目；
-    |T_e| 恰为 B 的倍数时不产生填充；同一行允许重复选中同一专家（展平下标
-    不同即不同条目）；专家内条目次序按展平下标 i 升序。
+    The input topk_ids ([num_tokens, top_k], elements are expert ids in
+    [0, num_experts), duplicates allowed within a row) holds the experts the
+    router selected for each token. Write the flattened index
+    i = t * top_k + j (t is the token row, j the column), N = num_tokens * top_k,
+    E = num_experts, B = block_size. For every expert e:
+        T_e = { i : the i-th element of flattened topk_ids == e } (ascending i)
+        n_blocks_e = ceil(|T_e| / B)        # aligned blocks occupied by e
+        padded_e   = n_blocks_e * B         # aligned slot count of e
+    Produce the three scheduling tensors of grouped GEMM:
+        sorted_token_ids  length L1 = N + E*(B-1): for e = 0..E-1 in order, all
+          indices of T_e (ascending), then padded_e - |T_e| fill sentinels N;
+          the buffer tail [S, L1) is also sentinel N, where S = sum_e padded_e
+        expert_ids        length L2 = ceil(L1/B): for e = 0..E-1 in order,
+          n_blocks_e copies of e (together the first S/B positions), the tail
+          [S/B, L2) filled with the -1 sentinel
+        num_tokens_post_pad  scalar S (total padded slot count, always a
+          multiple of B)
+    grouped GEMM takes every B consecutive slots of sorted_token_ids as one
+    M-tile, uses expert_ids as that tile's expert id to fetch weights, skips
+    fill slots whose value is sentinel N, and num_tokens_post_pad gives the
+    valid total length. This task is that scheduling prologue itself and does
+    not include the GEMM.
 
-    输入输出规格：
-      topk_ids  int64/int32（或被评测器 cast 成的 fp32，整数值不变），连续
-                2D [num_tokens, top_k]；num_tokens/top_k >= 1 且
-                top_k <= num_experts；E、B 为 __init__ 超参且 >= 1，允许非
-                2 次幂
-      返回      单个一维 float32 张量，长度 L1 + L2 + 1，三段打包：
-                out[:L1] = sorted_token_ids 的 L1 个整数（含哨兵 N）
-                out[L1:L1+L2] = expert_ids 的 L2 个整数（尾部 -1）
-                out[L1+L2] = num_tokens_post_pad（标量 S）
-                ——全部为非负/负一整数；全域约束 L1 = N + E*(B-1) <= 2^24
-                保证哨兵 N、各下标、专家编号与 S <= L1 在 fp32 中精确表示
-      __init__ 超参：num_experts（int）、block_size（int）。
+    Boundary behaviour: an expert with |T_e| = 0 occupies 0 blocks and yields no
+    sorted entry and no expert entry; when |T_e| is an exact multiple of B no
+    padding is produced; the same row may select the same expert more than once
+    (different flattened indices are different entries); entries within an
+    expert follow ascending flattened index i.
 
-    实现约束（违规判负）：
-      - 分桶计数、块数前缀和、散射写排布、块专家表生成等核心计算必须在
-        提交文件内的 Triton kernel 中完成；forward 里只允许做输入/输出
-        整理（dtype 恢复、三段 cat 打包）。禁止调用 torch.sort /
-        torch.argsort / torch.bincount / torch.cumsum / torch.histc /
-        torch.unique / torch.repeat_interleave，以及任何第三方 MoE/调度
-        算子库。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 全程整数算术（无浮点累加）；输出按上述协议打包成 float32 的整数。
+    Input/output specification:
+      topk_ids  int64/int32 (or fp32 as cast by the evaluator, integer values
+                unchanged), contiguous 2D [num_tokens, top_k]; num_tokens /
+                top_k >= 1 and top_k <= num_experts; E and B are __init__
+                hyperparameters and >= 1, non powers of two allowed
+      returns   a single 1-D float32 tensor of length L1 + L2 + 1, packed in
+                three segments:
+                out[:L1] = the L1 integers of sorted_token_ids (sentinel N
+                           included)
+                out[L1:L1+L2] = the L2 integers of expert_ids (tail -1)
+                out[L1+L2] = num_tokens_post_pad (scalar S)
+                -- all of them are non-negative / minus-one integers; the
+                global-domain constraint L1 = N + E*(B-1) <= 2^24 guarantees
+                that sentinel N, every index, every expert id and S <= L1 are
+                exactly representable in fp32
+      __init__ hyperparameters: num_experts (int), block_size (int).
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：纯调度前置（排序/对齐/块表生成），不含 grouped GEMM 本体、
-    不含路由打分（softmax/topk 已在上游完成）。
+    Implementation constraints (violations are scored as failures):
+      - Core computation (bucket counting, block-count prefix sums, scatter
+        writes of the layout, block expert table generation) must be done in a
+        Triton kernel inside the submitted file; forward may only do input/
+        output arrangement (dtype restoration, three-segment cat packing).
+        Calling torch.sort / torch.argsort / torch.bincount / torch.cumsum /
+        torch.histc / torch.unique / torch.repeat_interleave, or any
+        third-party MoE/scheduling operator library, is forbidden.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Integer arithmetic throughout (no floating-point accumulation); the
+        output is packed into float32 integers per the protocol above.
+
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: the pure scheduling prologue (sorting / alignment / block table
+    generation); no grouped GEMM body and no routing scores (softmax/topk are
+    already done upstream).
     """
 
     def __init__(self, num_experts: int, block_size: int):
@@ -70,12 +88,14 @@ class Model(nn.Module):
         self.block_size = int(block_size)
 
     def forward(self, topk_ids):
-        # KernelBench 评测器会把全部输入张量 cast 成评测 precision（triton 后端
-        # 为 fp32）；专家编号是小整数，fp32 可精确表示，此处无损恢复
+        # The KernelBench evaluator casts every input tensor to the evaluation
+        # precision (fp32 for the triton backend); expert ids are small
+        # integers and exactly representable in fp32, so restore them here
+        # losslessly
         topk_ids = topk_ids.to(torch.long)
         E, B = self.num_experts, self.block_size
         assert int(topk_ids.min()) >= 0 and int(topk_ids.max()) < E, \
-            "topk_ids 必须落在 [0, num_experts) 内"
+            "topk_ids must fall inside [0, num_experts)"
 
         N = topk_ids.numel()
         flat_ids = topk_ids.reshape(-1)
@@ -83,27 +103,28 @@ class Model(nn.Module):
         counts = torch.bincount(flat_ids, minlength=E)          # |T_e|
         n_blocks = (counts + (B - 1)) // B                      # ceil(|T_e|/B)
         padded = n_blocks * B                                   # padded_e
-        seg_start = torch.cumsum(counts, 0) - counts            # 无填充紧排起始
-        slot_start = torch.cumsum(padded, 0) - padded           # 对齐排布起始
+        seg_start = torch.cumsum(counts, 0) - counts            # compact start
+        slot_start = torch.cumsum(padded, 0) - padded           # aligned start
         S = int(padded.sum())                                   # num_tokens_post_pad
         total_blocks = int(n_blocks.sum())
 
-        # 稳定排序：专家编号为主键、展平下标为次序 —— 与逐 token 扫描的
-        # 分桶次序一致（专家内按 i 升序）
+        # Stable sort: expert id is the primary key, flattened index the
+        # tie-break -- matches the bucket order of a per-token scan (ascending
+        # i inside one expert)
         order = torch.argsort(flat_ids, stable=True)
         pos = torch.arange(N, dtype=torch.long, device=flat_ids.device)
         dst = pos - seg_start[flat_ids[order]] + slot_start[flat_ids[order]]
 
         L1 = N + E * (B - 1)
         L2 = (L1 + B - 1) // B
-        sorted_ids = torch.full((L1,), N, dtype=torch.long, device=flat_ids.device)   # 哨兵 N 预填充
+        sorted_ids = torch.full((L1,), N, dtype=torch.long, device=flat_ids.device)   # sentinel N prefill
         sorted_ids[dst] = order
-        expert_ids = torch.full((L2,), -1, dtype=torch.long, device=flat_ids.device)  # 尾部 -1 哨兵
+        expert_ids = torch.full((L2,), -1, dtype=torch.long, device=flat_ids.device)  # tail -1 sentinel
         expert_ids[:total_blocks] = torch.repeat_interleave(
             torch.arange(E, device=flat_ids.device), n_blocks
         )
 
-        # 单张量输出协议：[sorted_token_ids | expert_ids | num_tokens_post_pad]
+        # Single-tensor output protocol: [sorted_token_ids | expert_ids | num_tokens_post_pad]
         return torch.cat([
             sorted_ids.to(torch.float32),
             expert_ids.to(torch.float32),
@@ -116,9 +137,11 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性。打分用 fp16 值、fp32 softmax
-    # 后取 top_k（行内专家互不相同，与 MoE 路由输出同分布）
+    # Fixed shape family; the random part consumes the global RNG -- the
+    # evaluator calls this function after set_seed, so multiple correctness
+    # trials see diverse inputs. Scores are fp16 values, softmax is taken in
+    # fp32 and then top_k is extracted (experts differ within a row, the same
+    # distribution as MoE router output)
     num_tokens, num_experts, top_k = 256, 16, 4
     scores = torch.randn(num_tokens, num_experts).to(torch.float16)
     probs = torch.softmax(scores.to(torch.float32), dim=1)
@@ -128,17 +151,19 @@ def get_inputs():
 
 def make_inputs(num_tokens: int, num_experts: int, top_k: int, block_size: int,
                 ids_dtype: str = "int64", dist: str = "topk", seed: int = 0):
-    """按公开/隐藏/性能案例描述生成输入。仅在评测端运行（CPU 生成，评测器
-    搬运到设备）。num_experts/block_size 供评测端构造 Model 用，这里只做
-    契约校验。
+    """Generate inputs from a public/hidden/perf case description. Runs on the
+    evaluation side only (generated on CPU; the evaluator moves them to the
+    device). num_experts/block_size are used by the evaluation side to build
+    the Model; here they only drive contract checks.
 
-    dist="topk"：fp16 randn 打分、fp32 softmax 后取 top_k，行内专家互不
-    相同（与官方测试的输入生成同分布）；dist="uniform"：均匀采样，行内
-    允许重复（用于空专家/重复专家边界压力）。消费顺序固定：randn 一次或
-    randint 一次，同 seed 下逐位可复现。
+    dist="topk": fp16 randn scores, fp32 softmax, then top_k, experts differ
+    within a row (the same distribution as the official test input generator);
+    dist="uniform": uniform sampling, duplicates allowed within a row (used to
+    stress the empty-expert / duplicate-expert boundaries). Consumption order
+    is fixed: one randn or one randint, bit-reproducible under the same seed.
     """
     assert num_tokens >= 1 and num_experts >= 1 and block_size >= 1
-    assert 1 <= top_k <= num_experts, "top_k 必须落在 [1, num_experts] 内"
+    assert 1 <= top_k <= num_experts, "top_k must fall inside [1, num_experts]"
     assert dist in ("topk", "uniform")
 
     gen = torch.Generator().manual_seed(seed)

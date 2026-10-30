@@ -1,22 +1,27 @@
-# 4016_gemm_w8a8 — int8 分块量化 GEMM（激活 per-token-group ×128 scale、
-# 权重 128×128 块 scale）的 model_class（KernelBench 兼容）题目文件。
+# 4016_gemm_w8a8 -- int8 block-quantized GEMM (activations with a
+# per-token-group x128 scale, weights with a 128x128 block scale) model_class
+# (KernelBench compatible) task file.
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=4016, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=4016, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 def _per_token_group_quant_int8(x: torch.Tensor, group_k: int = 128):
-    """按行分组（group_k 个元素一组）的 int8 量化：组内 absmax 定标。
+    """int8 quantization grouped along the row (group_k elements per group):
+    scaled by the in-group absmax.
 
-    返回 (码字 int8 与 x 同形, scale float32 (m, ceil(k/group_k)))。
-    尾组不足 group_k 时按有效元素取 absmax，补零元素量化后裁掉。
+    Returns (int8 code words shaped like x, float32 scale
+    (m, ceil(k/group_k))). A tail group shorter than group_k takes its absmax
+    over the valid elements only; the zero-padded elements are cropped after
+    quantization.
     """
     m, k = x.shape
     g = (k + group_k - 1) // group_k
@@ -31,10 +36,13 @@ def _per_token_group_quant_int8(x: torch.Tensor, group_k: int = 128):
 
 
 def _per_block_quant_int8(w: torch.Tensor, block_n: int = 128, block_k: int = 128):
-    """按 (block_n × block_k) 块的 int8 量化：块内 absmax 定标。
+    """int8 quantization in (block_n x block_k) blocks: scaled by the in-block
+    absmax.
 
-    返回 (码字 int8 与 w 同形, scale float32 (ceil(n/block_n), ceil(k/block_k)))。
-    右/下边缘的不完整块只按其有效元素取 absmax（补零不影响定标）。
+    Returns (int8 code words shaped like w, float32 scale
+    (ceil(n/block_n), ceil(k/block_k))). An incomplete block on the
+    right/bottom edge takes its absmax over the valid elements only (zero
+    padding does not affect the scaling).
     """
     n, k = w.shape
     gn = (n + block_n - 1) // block_n
@@ -50,53 +58,65 @@ def _per_block_quant_int8(w: torch.Tensor, block_n: int = 128, block_k: int = 12
 
 
 class Model(nn.Module):
-    """int8 分块量化 GEMM（量化激活 × 量化权重，块 scale 反量化）。
+    """int8 block-quantized GEMM (quantized activations x quantized weights,
+    dequantized with block scales).
 
-    数学定义：给定 int8 激活码字 A (M,K)、int8 权重码字 B (N,K)、激活的
-    per-token-group scale As (M, ceil(K/128))、权重的 128×128 分块 scale
-    Bs (ceil(N/128), ceil(K/128))（均 float32），先反量化再做矩阵乘：
+    Mathematical definition: given the int8 activation code words A (M,K), the
+    int8 weight code words B (N,K), the activation per-token-group scale
+    As (M, ceil(K/128)) and the weight 128x128 block scale
+    Bs (ceil(N/128), ceil(K/128)) (all float32), dequantize first and then do
+    the matrix multiply:
       Af[m,k] = A[m,k] * As[m, floor(k/128)]
       Bf[n,k] = B[n,k] * Bs[floor(n/128), floor(k/128)]
-      out[m,n] = sum_k Af[m,k] * Bf[n,k]    （float32 累加，即 Af @ Bf^T）
-    分块量化的等价计算顺序：沿 K 每 128 一组先做 int8 点积（可在 int32 中
-    精确累加），再乘该组的 As[m,g] * Bs[n_blk,g] 后 float32 求和——与上式
-    在 float32 精度内一致。输出 cast 到 __init__ 的 out_dtype。
-    边界行为：K、N 不被 128 整除时按 floor 索引自然延拓——尾组/尾块只覆盖
-    有效元素（越界元素不参与累加），As/Bs 的组数按 ceil(·/128) 给出。
+      out[m,n] = sum_k Af[m,k] * Bf[n,k]    (float32 accumulation, i.e. Af @ Bf^T)
+    The equivalent compute order for block quantization: take an int8 dot
+    product per 128-element group along K first (exactly accumulable in int32),
+    then multiply by that group's As[m,g] * Bs[n_blk,g] and sum in float32 --
+    equal to the expression above within float32 precision. The output is cast
+    to the out_dtype passed to __init__.
+    Boundary behaviour: when K or N is not divisible by 128 the floor index
+    simply extends naturally -- a tail group/block covers only the valid
+    elements (out-of-range elements do not take part in the accumulation), and
+    the group counts of As/Bs are given by ceil(.../128).
 
-    输入输出规格：
-      aq      int8    (M, K)                激活码字，行主
-      bq      int8    (N, K)                权重码字，行主（输出通道在行上）
-      a_scale float32 (M, ceil(K/128))      每 token 按 128 元素一组的 scale
-      b_scale float32 (ceil(N/128), ceil(K/128))   权重 128×128 块 scale
+    Input/output specification:
+      aq      int8    (M, K)                 activation code words, row-major
+      bq      int8    (N, K)                 weight code words, row-major (output channels on rows)
+      a_scale float32 (M, ceil(K/128))       per-token scale, one group per 128 elements
+      b_scale float32 (ceil(N/128), ceil(K/128))   weight 128x128 block scale
       out     out_dtype (M, N)              bfloat16 / float16
-      M/N/K >= 1，均允许非 2 次幂与不对齐 128 的尾部。
+      M/N/K >= 1, all allow non-powers of two and a tail not aligned to 128.
 
-    实现约束（违规判负）：
-      - 核心计算（int8 GEMM 累加与 scale 乘）必须在提交文件内完成，禁止
-        调用 torch.matmul / torch.bmm / torch.mm / torch.addmm /
-        torch.einsum / torch._int_mm / F.linear / functional.linear 等
-        库级矩阵乘捷径，以及题集静态审计禁用清单中的其余入口。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间累加用 float32（int8 乘积可在 int32 中精确累加后转 float32）；
-        输出 cast 到 out_dtype。
-      - 评测器会把全部输入 cast 成 fp32 后传入 forward；int8 码字值域
-        [-128,127] 与 fp32 scale 均可精确表示，入口处 .to(torch.int8) /
-        .to(torch.float32) 无损恢复。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (int8 GEMM accumulation and the scale multiply)
+        must be completed inside the submitted file, and calling library-level
+        matrix-multiply shortcuts such as torch.matmul / torch.bmm / torch.mm /
+        torch.addmm / torch.einsum / torch._int_mm / F.linear /
+        functional.linear, or the other entries on the task set's static-audit
+        forbidden list, is forbidden.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Use float32 for intermediate accumulation (int8 products can be
+        accumulated exactly in int32 first, then converted to float32); the
+        output is cast to out_dtype.
+      - The evaluator casts every input to fp32 before calling forward; the
+        int8 code-word range [-128,127] and the fp32 scales are both exactly
+        representable, so .to(torch.int8) / .to(torch.float32) at the entry
+        point recover them losslessly.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：块形固定 [128,128]、A 为二维 (M,K)、无 bias、无 splitK；
-    输出 bfloat16 / float16。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: block shape fixed at [128,128], A is 2D (M,K), no bias, no
+    splitK; the output is bfloat16 / float16.
     """
 
     def __init__(self, out_dtype: str = "bfloat16"):
         super().__init__()
         self.out_dtype = getattr(torch, out_dtype)
-        self.block_n = 128   # 权重分块量化块形固定 [128, 128]
+        self.block_n = 128   # weight block-quantization block shape fixed [128, 128]
         self.block_k = 128
 
     def forward(self, aq, bq, a_scale, b_scale):
-        # 评测器把全部输入 cast 成 fp32；int8 码字与 fp32 scale 无损恢复
+        # The evaluator casts every input to fp32; int8 code words and fp32
+        # scales are recovered losslessly
         aq = aq.to(torch.int8)
         bq = bq.to(torch.int8)
         a_scale = a_scale.to(torch.float32)
@@ -104,18 +124,18 @@ class Model(nn.Module):
 
         M, K = aq.shape
         N = bq.shape[0]
-        assert K == bq.shape[1], "aq 与 bq 的 K 维必须一致"
+        assert K == bq.shape[1], "the K dimension of aq and bq must match"
 
-        # 反量化 A：A[m,k] * As[m, k//block_k]（每 token 按 128 一组）
+        # Dequantize A: A[m,k] * As[m, k//block_k] (one group of 128 per token)
         a = aq.to(torch.float32) * a_scale.repeat_interleave(self.block_k, dim=1)[:, :K]
-        # 反量化 B：B[n,k] * Bs[n//block_n, k//block_k]（128×128 块 scale）
+        # Dequantize B: B[n,k] * Bs[n//block_n, k//block_k] (128x128 block scale)
         b_exp = (
             b_scale.repeat_interleave(self.block_n, dim=0)[:N]
             .repeat_interleave(self.block_k, dim=1)[:, :K]
         )
         b = bq.to(torch.float32) * b_exp
 
-        out = torch.matmul(a, b.t())          # (M, N) float32 累加
+        out = torch.matmul(a, b.t())          # (M, N) float32 accumulation
         return out.to(self.out_dtype)
 
 
@@ -124,9 +144,11 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性。生成口径与 make_inputs 一致：
-    # 激活 fp16 randn → per-token-group int8；权重 randn → 128×128 块 int8。
+    # Fixed shape family; the random part consumes the global RNG -- the
+    # evaluator calls this function after set_seed, so multiple correctness
+    # trials therefore see diverse inputs. The generation scheme matches
+    # make_inputs: activation fp16 randn -> per-token-group int8; weight randn
+    # -> 128x128 block int8.
     m, n, k = 96, 1024, 768
 
     x = torch.randn(m, k).to(torch.float16)
@@ -138,21 +160,28 @@ def get_inputs():
 
 def make_inputs(m: int, n: int, k: int, dtype: str = "bfloat16", seed: int = 0,
                 seq_lens=None, head_size=None):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description. Runs on the
+    evaluation side only (generated on CPU; the evaluator moves them to the
+    device).
 
-    消费顺序固定：激活 randn(m,k) → 权重 randn(n,k)，来自同一
-    torch.Generator(seed)，同 seed 下逐位可复现。dtype 为输出 dtype
-    （Model 构造参数 out_dtype 的 case 侧键名），不参与输入生成。
-    离线终审管线（audit_model_class.py）对所有 model_class 任务统一以
-    make_inputs(seq_lens=..., **case_fields) 生成输入、以 case["head_size"]
-    位置构造 Model、以 case["dtype"] 取容差键；本任务的 head_size 即 dtype
-    的兼容别名（管线把它作为 Model 首个位置实参传入，落在本模型的
-    out_dtype 上），make_inputs 仅校验其与 dtype 一致，不参与输入生成。
-    seq_lens 为管线的统一调用兼容形参（分页注意力族题目专用关键字），
-    本算子无该语义，传入任何值均被忽略。
+    Consumption order is fixed: activation randn(m,k) -> weight randn(n,k), from
+    the same torch.Generator(seed); bit-reproducible for the same seed. dtype is
+    the output dtype (the case-side key name of the Model constructor argument
+    out_dtype) and does not take part in input generation.
+    The offline final-audit pipeline (audit_model_class.py) uniformly generates
+    inputs for all model_class tasks with
+    make_inputs(seq_lens=..., **case_fields), constructs Model from
+    case["head_size"] positionally, and takes the tolerance key from
+    case["dtype"]; for this task head_size is the compatibility alias of dtype
+    (the pipeline passes it as the first positional argument to Model, landing
+    on this model's out_dtype), and make_inputs only asserts that it equals
+    dtype -- it does not take part in input generation.
+    seq_lens is the pipeline's uniform-call compatibility parameter (a keyword
+    reserved for the paged-attention task family); this operator has no such
+    semantics, so any value passed in is ignored.
     """
     if head_size is not None and head_size != dtype:
-        raise ValueError(f"head_size({head_size!r}) 应与 dtype({dtype!r}) 一致（兼容别名）")
+        raise ValueError(f"head_size({head_size!r}) should equal dtype({dtype!r}) (compatibility alias)")
     gen = torch.Generator().manual_seed(seed)
 
     x = torch.randn(m, k, generator=gen).to(torch.float16)

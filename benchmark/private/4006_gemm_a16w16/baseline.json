@@ -1,5 +1,97 @@
 {
   "task_id": "4006_gemm_a16w16",
-  "status": "placeholder",
-  "baselines": []
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_llm_mlp_4864_4096_8192_bf16",
+      "us": 63679.491,
+      "mean_us": 63700.211,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 2.0
+    },
+    {
+      "case": "perf_decode_batch_16384_8192_1024_bf16",
+      "us": 55536.856,
+      "mean_us": 55583.266,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.5
+    },
+    {
+      "case": "perf_square_2048_f16",
+      "us": 3141.358,
+      "mean_us": 3142.537,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.125
+    },
+    {
+      "case": "perf_llm_mlp_4864_4096_8192_bf16",
+      "us": 7057.6,
+      "mean_us": 7069.333,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_decode_batch_16384_8192_1024_bf16",
+      "us": 6121.039,
+      "mean_us": 6125.06,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_square_2048_f16",
+      "us": 550.08,
+      "mean_us": 551.131,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    }
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  },
+  "impls": [
+    "aiter",
+    "torch_eager"
+  ]
 }

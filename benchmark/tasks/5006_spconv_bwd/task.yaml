@@ -1,7 +1,7 @@
 id: "5006_spconv_bwd"
 name: spconv_bwd
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -27,9 +27,8 @@ description: >
   值。本题为自包含 KernelBench 题目文件（reference.py 即题目文件，同时镜像
   到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
   model_class 路径（--kernelbench-root benchmark/kernelbench_compat --level 3
-  --problem-id 5006 --backend triton），无需任何框架改动。starter 由框架
-  loader 从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
-  forward_stmt_N），本任务包不单独提供 starter。
+  --problem-id 5006 --backend cuda），无需任何框架改动。starter 由框架
+  loader 从 Model 自动生成 ModelNew scaffold（锚点：user_helpers / cuda_cpp / cuda_cu / init_body / forward_stmt_N），本任务包不单独提供 starter。
 
 io:
   inputs:
@@ -71,7 +70,7 @@ tolerance:
     全零索引对 case（counts_max=0）输出逐位为零实测通过。语义性错误（索引
     行 0/1 互换、布局映射转置错、未按 counts 屏蔽填充）产生 O(1) 级或行级
     偏差，远超容差，可被可靠捕获。在线（搜索循环内）由
-    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为 fp32、
+    KernelBenchPaperEvaluator 判定：cuda 后端输入与模型统一 cast 为 fp32、
     allclose(atol=rtol=1e-4)，作用于 get_inputs 固定族（n=1024、kv=9，归约
     深度 <= n=1024 项，实测 fp32 噪声 ~1e-5）——在线口径更紧但可行，在线
     结论仍不能替代终审。
