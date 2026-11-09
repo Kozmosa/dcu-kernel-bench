@@ -1,91 +1,108 @@
-# 2010_batchnorm_fwd —— BatchNorm 前向家族（inference / training）的
-# model_class（KernelBench 兼容）题目文件。
+# 2010_batchnorm_fwd -- model_class (KernelBench compatible) task file for the
+# BatchNorm forward family (inference / training).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=2010, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=2, problem_id=2010, backend=cuda (HIP).
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """BatchNorm 前向家族：推理仿射（inference）与训练批统计（training）。
+    """BatchNorm forward family: inference affine (inference) and training batch
+    statistics (training).
 
-    输入 x (N, C, H, W)，NCHW contiguous；scale / bias / mean / variance 均为
-    (1, C, 1, 1)，沿通道维广播。统计维度：per-channel，对每个通道 c 在
-    (N, H, W) 三个维度上求统计，每通道元素数 m = N*H*W。__init__ 参数
-    variant 选择两条路径（eps 缺省 1e-5，momentum 缺省 0.1，均仅作标量
-    超参）：
+    The input is x (N, C, H, W), NCHW contiguous; scale / bias / mean / variance are
+    all (1, C, 1, 1) and broadcast along the channel dimension. Reduction dimension:
+    per-channel, computing the statistics of every channel c over the three
+    dimensions (N, H, W), with m = N*H*W elements per channel. The __init__ argument
+    variant selects one of two paths (eps defaults to 1e-5 and momentum to 0.1; both
+    are scalar hyper-parameters only):
 
-        "inference"：均值与方差作为输入给定，逐元素仿射（float32 中间计算）：
+        "inference": the mean and the variance are given as inputs, element-wise
+                     affine (float32 intermediate computation):
             y = scale * (x - mean) / sqrt(variance + eps) + bias
-        "training"：批统计 + 仿射 + running 更新（float32 全程）：
-            batch_mean_c = sum_{n,h,w} x[n,c,h,w] / m                    （有偏批均值）
-            batch_var_c  = sum_{n,h,w} (x[n,c,h,w] - batch_mean_c)^2 / m （有偏批方差）
-            saved_mean         = batch_mean                              （shape (1,C,1,1)）
-            saved_inv_variance = 1 / sqrt(batch_var + eps)               （shape (1,C,1,1)）
+        "training": batch statistics + affine + running update (float32
+                    throughout):
+            batch_mean_c = sum_{n,h,w} x[n,c,h,w] / m                    (biased batch mean)
+            batch_var_c  = sum_{n,h,w} (x[n,c,h,w] - batch_mean_c)^2 / m (biased batch variance)
+            saved_mean         = batch_mean                              (shape (1,C,1,1))
+            saved_inv_variance = 1 / sqrt(batch_var + eps)               (shape (1,C,1,1))
             y = scale * (x - saved_mean) * saved_inv_variance + bias
             next_running_mean = (1 - momentum) * mean + momentum * batch_mean
             next_running_var  = (1 - momentum) * variance
                                 + momentum * batch_var * m / (m - 1)
-            其中 forward 第 4/5 参在 training 下为上一时刻的 running 统计
-            （prev_running_mean / prev_running_var）；running 方差更新使用
-            无偏批方差（m/(m-1) 修正，故要求 m >= 2）——这是 PyTorch /
-            cuDNN / MIOpen 训练 BN 的标准约定。
+            In the training variant the 4th/5th forward arguments are the running
+            statistics of the previous step (prev_running_mean / prev_running_var);
+            the running variance update uses the unbiased batch variance (the
+            m/(m-1) correction, hence the requirement m >= 2) -- this is the
+            standard PyTorch / cuDNN / MIOpen training-BN convention.
 
-    forward 形参对两 variant 统一为 (x, scale, bias, mean, variance)：
-    inference 的第 4/5 参为给定 mean / variance，training 的第 4/5 参为
-    prev_running_mean / prev_running_var。
+    The forward signature is (x, scale, bias, mean, variance) for both variants: in
+    inference the 4th/5th arguments are the given mean / variance, in training they
+    are prev_running_mean / prev_running_var.
 
-    单张量输出协议（forward 必须返回单个张量，评测器按单输出比较）：
-        "inference"：返回 y 本体，shape (N, C, H, W)，dtype 与 x 相同；
-        "training" ：返回一维 float32 打包张量，长度 N*C*H*W + 4*C，五个
-                     逻辑输出各以 float32 cast、reshape(-1) 后按样例输出
-                     顺序 torch.cat，分段协议（半开区间）：
+    Single-tensor output protocol (forward must return a single tensor; the
+    evaluator compares a single output):
+        "inference": returns y itself, shape (N, C, H, W), same dtype as x;
+        "training" : returns a one-dimensional float32 packed tensor of length
+                     N*C*H*W + 4*C; the five logical outputs are each cast to
+                     float32, reshaped with reshape(-1) and torch.cat'ed in the
+                     sample-output order, with the segment protocol (half-open
+                     intervals):
             [0,            N*C*H*W)      y
             [N*C*H*W,      N*C*H*W + C)  saved_mean
             [N*C*H*W + C,  N*C*H*W + 2C) saved_inv_variance
             [N*C*H*W + 2C, N*C*H*W + 3C) next_running_mean
             [N*C*H*W + 3C, N*C*H*W + 4C) next_running_var
 
-    输入输出规格：
-        x        float32（training 恒为 float32）/ float16 / bfloat16
-                 （仅 inference），(N, C, H, W)，contiguous，N/C/H/W >= 1
-        scale    同 x dtype (1, C, 1, 1)，contiguous
-        bias     同 x dtype (1, C, 1, 1)，contiguous
-        mean     同 x dtype (1, C, 1, 1)，contiguous（inference：给定均值，
-                 任意实值；training：prev_running_mean）
-        variance 同 x dtype (1, C, 1, 1)，contiguous，恒为正（inference：
-                 给定方差；training：prev_running_var）
-        out      inference：(N, C, H, W)，同 x dtype；training：一维
-                 float32，长度 N*C*H*W + 4*C（五段打包协议如上）
-        输入为常规 randn/rand 量级（无 inf/NaN）；评测器会把全部输入
-        cast 成 fp32 传入（fp16/bf16 -> fp32 无损）。
+    Input/output specification:
+        x        float32 (always float32 for training) / float16 / bfloat16
+                 (inference only), (N, C, H, W), contiguous, N/C/H/W >= 1
+        scale    same dtype as x, (1, C, 1, 1), contiguous
+        bias     same dtype as x, (1, C, 1, 1), contiguous
+        mean     same dtype as x, (1, C, 1, 1), contiguous (inference: the given
+                 mean, any real value; training: prev_running_mean)
+        variance same dtype as x, (1, C, 1, 1), contiguous, always positive
+                 (inference: the given variance; training: prev_running_var)
+        out      inference: (N, C, H, W), same dtype as x; training: one-dimensional
+                 float32 of length N*C*H*W + 4*C (the five-segment packing protocol
+                 above)
+        The inputs are the usual randn/rand magnitude (no inf/NaN); the evaluator
+        casts all inputs to fp32 before passing them in (fp16/bf16 -> fp32 is
+        lossless).
 
-    实现约束（违规判负）：
-        - 核心计算（per-channel 归约统计、rsqrt、仿射、running 更新）必须
-          在提交文件内以 Triton kernel 完成。
-        - ModelNew 的 __init__ 与 forward 签名不可更改。
-        - 统计、归一化与 running 更新全程 float32 中间计算；inference 的 y
-          cast 回 x dtype；training 五段均为 float32。
-        - forward 返回单张量 out（评测器按单输出比较 shape/dtype/allclose）。
+    Implementation constraints (violations are scored as failures):
+        - The core computation (the per-channel reduction statistics, rsqrt, the
+          affine, and the running update) must be completed inside the submitted
+          file with a HIP kernel.
+        - The __init__ and forward signatures of ModelNew must not be changed.
+        - The statistics, the normalization and the running update all use float32
+          intermediates; the y of inference is cast back to the x dtype; all five
+          training segments are float32.
+        - forward returns the single tensor out (the evaluator compares
+          shape/dtype/allclose on a single output).
 
-    禁用列表：torch.nn.BatchNorm1d / torch.nn.BatchNorm2d /
+    Forbidden: torch.nn.BatchNorm1d / torch.nn.BatchNorm2d /
     torch.nn.BatchNorm3d / torch.nn.SyncBatchNorm /
     torch.nn.functional.batch_norm / torch.batch_norm /
-    torch.native_batch_norm / miopen / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    torch.native_batch_norm / miopen / hipdnn.
+    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor regions;
+    device code must include <hip/hip_runtime.h> -- <cuda_runtime.h> is not available
+    on this machine).
     """
 
     def __init__(self, variant: str = "training", eps: float = 1e-5, momentum: float = 0.1):
         super().__init__()
-        assert variant in ("inference", "training"), "variant 必须是 inference / training 之一"
-        assert eps > 0, "eps 需为正"
-        assert 0.0 <= momentum <= 1.0, "momentum 需在 [0, 1]"
+        assert variant in ("inference", "training"), "variant must be one of inference / training"
+        assert eps > 0, "eps must be positive"
+        assert 0.0 <= momentum <= 1.0, "momentum must be in [0, 1]"
         self.variant = variant
         self.eps = float(eps)
         self.momentum = float(momentum)
@@ -99,25 +116,29 @@ class Model(nn.Module):
         vf = variance.to(torch.float32)
 
         if self.variant == "inference":
-            # 给定 mean/variance 的逐元素仿射，(1,C,1,1) 沿通道广播
+            # element-wise affine with the given mean/variance; (1,C,1,1)
+            # broadcasts along the channel dimension
             inv_std = torch.rsqrt(vf + eps)
             y = (xf - mf) * inv_std * sf + bf
             return y.to(x.dtype)
 
-        # training：per-channel 有偏批统计（对 (N,H,W) 归约），y 用批统计归一化
+        # training: per-channel biased batch statistics (reduction over (N,H,W));
+        # y is normalized with the batch statistics
         m = xf.shape[0] * xf.shape[2] * xf.shape[3]
-        assert m >= 2, "training 变体要求 N*H*W >= 2（running 方差的无偏修正因子 m/(m-1)）"
-        batch_mean = xf.mean(dim=(0, 2, 3), keepdim=True)                        # (1,C,1,1) 有偏均值
-        batch_var = ((xf - batch_mean) ** 2).mean(dim=(0, 2, 3), keepdim=True)   # (1,C,1,1) 有偏方差
+        assert m >= 2, "the training variant requires N*H*W >= 2 (the m/(m-1) unbiased correction factor of the running variance)"
+        batch_mean = xf.mean(dim=(0, 2, 3), keepdim=True)                        # (1,C,1,1) biased mean
+        batch_var = ((xf - batch_mean) ** 2).mean(dim=(0, 2, 3), keepdim=True)   # (1,C,1,1) biased variance
         saved_inv_variance = torch.rsqrt(batch_var + eps)
         y = (xf - batch_mean) * saved_inv_variance * sf + bf
 
-        # running 统计更新：均值用批均值，方差用无偏批方差（m/(m-1) 修正）
+        # running statistics update: the mean uses the batch mean, the variance uses
+        # the unbiased batch variance (the m/(m-1) correction)
         batch_var_unbiased = batch_var * (m / (m - 1))
         next_running_mean = (1.0 - self.momentum) * mf + self.momentum * batch_mean
         next_running_var = (1.0 - self.momentum) * vf + self.momentum * batch_var_unbiased
 
-        # 单张量输出：五段按样例输出顺序一维拼接（全 float32）
+        # single-tensor output: the five segments concatenated in one dimension in
+        # the sample-output order (all float32)
         return torch.cat([
             y.to(torch.float32).reshape(-1),
             batch_mean.to(torch.float32).reshape(-1),
@@ -132,39 +153,42 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性。生成规则与 make_inputs 一致
-    # （消费顺序 x -> scale -> bias -> mean -> variance，此处消费全局 RNG）
+    # Fixed shape family; the random part consumes the global RNG -- the evaluator
+    # calls this function after set_seed, so multiple correctness trials therefore
+    # see diverse inputs. The generation rules match make_inputs (consumption order
+    # x -> scale -> bias -> mean -> variance; here the global RNG is consumed)
     n, c, h, w = 4, 16, 56, 56
     x = torch.randn(n, c, h, w)
     scale = torch.rand(1, c, 1, 1) + 0.5
     bias = torch.randn(1, c, 1, 1)
-    mean = torch.randn(1, c, 1, 1)              # training：prev_running_mean
-    variance = torch.rand(1, c, 1, 1) + 0.25    # training：prev_running_var
+    mean = torch.randn(1, c, 1, 1)              # training: prev_running_mean
+    variance = torch.rand(1, c, 1, 1) + 0.25    # training: prev_running_var
     return [x, scale, bias, mean, variance]
 
 
 def make_inputs(n: int, c: int, h: int, w: int, variant: str = "training",
                 dtype: str = "float32", seed: int = 0,
                 eps: float = 1e-5, momentum: float = 0.1):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description. Runs on the evaluation
+    side only (generated on CPU; the evaluator moves them to the device).
 
-    消费顺序固定：x -> scale -> bias -> mean -> variance。x/bias/mean 用
-    torch.randn，scale 用 torch.rand + 0.5（正缩放域 [0.5, 1.5)），variance
-    用 torch.rand + 0.25（恒正域 [0.25, 1.25)），全部来自同一
-    torch.Generator(seed)，同 seed 下逐位可复现。
-    variant / eps / momentum 同时是构造 Model 的 init 超参，此处仅做合法性
-    校验；training 变体的 dtype 域仅声明 float32（打包输出协议），且要求
-    N*H*W >= 2。
+    The consumption order is fixed: x -> scale -> bias -> mean -> variance. x/bias/
+    mean use torch.randn, scale uses torch.rand + 0.5 (the positive scaling range
+    [0.5, 1.5)), variance uses torch.rand + 0.25 (the always-positive range
+    [0.25, 1.25)); everything comes from the same torch.Generator(seed), so the same
+    seed reproduces inputs bit-for-bit.
+    variant / eps / momentum are also the init hyper-parameters used to construct the
+    Model and are only validated here; the dtype domain of the training variant
+    declares float32 only (the packed-output protocol) and it requires N*H*W >= 2.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
-    assert variant in ("inference", "training"), "variant 必须是 inference / training 之一"
-    assert min(n, c, h, w) >= 1, "N/C/H/W 均需 >= 1"
-    assert eps > 0 and 0.0 <= momentum <= 1.0, "eps 需为正，momentum 需在 [0, 1]"
+    assert variant in ("inference", "training"), "variant must be one of inference / training"
+    assert min(n, c, h, w) >= 1, "N/C/H/W must all be >= 1"
+    assert eps > 0 and 0.0 <= momentum <= 1.0, "eps must be positive and momentum must be in [0, 1]"
     if variant == "training":
-        assert dt == torch.float32, "training 变体的 dtype 域仅声明 float32"
-        assert n * h * w >= 2, "training 变体要求 N*H*W >= 2"
+        assert dt == torch.float32, "the dtype domain of the training variant declares float32 only"
+        assert n * h * w >= 2, "the training variant requires N*H*W >= 2"
     x = torch.randn(n, c, h, w, generator=gen).to(dt)
     scale = (torch.rand(1, c, 1, 1, generator=gen) + 0.5).to(dt)
     bias = torch.randn(1, c, 1, 1, generator=gen).to(dt)

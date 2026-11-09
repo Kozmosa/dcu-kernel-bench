@@ -1,0 +1,129 @@
+From 77b7453b005a22578c22ad5df5623f1a2f55bba1 Mon Sep 17 00:00:00 2001
+From: uestcpyp <240867617@qq.com>
+Date: Fri, 16 Oct 2026 22:02:34 +0800
+Subject: [PATCH 2/6] =?UTF-8?q?fix(loader):=20=E4=BF=AE=E5=A4=9A=E8=A1=8C?=
+ =?UTF-8?q?=E7=AD=BE=E5=90=8D=E6=88=AA=E6=96=AD=E4=B8=8E=E8=AF=AD=E5=8F=A5?=
+ =?UTF-8?q?=E5=9D=97=E7=BC=A9=E8=BF=9B=E9=94=99=E4=B9=B1=EF=BC=88=E8=84=9A?=
+ =?UTF-8?q?=E6=89=8B=E6=9E=B6=E4=BB=8E=E6=A0=B9=E8=8A=82=E7=82=B9=E8=B5=B7?=
+ =?UTF-8?q?=E9=9D=9E=E6=B3=95=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+`ast.get_source_segment(node)` 返回的是整个函数体的源码，且只把**首行**切到
+节点的 col_offset（首行缩进被吃掉），其余行保留绝对缩进。两个消费者各错一处：
+
+1. `_extract_signature` 只取 splitlines()[0] —— 多行签名只剩头一行：
+     def __init__(self, variant: str = "modulated", stride=(1, 1), padding=(1, 1),:
+   括号未闭合 -> 整份脚手架 SyntaxError，从根节点起就编译不过。
+2. `_extract_body` / `_extract_forward_steps` 先 dedent 再统一补缩进。因为首行
+   缩进为 0，dedent 的公共前缀恒为 0、退化成空操作，补缩进后块内层级错乱：
+     if self.variant == "relu":        <- 8 列
+                 z = torch.relu(z)     <- 20 列
+             elif self.variant == ...  <- 16 列  => IndentationError
+
+影响 7 道题的脚手架（5003/5004/5005/5007/5008/5009/6001），其中 5008 被 Agent
+自行改对，故最终未通过的是另外 6 道 —— 这 9 道题的失败完全不是 Agent 能力问题。
+
+修法：新增 `_normalized_segment()`（把首行被切掉的缩进补回去再 dedent）；
+`_extract_signature` 改为按括号配平读到以冒号结尾的那一行。
+
+验证：repro_scaffold_bug.py 修前 7/10 非法 -> 修后 0/10；verify_scaffold_fix.py
+20 题 x 2 backend = 40 份脚手架全部合法；本地全套测试 297 pass / 0 fail。
+---
+ pyramidkernel/core/loader.py | 53 ++++++++++++++++++++++++++++--------
+ 1 file changed, 42 insertions(+), 11 deletions(-)
+
+diff --git a/pyramidkernel/core/loader.py b/pyramidkernel/core/loader.py
+index 087d3fe..cdf5c48 100644
+--- a/pyramidkernel/core/loader.py
++++ b/pyramidkernel/core/loader.py
+@@ -403,26 +403,57 @@ class KernelBenchLoader:
+                 segments.append(ast.get_source_segment(source, node) or "")
+         return "\n".join(segment for segment in segments if segment)
+ 
++    @staticmethod
++    def _normalized_segment(source: str, node: ast.AST) -> str | None:
++        """取节点的源码片段，并把缩进归一化到"该节点自身深度为 0"。
++
++        为什么不能直接用 `textwrap.dedent(ast.get_source_segment(...))`：
++        `ast.get_source_segment` 只把**首行**切到节点的 col_offset（首行缩进被吃掉），
++        其余行仍保留绝对缩进。于是 dedent 的公共前缀恒为 0、退化成空操作，调用方
++        再统一补缩进时块内层级就错乱了，典型症状是
++        `IndentationError: unindent does not match any outer indentation level`
++        （`if` 在 8 列、首行体在 20 列、`elif` 在 16 列）。这里先把首行被切掉的
++        缩进补回去，dedent 才有正确的公共前缀。
++        """
++        segment = ast.get_source_segment(source, node)
++        if not segment:
++            return None
++        lines = segment.splitlines()
++        first = " " * getattr(node, "col_offset", 0) + lines[0]
++        return textwrap.dedent("\n".join([first, *lines[1:]]))
++
+     @staticmethod
+     def _extract_class_preamble(source: str, class_node: ast.ClassDef) -> str:
+         segments = []
+         for node in class_node.body:
+             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                 continue
+-            segment = ast.get_source_segment(source, node)
++            segment = KernelBenchLoader._normalized_segment(source, node)
+             if segment:
+-                segments.append(textwrap.dedent(segment))
++                segments.append(segment)
+         return "\n".join(segments).strip("\n")
+ 
+     @staticmethod
+     def _extract_signature(source: str, node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
+-        segment = ast.get_source_segment(source, node)
++        segment = KernelBenchLoader._normalized_segment(source, node)
+         if not segment:
+             raise KernelBenchLoadError(f"Could not extract signature for {node.name}")
+-        first_line = segment.splitlines()[0].strip()
+-        if first_line.endswith(":"):
+-            first_line = first_line[:-1]
+-        return first_line[4:].strip() if first_line.startswith("def ") else first_line
++        # 签名可能跨多行（每个参数一行）。只取 splitlines()[0] 会把
++        # `def __init__(self, a: int = 1,` 这种截断成括号未闭合的非法语法，
++        # 而脚手架的任何语法错误都会让整道题从根节点起就编译不过 —— 必须按括号
++        # 配平一直读到以冒号结尾的那一行。
++        header: list[str] = []
++        depth = 0
++        for line in segment.splitlines():
++            header.append(line.strip())
++            depth += sum(line.count(ch) for ch in "([{")
++            depth -= sum(line.count(ch) for ch in ")]}")
++            if depth <= 0 and line.rstrip().endswith(":"):
++                break
++        signature = " ".join(part for part in header if part)
++        if signature.endswith(":"):
++            signature = signature[:-1]
++        return signature[4:].strip() if signature.startswith("def ") else signature
+ 
+     @staticmethod
+     def _extract_body(source: str, node: ast.FunctionDef | ast.AsyncFunctionDef, drop_super_init: bool) -> str:
+@@ -430,9 +461,9 @@ class KernelBenchLoader:
+         for statement in node.body:
+             if drop_super_init and KernelBenchLoader._is_super_init(statement):
+                 continue
+-            segment = ast.get_source_segment(source, statement)
++            segment = KernelBenchLoader._normalized_segment(source, statement)
+             if segment:
+-                lines.append(textwrap.dedent(segment))
++                lines.append(segment)
+         return "\n".join(lines).strip("\n")
+ 
+     @staticmethod
+@@ -455,9 +486,9 @@ class KernelBenchLoader:
+     def _extract_forward_steps(source: str, forward_node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[str]:
+         steps = []
+         for statement in forward_node.body:
+-            segment = ast.get_source_segment(source, statement)
++            segment = KernelBenchLoader._normalized_segment(source, statement)
+             if segment:
+-                steps.append(textwrap.dedent(segment).strip("\n"))
++                steps.append(segment.strip("\n"))
+         return steps
+ 
+     @staticmethod

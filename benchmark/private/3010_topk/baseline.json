@@ -1,1 +1,97 @@
-{"task_id": "3010_topk", "status": "placeholder", "baselines": []}
+{
+  "task_id": "3010_topk",
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_b8_m128256_k8_f32",
+      "us": 263.92,
+      "mean_us": 266.517,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0
+    },
+    {
+      "case": "perf_b512_m16384_k8_f16",
+      "us": 396.96,
+      "mean_us": 400.149,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0
+    },
+    {
+      "case": "perf_b1335_m128256_k8_f32",
+      "us": 3628.16,
+      "mean_us": 3637.888,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0
+    },
+    {
+      "case": "perf_b8_m128256_k8_f32",
+      "us": 241.28,
+      "mean_us": 240.107,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b512_m16384_k8_f16",
+      "us": 491.84,
+      "mean_us": 492.944,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b1335_m128256_k8_f32",
+      "us": 6385.759,
+      "mean_us": 6394.053,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    }
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  },
+  "impls": [
+    "aiter",
+    "torch_eager"
+  ]
+}

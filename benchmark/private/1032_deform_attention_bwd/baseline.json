@@ -1,5 +1,57 @@
 {
   "task_id": "1032_deform_attention_bwd",
-  "status": "placeholder",
-  "baselines": []
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_detr_multiscale_bwd_f16",
+      "us": 110618.633,
+      "mean_us": 110966.203,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 5,
+        "repeat_iters": 20,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_seg_multiscale_bwd_f16",
+      "us": 63872.511,
+      "mean_us": 64056.565,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 5,
+        "repeat_iters": 20,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_f32_multiscale_bwd_f32",
+      "us": 38119.408,
+      "mean_us": 38139.608,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 5,
+        "repeat_iters": 20,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    }
+  ],
+  "impls": [
+    "torch_eager"
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  }
 }

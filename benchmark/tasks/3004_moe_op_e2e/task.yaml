@@ -47,17 +47,42 @@ shape:
     - "case 键与 make_inputs 形参、io.init_inputs 名三方一致（top_k / num_experts）"
 
 tolerance:
-  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2}
-  float32:  {atol: 2.0e-2, rtol: 2.0e-2}
-  compare: "reference 以 float32 计算后 cast 到输出 dtype 再比较"
+  bfloat16: {atol: 2.0e-2, rtol: 2.0e-2, max_mismatch_frac: 5.0e-3}
+  float32:  {atol: 2.0e-2, rtol: 2.0e-2, max_mismatch_frac: 5.0e-3}
+  compare: >
+    reference 以 float32 计算后 cast 到输出 dtype 再比较；逐元素 atol=rtol=2e-2，
+    另允许 <= 0.5% 的元素超限（灾难性抵消尾部，见 note）。
   note: >
-    沿用本评测集默认容差：本题 reference 与候选 kernel 都以 float32 全程
-    累加、仅在输出处 cast 一次，差异只剩累加序噪声与最终 cast 舍入
-    （bf16 相对舍入 <= 2^-8 ≈ 0.0039 << rtol 0.02，数学上必过）；构建自检
-    对官方 fp32 oracle 的实测最大绝对偏差见 sources/3004_moe_op_e2e.yaml
-    note。float32 case 无最终 cast，同容差下裕度更大。在线（搜索循环内）由
-    KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast 为 fp32、
-    allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+    主体沿用本评测集默认容差：reference 与候选 kernel 都以 float32 累加、在输出处
+    cast 一次，差异只剩累加序噪声与最终 cast 舍入（bf16 相对舍入 <= 2^-8 ≈ 0.0039
+    << rtol 0.02）；构建自检对官方 fp32 oracle 的实测最大绝对偏差见
+    sources/3004_moe_op_e2e.yaml 的 note。float32 case 无最终 cast，同容差下裕度更大。
+
+    **失配预算 max_mismatch_frac=5e-3（2026-10 补，实测证据）**：原 note 断言
+    "数学上必过"不成立。真实 MoE kernel 会把 SwiGLU 中间量 h 落到 compute dtype
+    ——aiter 官方 kernel 的两条路径都是 `acc = (silu_acc * mul_acc).to(dtype)`
+    （moe_op_e2e.py:261 非 persistent、:505 persistent）——而本 reference 让 h 保持
+    fp32。题面的实现约束只要求"**中间累加**用 float32"（aiter 的 accumulator 确实是
+    fp32），并未要求 h 保持 fp32；故两种做法都合法，容差必须同时容纳。
+
+    实测 aiter 官方实现 vs 本 reference 的超差比例：
+      perf_prefill_m1024_n4096_k2560  9115/5242880 = 0.174%
+      perf_mid_m256_n2048_k1024       1375/524288  = 0.262%
+      perf_decode_m8_n8192_k2048      0
+    超差元素集中在**灾难性抵消**处：|ref| 接近 0，rtol 项失效，相对差可达 87% 但绝对
+    差只有 1~4，atol 扛不住。故用失配预算而不是继续放大 atol/rtol——实测 atol=0.2
+    时仍有 0.013% 超限，要靠 atol 全覆盖需要 ~4（荒谬）。预算取 0.5%（最坏实测
+    0.262%，余量约 1.9x）。
+
+    决定性实验（证明差异不是算法错误）：把 reference 的 h 也 cast 成 bf16 后，同一
+    比对在 2e-2 下只差 1/5242880 = 0.00002%。**不采用"改 reference 让 h 变 bf16"
+    的方案**：那会反过来惩罚更准确的 fp32 实现（方向相反）。
+
+    拦截力：路由/专家选择错误会整条槽位错（top_k=2 时约 50% 元素）、激活写错会命中
+    几乎全部元素，均远超声明的 0.5% 额度，仍会被拦下。
+
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与模型
+    统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）
 forbidden:

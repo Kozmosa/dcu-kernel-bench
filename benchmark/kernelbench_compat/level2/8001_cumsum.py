@@ -1,57 +1,75 @@
-# 8001_cumsum —— Cumsum（inclusive 前缀和）的 model_class（KernelBench
-# 兼容）题目文件。
+# 8001_cumsum -- model_class (KernelBench compatible) task file for
+# Cumsum (inclusive prefix sum).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=8001, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=2, problem_id=8001, backend=cuda (HIP).
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """Cumsum（inclusive 前缀和）：沿指定维的顺序累加。
+    """Cumsum (inclusive prefix sum): a sequential accumulation along a given
+    dimension.
 
-    算子定义：对 n 维输入 x 与 scan 维 dim，输出 out 与 x 同形：
+    Operator definition: for an n-dimensional input x and the scan dimension
+    `dim`, the output out has the same shape as x:
         out[i_0, ..., i_k, ...] = sum_{j <= i_dim} x[i_0, ..., j, ...]
-    即 dim 维上的 inclusive 前缀和（含当前元素），其余维度各条链独立
-    累加。__init__ 参数 dim 指定 scan 维（torch 惯例：非负从 0 起，负数
-    从末尾计数，如 -1 为最后一维），缺省 2。
+    i.e. an inclusive prefix sum along dimension `dim` (including the current
+    element), with every other dimension accumulating independently per chain.
+    The __init__ parameter `dim` selects the scan dimension (torch convention:
+    non-negative counts from 0, negative counts from the end, e.g. -1 means the
+    last dimension), defaulting to 2.
 
-    数值契约：累加一律在 float32 中进行——float16/bfloat16 输入先 cast
-    到 float32 累加，再 cast 回输入 dtype（与生产 scan 库的
-    compute-in-fp32 口径一致）。
+    Numeric contract: accumulation always happens in float32 -- float16/bfloat16
+    inputs are first cast to float32, accumulated, then cast back to the input
+    dtype (matching the compute-in-fp32 convention of production scan
+    libraries).
 
-    输入输出规格：
-        x     float32 / float16 / bfloat16，contiguous，ndim ∈ [1, 4]，
-              各维 >= 1，scan 维长度 L ∈ [1, 65536]，总元素数 <= 2^25；
-              值域为常规 randn 量级（无 inf/NaN）
-        out   单张量，与 x 同形状、同 dtype、contiguous；forward 必须返回
-              单个张量（评测器按单输出的 .shape / allclose 比较）
-        在线评测器会把全部输入 cast 成 fp32 传入（fp16/bf16 -> fp32 无损）；
-        离线终审按声明 dtype 原生传入——实现须对两种传入都正确。
+    Input/output specification:
+        x     float32 / float16 / bfloat16, contiguous, ndim in [1, 4],
+              every dimension >= 1, scan dimension length L in [1, 65536],
+              total element count <= 2^25; values are ordinary randn magnitude
+              (no inf/NaN)
+        out   a single tensor, same shape / dtype as x, contiguous; forward must
+              return a single tensor (the evaluator compares .shape / allclose
+              on a single output).
+        The online evaluator casts all inputs to fp32 before calling forward
+        (fp16/bf16 -> fp32 is lossless); the offline final audit passes inputs
+        natively in their declared dtype -- the implementation must be correct
+        for both.
 
-    边界行为：L=1 时 out 等于 x（cast 回输入 dtype）；L 非 2 的幂、素数
-    长度、超出单 block 容量的长轴都必须用掩码 + 分块扫描正确处理，越界
-    lane 不得进入前缀和；dim 为负数时按 torch 惯例解释。
+    Boundary behaviour: when L=1, out equals x (cast back to the input dtype);
+    non-power-of-two L, prime lengths, and axes longer than a single block's
+    capacity must all be handled correctly with masking plus a blocked scan, and
+    out-of-range lanes must not contribute to the prefix sum; a negative `dim`
+    follows the torch convention.
 
-    实现约束（违规判负）：
-        - 核心 scan（前缀和）必须在提交文件内以 Triton kernel 手写完成
-          （分块扫描 / Hillis-Steele / Blelloch 等均可），禁止调用任何
-          库级 scan 原语，禁止用 FFT / 矩阵乘 / 卷积等数学等价路径绕过。
-        - ModelNew 的 __init__ 与 forward 签名不可更改。
-        - 累加在 float32 中进行，输出 cast 回输入 dtype。
-        - forward 返回单张量 out（评测器按单输出比较）。
+    Implementation constraints (violations are scored as failures):
+        - The core scan (prefix sum) must be handwritten with a HIP kernel
+          inside the submitted file; calling any library-level scan primitive is
+          forbidden, as is bypassing via mathematically equivalent paths such as
+          FFT / matrix multiplication / convolution.
+        - The __init__ and forward signatures of ModelNew must not be changed.
+        - Accumulate in float32 and cast the output back to the input dtype.
+        - forward returns the single tensor `out` (the evaluator compares a
+          single output).
 
-    禁用列表（静态审计剥除 docstring 与注释后按字面子串匹配）：
+    Forbidden (static audit strips docstrings and comments, then does literal
+    substring matching):
     torch.cumsum / .cumsum( / torch.cumulative_sum / .cumulative_sum( /
-    aten.cumsum / aten.cumulative_sum / tl.cumsum / tl.associative_scan /
+    aten.cumsum / aten.cumulative_sum /
     torch.fft / torch.matmul / torch.mm / torch.bmm / torch.einsum /
-    conv1d( / numpy / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    conv1d( / numpy / hipdnn.
+    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
+    regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
+    is not available on this machine).
     """
 
     def __init__(self, dim: int = 2):
@@ -59,10 +77,12 @@ class Model(nn.Module):
         self.dim = int(dim)
 
     def forward(self, x):
-        # dim 语义按 torch 惯例（负数从末尾计数），必须指向既有维度
+        # `dim` follows the torch convention (negative counts from the end) and
+        # must point at an existing dimension.
         ndim = x.dim()
-        assert -ndim <= self.dim < ndim, "dim 需指向输入的既有维度"
-        # 数值契约：float32 中累加，输出 cast 回输入 dtype
+        assert -ndim <= self.dim < ndim, "dim must point at an existing dimension of the input"
+        # Numeric contract: accumulate in float32, cast the output back to the
+        # input dtype.
         y = torch.cumsum(x.to(torch.float32), dim=self.dim)
         return y.to(x.dtype)
 
@@ -72,33 +92,38 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family; the random part consumes the global RNG -- the
+    # evaluator calls this function after set_seed, so multiple correctness
+    # trials therefore see diverse inputs.
     b, c, h, w = 8, 16, 512, 128
-    x = torch.randn(b, c, h, w)   # float32 主 dtype
+    x = torch.randn(b, c, h, w)   # float32 as the primary dtype
     return [x]
 
 
 def make_inputs(shape, dim, dtype="float32", seed=0):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description.
 
-    shape 为输入形状列表（ndim 1-4），dim 为 scan 维（同时是构造 Model 的
-    init 超参，此处仅做合法性校验），全部来自同一 torch.Generator(seed)，
-    同 seed 下逐位可复现；消费顺序仅 x 一个张量（torch.randn 后 cast 到
-    dtype）。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    `shape` is the input shape list (ndim 1-4); `dim` is the scan dimension (also
+    the init hyper-parameter used to construct the Model -- it is only validated
+    here). Everything comes from the same torch.Generator(seed), so the same seed
+    reproduces inputs bit-for-bit; the only tensor consumed is x (torch.randn,
+    then cast to dtype).
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
     ndim = len(shape)
-    assert 1 <= ndim <= 4, "需 1 <= ndim <= 4"
-    assert all(s >= 1 for s in shape), "各维长度需 >= 1"
+    assert 1 <= ndim <= 4, "requires 1 <= ndim <= 4"
+    assert all(s >= 1 for s in shape), "every dimension must be >= 1"
     d = int(dim)
-    assert -ndim <= d < ndim, "dim 需指向既有维度"
+    assert -ndim <= d < ndim, "dim must point at an existing dimension"
     L = shape[d % ndim]
-    assert 1 <= L <= 65536, "scan 维长度需在 [1, 65536]"
+    assert 1 <= L <= 65536, "scan dimension length must be in [1, 65536]"
     numel = 1
     for s in shape:
         numel *= s
-    assert numel <= 2 ** 25, "总元素数需 <= 2^25"
+    assert numel <= 2 ** 25, "total element count must be <= 2^25"
     x = torch.randn(*shape, generator=gen).to(dt)
     return (x,)

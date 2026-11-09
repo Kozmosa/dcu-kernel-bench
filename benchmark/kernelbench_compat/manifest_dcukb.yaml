@@ -1,0 +1,225 @@
+# dcu-kernel-bench 全量 model_class 题 manifest（PyramidKernel run-kernelbench-batch 用）
+# 由 .dcu_runs/gen_manifest.py 生成；level = task.yaml 的 difficulty
+#   basic -> level1 / medium -> level2 / hard -> level3（与 kernelbench_compat/levelN 一致）
+name: dcukb_all
+backend: triton
+# 题数: 66
+tasks:
+  - alias: 1002_paged_attention
+    level: 3
+    problem_id: 1002
+  - alias: 1010_chunked_pa_prefill
+    level: 3
+    problem_id: 1010
+  - alias: 1011_extend_attention
+    level: 3
+    problem_id: 1011
+  - alias: 1012_flash_attention_forward
+    level: 3
+    problem_id: 1012
+  - alias: 1014_hstu_attention
+    level: 3
+    problem_id: 1014
+  - alias: 1015_lean_atten
+    level: 3
+    problem_id: 1015
+  - alias: 1016_lean_atten_paged
+    level: 3
+    problem_id: 1016
+  - alias: 1017_mha
+    level: 3
+    problem_id: 1017
+  - alias: 1018_mha_fused_bwd
+    level: 3
+    problem_id: 1018
+  - alias: 1019_mha_onekernel_bwd
+    level: 3
+    problem_id: 1019
+  - alias: 1020_mla_decode_rope
+    level: 3
+    problem_id: 1020
+  - alias: 1021_pa_decode
+    level: 3
+    problem_id: 1021
+  - alias: 1022_pa_prefill
+    level: 3
+    problem_id: 1022
+  - alias: 1024_prefill_attention
+    level: 3
+    problem_id: 1024
+  - alias: 1026_sage_attention_qk_int8_per_block
+    level: 3
+    problem_id: 1026
+  - alias: 1027_sage_attention_qk_int8_per_block_causal
+    level: 3
+    problem_id: 1027
+  - alias: 1029_triton_decode_attention
+    level: 3
+    problem_id: 1029
+  - alias: 1030_unified_attention
+    level: 3
+    problem_id: 1030
+  - alias: 1031_deform_attention_fwd
+    level: 3
+    problem_id: 1031
+    backend: cuda
+  - alias: 1032_deform_attention_bwd
+    level: 3
+    problem_id: 1032
+    backend: cuda
+  - alias: 2001_activation
+    level: 2
+    problem_id: 2001
+  - alias: 2002_add_swiglu
+    level: 2
+    problem_id: 2002
+  - alias: 2003_fused_mul_add
+    level: 2
+    problem_id: 2003
+  - alias: 2004_fused_qk_concat
+    level: 2
+    problem_id: 2004
+  - alias: 2005_moe_activation
+    level: 2
+    problem_id: 2005
+  - alias: 2006_norm
+    level: 2
+    problem_id: 2006
+  - alias: 2007_rmsnorm
+    level: 2
+    problem_id: 2007
+  - alias: 2008_rope
+    level: 2
+    problem_id: 2008
+  - alias: 2009_softmax
+    level: 2
+    problem_id: 2009
+  - alias: 2010_batchnorm_fwd
+    level: 2
+    problem_id: 2010
+    backend: cuda
+  - alias: 2011_batchnorm_bwd
+    level: 3
+    problem_id: 2011
+    backend: cuda
+  - alias: 2012_groupnorm_fwd
+    level: 2
+    problem_id: 2012
+    backend: cuda
+  - alias: 2013_groupnorm_bwd
+    level: 3
+    problem_id: 2013
+    backend: cuda
+  - alias: 2014_instancenorm_fwd
+    level: 2
+    problem_id: 2014
+    backend: cuda
+  - alias: 3002_moe_align_block_size
+    level: 3
+    problem_id: 3002
+  - alias: 3003_moe_op
+    level: 3
+    problem_id: 3003
+  - alias: 3004_moe_op_e2e
+    level: 3
+    problem_id: 3004
+  - alias: 3006_moe_op_mxfp4
+    level: 3
+    problem_id: 3006
+  - alias: 3007_moe_op_silu_fused
+    level: 3
+    problem_id: 3007
+  - alias: 3009_routing
+    level: 3
+    problem_id: 3009
+  - alias: 3010_topk
+    level: 3
+    problem_id: 3010
+  - alias: 4001_batched_gemm_a8w8
+    level: 3
+    problem_id: 4001
+  - alias: 4004_batched_gemm_bf16
+    level: 3
+    problem_id: 4004
+  - alias: 4005_fused_mxfp4_quant
+    level: 3
+    problem_id: 4005
+  - alias: 4006_gemm_a16w16
+    level: 3
+    problem_id: 4006
+  - alias: 4007_gemm_a16w16_atomic
+    level: 3
+    problem_id: 4007
+  - alias: 4008_gemm_a16w4
+    level: 3
+    problem_id: 4008
+  - alias: 4009_gemm_a8w8
+    level: 3
+    problem_id: 4009
+  - alias: 4010_gemm_a8w8_blockscale
+    level: 3
+    problem_id: 4010
+  - alias: 4016_gemm_w8a8
+    level: 3
+    problem_id: 4016
+  - alias: 4017_group_quant_int8
+    level: 3
+    problem_id: 4017
+  - alias: 4018_quant
+    level: 3
+    problem_id: 4018
+  - alias: 5001_conv2d_fwd
+    level: 3
+    problem_id: 5001
+    backend: cuda
+  - alias: 5002_conv2d_bwd
+    level: 3
+    problem_id: 5002
+    backend: cuda
+  - alias: 5003_deform_conv2d_fwd
+    level: 3
+    problem_id: 5003
+    backend: cuda
+  - alias: 5004_deform_conv2d_bwd
+    level: 3
+    problem_id: 5004
+    backend: cuda
+  - alias: 5005_spconv_fprop
+    level: 3
+    problem_id: 5005
+    backend: cuda
+  - alias: 5006_spconv_bwd
+    level: 3
+    problem_id: 5006
+    backend: cuda
+  - alias: 5007_spconv_indice_pairs
+    level: 2
+    problem_id: 5007
+    backend: cuda
+  - alias: 5008_conv_bias_act
+    level: 3
+    problem_id: 5008
+    backend: cuda
+  - alias: 5009_conv_depthtospace
+    level: 2
+    problem_id: 5009
+    backend: cuda
+  - alias: 6001_fused_adamw
+    level: 2
+    problem_id: 6001
+    backend: cuda
+  - alias: 7001_ctc_loss
+    level: 3
+    problem_id: 7001
+  - alias: 8001_cumsum
+    level: 2
+    problem_id: 8001
+    backend: cuda
+  - alias: 8002_gather
+    level: 1
+    problem_id: 8002
+    backend: cuda
+  - alias: 8003_scatter_nd
+    level: 2
+    problem_id: 8003
+    backend: cuda

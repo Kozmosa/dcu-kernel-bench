@@ -1,22 +1,26 @@
-# 1001_paged_attention — Starter（Triton track）
+# 1001_paged_attention -- Starter (Triton track)
 #
-# 评测约定：
-#   - 补全 paged_attention_decode_kernel 与 paged_attention_decode；
-#     函数签名与 constexpr 参数语义不可改。
-#   - 核心计算（QK^T、在线 softmax、PV 累加）必须在本文件的 Triton kernel
-#     中完成；task.yaml 的 forbidden 列表会被静态审计，禁止转调 torch/ATen
-#     或任何注意力库。
-#   - 中间累加用 float32；输出 cast 回输入 dtype。
-#   - 参考 task.yaml 的语义描述与 reference.py 的行为（评测以 reference 为准）。
+# Evaluation contract:
+#   - Complete paged_attention_decode_kernel and paged_attention_decode; the
+#     function signatures and the semantics of the constexpr parameters must not
+#     be changed.
+#   - The core computation (QK^T, online softmax, PV accumulation) must be done
+#     in the Triton kernel inside this file; the forbidden list in task.yaml is
+#     enforced by the static audit, so calling into torch/ATen or any attention
+#     library is not allowed.
+#   - Accumulate intermediates in float32; cast the output back to the input
+#     dtype.
+#   - Follow the semantic description in task.yaml and the behaviour of
+#     reference.py (the evaluation is based on the reference).
 
 import triton
 import triton.language as tl
 
 
-# TODO(Agent): 实现设备 kernel。
-# 建议 grid: (num_seqs, num_kv_heads)（GQA 一组 query heads 共享 KV 加载）
-# 或 (num_seqs * num_q_heads,)（MHA 简单路径）；都必须掩蔽 seq_lens 与
-# HEAD_SZ_POW2 / KV_BLK_SZ_POW2 的 padding。
+# TODO(Agent): implement the device kernel.
+# Suggested grid: (num_seqs, num_kv_heads) (one GQA group of query heads shares
+# the KV load) or (num_seqs * num_q_heads,) (the simple MHA path); either way you
+# must mask seq_lens as well as the HEAD_SZ_POW2 / KV_BLK_SZ_POW2 padding.
 @triton.jit
 def paged_attention_decode_kernel(
     out_ptr,            # [num_seqs, num_q_heads, head_size]
@@ -31,21 +35,23 @@ def paged_attention_decode_kernel(
     stride_k_b, stride_k_h, stride_k_bs, stride_k_d,
     stride_v_b, stride_v_h, stride_v_bs, stride_v_d,
     stride_bt_s,
-    HEAD_SZ: tl.constexpr,        # 真实 head_size（可为非 2 次幂，如 96）
+    HEAD_SZ: tl.constexpr,        # the real head_size (may be non-power-of-two, e.g. 96)
     HEAD_SZ_POW2: tl.constexpr,   # next_power_of_2(head_size)
-    KV_BLK_SZ: tl.constexpr,      # 真实 block_size
+    KV_BLK_SZ: tl.constexpr,      # the real block_size
     KV_BLK_SZ_POW2: tl.constexpr, # next_power_of_2(block_size)
     GROUP: tl.constexpr,          # num_q_heads // num_kv_heads
 ):
     # TODO(Agent):
-    #   seq_idx / head 索引 -> 逐物理块加载 K/V（经 bt_ptr 间接寻址）
-    #   在线 softmax：max_logit / exp_sum / acc，float32 累加
-    #   out = acc / exp_sum，cast 到 out_ptr.dtype.element_ty
+    #   seq_idx / head indices -> load K/V block by block (indirect addressing through bt_ptr)
+    #   online softmax: max_logit / exp_sum / acc, accumulated in float32
+    #   out = acc / exp_sum, cast to out_ptr.dtype.element_ty
     ...
 
 
-# Host 启动入口。输入输出均为已在当前设备上的 contiguous tensor。
-# TODO(Agent): 计算 constexpr 值、选择 grid 并启动 kernel；返回 out。
+# Host launch entry point. Inputs and outputs are contiguous tensors already on
+# the current device.
+# TODO(Agent): compute the constexpr values, pick the grid, launch the kernel and
+# return out.
 def paged_attention_decode(query, key_cache, value_cache,
                            block_tables, seq_lens, scale, out):
-    raise NotImplementedError("替换为真实实现")
+    raise NotImplementedError("replace this with the real implementation")

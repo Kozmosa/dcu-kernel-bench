@@ -1,26 +1,30 @@
-# 2003_fused_mul_add — 逐元素融合乘加 out = a*x + b（KernelBench 兼容 model_class 题目）。
+# 2003_fused_mul_add -- element-wise fused multiply-add out = a*x + b, as a
+# KernelBench compatible model_class task file.
 #
-# 本文件必须自包含：评测器以 exec(source) 加载题目，禁止本地模块导入，
-# 参考实现（Model.forward）与输入生成全部内联。
+# This file must be self-contained: the evaluator loads the task via exec(source),
+# so local module imports are forbidden -- the reference implementation
+# (Model.forward) and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=2003, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=2, problem_id=2003, backend=triton.
 
 import torch
 import torch.nn as nn
 
-# a / b 的四种取值形态（与算子契约一致）：
-#   scalar_float —— Python float 标量；scalar_int —— Python int 标量；
-#   tensor1      —— 单元素张量（numel == 1）；tensor_full —— 与 x 同形的张量。
+# The four value forms of a / b (matching the operator contract):
+#   scalar_float -- a Python float scalar; scalar_int -- a Python int scalar;
+#   tensor1      -- a single-element tensor (numel == 1); tensor_full -- a tensor
+#                   with the same shape as x.
 _OPERAND_KINDS = ("scalar_float", "scalar_int", "tensor1", "tensor_full")
 
 
 def _draw_operand(kind, shape, dt, gen):
-    """按形态生成 a / b：标量取 randn*100（对齐官方算子的量级习惯），张量直接 randn。
+    """Draw a / b according to the form: scalars come from randn*100 (matching the
+    magnitude convention of the official operator), tensors come from randn.
 
-    gen 为 None 时消费全局 RNG（get_inputs 路径），否则消费给定 Generator
-    （make_inputs 确定性路径）。
+    When gen is None the global RNG is consumed (the get_inputs path); otherwise the
+    given Generator is consumed (the make_inputs deterministic path).
     """
     if kind == "tensor_full":
         return torch.randn(*shape, dtype=dt, generator=gen)
@@ -31,51 +35,69 @@ def _draw_operand(kind, shape, dt, gen):
         return int(base.item() * 100)
     if kind == "tensor1":
         return base.reshape(1)
-    raise ValueError(f"未知形态: {kind}")
+    raise ValueError(f"unknown form: {kind}")
 
 
 class Model(nn.Module):
-    """逐元素融合乘加（fused multiply-add）：out = a * x + b。
+    """Element-wise fused multiply-add: out = a * x + b.
 
-    ① 算子语义：对 x 的每个元素 i，out[i] = a_i * x[i] + b_i。a 与 b 各自
-    独立地取以下三种形态之一（可任意组合，如 a 为标量、b 为同形张量）：
-      1. Python float / int 标量：a_i = a（值广播到 x 的每个元素）；
-      2. 单元素张量（numel == 1，形状任意，如 (1,)）：a_i = 其唯一元素（广播）；
-      3. 与 x 同形的张量（numel == x.numel()）：a_i = a 的对应元素。
-    x 为任意维数、任意形状（含非 2 次幂、素数规模）的浮点张量。中间计算在
-    float32 中完成（x / a / b 先提升到 float32 再乘加），最终结果 cast 回
-    x 的 dtype。边界行为：本算子无整数张量输入、无索引/长度类语义；a、b
-    同为标量时输出仍与 x 同形。
+    (1) Operator semantics: for every element i of x,
+    out[i] = a_i * x[i] + b_i. a and b each independently take one of the
+    following three forms (any combination is allowed, e.g. a a scalar while b is a
+    same-shape tensor):
+      1. a Python float / int scalar: a_i = a (the value is broadcast to every
+         element of x);
+      2. a single-element tensor (numel == 1, any shape, e.g. (1,)): a_i = its only
+         element (broadcast);
+      3. a tensor with the same shape as x (numel == x.numel()): a_i = the
+         corresponding element of a.
+    x is a floating-point tensor of arbitrary rank and shape (including
+    non-powers-of-two and prime sizes). Intermediate computation runs in float32
+    (x / a / b are first promoted to float32, then multiplied and added), and the
+    final result is cast back to the dtype of x. Boundary behaviour: this operator
+    has no integer tensor inputs and no indexing/length-like semantics; when a and
+    b are both scalars the output still has the same shape as x.
 
-    ② 输入输出规格：
-      - x：float16 / bfloat16 / float32 张量，任意形状，contiguous；
-      - a、b：上述三种形态之一；为张量时 contiguous 且 dtype 与 x 一致；
-      - 返回：与 x 同形、同 dtype 的新张量（out-of-place，不得原地改写任何输入）。
+    (2) Input/output specification:
+      - x: float16 / bfloat16 / float32 tensor, arbitrary shape, contiguous;
+      - a, b: one of the three forms above; when a tensor, contiguous with the
+        same dtype as x;
+      - returns: a new tensor with the same shape and dtype as x (out-of-place; no
+        input may be overwritten in place).
 
-    ③ 实现约束（违规判负）：
-      - 核心计算（乘加）必须在提交文件内完成：自写 Triton kernel，单个
-        kernel、单次读入-计算-写回 pass 完成，禁止拆成先乘后加两个 kernel；
-      - a / b 为标量或单元素张量时作为广播参数在 kernel 内参与计算，不得
-        物化为与 x 同形的临时大张量；
-      - ModelNew 的 __init__ 与 forward 签名不可更改；
-      - 中间计算用 float32；输出 cast 回 x 的 dtype。
+    (3) Implementation constraints (violations are scored as failures):
+      - The core computation (the multiply-add) must be completed inside the
+        submitted file with a self-written Triton kernel: a single kernel and a
+        single read-compute-write pass; splitting it into a multiply kernel followed
+        by an add kernel is forbidden;
+      - When a / b is a scalar or a single-element tensor it must take part in the
+        kernel as a broadcast argument and must not be materialized into a
+        temporary big tensor with the same shape as x;
+      - The __init__ and forward signatures of ModelNew must not be changed;
+      - Use float32 for intermediate computation; cast the output back to the dtype
+        of x.
 
-    ④ 禁用列表与目标硬件：
-      - 禁止以 ATen 捷径直接完成本题计算：torch.addcmul（含 .addcmul /
-        .addcmul_ 方法）、torch.add、torch.mul，以及 .add( / .mul( /
-        .add_( / .mul_( 等张量方法与原地形式；亦禁止调用任何预编译
-        算子库提供的同功能入口（终审静态审计对 docstring/注释之外的代码
-        做子串匹配）；
-      - 目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    (4) Forbidden list and target hardware:
+      - Directly completing this task's computation with ATen shortcuts is
+        forbidden: torch.addcmul (including the .addcmul / .addcmul_ methods),
+        torch.add, torch.mul, and tensor methods with their in-place forms such as
+        .add( / .mul( / .add_( / .mul_; calling a same-functionality entry point
+        provided by any precompiled operator library is also forbidden (the final
+        static audit does substring matching on the code outside
+        docstrings/comments);
+      - Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
     """
 
     def __init__(self):
         super().__init__()
-        # 逐元素算子无超参数：block 尺寸与广播策略均属实现细节，由提交方自定。
+        # An element-wise operator has no hyper-parameters: the block size and the
+        # broadcast strategy are implementation details chosen by the submitter.
 
     def forward(self, x, a, b):
-        # 评测器会把输入张量统一 cast 成评测精度（triton 后端为 fp32）再传入；
-        # a / b 为 Python 标量时原样透传。本算子无整数张量输入，无需恢复。
+        # The evaluator casts the input tensors to the evaluation precision (fp32
+        # for the triton backend) before passing them in; Python scalars for a / b
+        # are passed through unchanged. This operator has no integer tensor inputs,
+        # so nothing needs restoring.
         return (a * x.to(torch.float32) + b).to(x.dtype)
 
 
@@ -84,9 +106,11 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族（与 public_cases.json 一致）；a / b 的形态由全局 RNG 从
-    # 四种形态独立等概率抽取——评测器 set_seed 后调用本函数，多轮 correctness
-    # trial 因此覆盖标量 / 单元素 / 同形张量的不同组合。
+    # Fixed shape family (matching public_cases.json); the forms of a / b are drawn
+    # independently and with equal probability from the four forms using the global
+    # RNG -- the evaluator calls this function after set_seed, so multiple
+    # correctness trials therefore cover different combinations of scalar /
+    # single-element / same-shape tensors.
     shape = (2048, 4096)
     dt = torch.float16
     a_kind = _OPERAND_KINDS[torch.randint(0, len(_OPERAND_KINDS), (1,)).item()]
@@ -98,10 +122,12 @@ def get_inputs():
 
 
 def make_inputs(shape, dtype="float16", a_kind="tensor_full", b_kind="tensor1", seed=0):
-    """确定性 case 生成器：torch.Generator().manual_seed(seed)，CPU 生成。
+    """Deterministic case generator: torch.Generator().manual_seed(seed), generated
+    on CPU.
 
-    字段与隐藏/性能 case 一一对应（shape 列表、dtype 字符串、a_kind/b_kind
-    形态名、seed），返回 (x, a, b)。仅在评测端运行。
+    The fields map one-to-one onto the hidden/perf cases (a shape list, a dtype
+    string, the a_kind/b_kind form names, and seed); returns (x, a, b). Runs on the
+    evaluation side only.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)

@@ -1,82 +1,97 @@
-# 2007_rmsnorm —— RMSNorm 前向家族（标准 / 残差融合）的 model_class
-# （KernelBench 兼容）题目文件。
+# 2007_rmsnorm -- model_class (KernelBench compatible) task file for the RMSNorm
+# forward family (standard / residual-fused).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=2007, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=2, problem_id=2007, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """RMSNorm 前向家族：标准 RMSNorm 与残差融合（fused residual-add）RMSNorm。
+    """RMSNorm forward family: standard RMSNorm and residual-fused
+    (fused residual-add) RMSNorm.
 
-    对 (M, N) 输入的每一行，归一化在 float32 中按如下定义计算：
+    For each row of an (M, N) input, the normalization is computed in float32 as
+    defined below:
         mean_sq = sum_i x_i^2 / N
         rsigma  = rsqrt(mean_sq + eps)
         y_i     = x_i * rsigma * w_i
-    w 为逐通道缩放向量。__init__ 参数 variant 选择两条路径之一：
-        "fused_add"：先在输入 dtype 下求 residual_out = x + residual（残差流
-        原样直通输出），再对 residual_out 施加上述 RMSNorm；
-        "rmsnorm"  ：直接对 x 施加 RMSNorm；residual 不参与计算（内容任意，
-        可为垃圾数据）。
-    forward 返回单张量 out（同 x dtype）：fused_add 时 (M, 2N)，前 N 列为
-    y、后 N 列为 residual_out（两段逻辑输出沿最后一维列拼接）；rmsnorm 时
-    (M, N)，即 y。
-    边界行为：全零行 mean_sq = 0 时 rsigma = rsqrt(eps)（eps 保证不除零）；
-    N 任意（含 1、非 2 的幂、非 16 对齐、超出单 block 归约上限的大 N）都必须
-    用掩码 / 分块归约正确处理，行尾越界元素不得参与平方和。
+    where w is the per-channel scale vector. The __init__ parameter `variant`
+    selects one of two paths:
+        "fused_add": first compute residual_out = x + residual in the input dtype
+        (the residual stream passes straight through to the output), then apply the
+        RMSNorm above to residual_out;
+        "rmsnorm"  : apply the RMSNorm directly to x; residual takes no part in the
+        computation (its content is arbitrary and may be garbage data).
+    forward returns a single tensor out (same dtype as x): with fused_add it is
+    (M, 2N) with the first N columns equal to y and the last N columns equal to
+    residual_out (the two logical outputs concatenated along the last dimension);
+    with rmsnorm it is (M, N), i.e. y.
+    Boundary behaviour: for an all-zero row mean_sq = 0, so rsigma = rsqrt(eps)
+    (eps guarantees no division by zero); N is arbitrary (including 1,
+    non-powers-of-two, sizes not multiple of 16, and large N beyond a single
+    block's reduction capacity) and must all be handled correctly with masking / a
+    blocked reduction, and out-of-range elements at the row tail must not
+    contribute to the sum of squares.
 
-    输入输出规格：
-        x        float16 / bfloat16 (M, N)，contiguous，M >= 1，N >= 1
-        weight   同 x dtype (N,)，contiguous
-        residual 同 x dtype (M, N)，contiguous（variant="rmsnorm" 时忽略）
-        out      单张量、同 x dtype：fused_add 时 (M, 2N)（前 N 列 y、后 N 列
-                 residual_out），rmsnorm 时 (M, N)（即 y）
-        评测器会把全部输入 cast 成 fp32 传入（fp16/bf16 -> fp32 无损）。
+    Input/output specification:
+        x        float16 / bfloat16 (M, N), contiguous, M >= 1, N >= 1
+        weight   same dtype as x, (N,), contiguous
+        residual same dtype as x, (M, N), contiguous (ignored when variant="rmsnorm")
+        out      a single tensor, same dtype as x: (M, 2N) with fused_add (first N
+                 columns y, last N columns residual_out), (M, N) with rmsnorm (i.e. y)
+        The evaluator casts all inputs to fp32 before calling forward
+        (fp16/bf16 -> fp32 is lossless).
 
-    实现约束（违规判负）：
-        - 核心计算（残差加法、逐行平方和归约、rsqrt、逐元素缩放）必须在提交
-          文件内以 Triton kernel 完成。
-        - ModelNew 的 __init__ 与 forward 签名不可更改。
-        - 平方和累加与归一化在 float32 中进行；y cast 回输入 dtype；
-          residual_out 在输入 dtype 下相加并原样写出。
-        - forward 返回单张量 out（评测器按单输出比较）；fused_add 的
-          residual_out 列块须与 x + residual 在输入 dtype 下逐位一致。
+    Implementation constraints (violations are scored as failures):
+        - The core computation (residual add, per-row sum-of-squares reduction,
+          rsqrt, element-wise scaling) must be completed with a Triton kernel inside
+          the submitted file.
+        - The __init__ and forward signatures of ModelNew must not be changed.
+        - The sum-of-squares accumulation and the normalization run in float32; y is
+          cast back to the input dtype; residual_out is added in the input dtype and
+          written out as-is.
+        - forward returns the single tensor `out` (the evaluator compares a single
+          output); with fused_add the residual_out column block must be bit-identical
+          to x + residual in the input dtype.
 
-    禁用列表：aiter / torch.rms_norm / torch.nn.functional.rms_norm /
+    Forbidden list: aiter / torch.rms_norm / torch.nn.functional.rms_norm /
     torch.nn.RMSNorm / torch.layer_norm / torch.nn.functional.layer_norm /
     torch.nn.LayerNorm / torch.norm / torch.linalg.norm /
-    torch.linalg.vector_norm。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    torch.linalg.vector_norm.
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
     """
 
     def __init__(self, variant: str = "fused_add", eps: float = 1e-5):
         super().__init__()
-        assert variant in ("rmsnorm", "fused_add"), "variant 必须是 rmsnorm / fused_add 之一"
+        assert variant in ("rmsnorm", "fused_add"), "variant must be one of rmsnorm / fused_add"
         self.variant = variant
         self.eps = float(eps)
 
     def forward(self, x, weight, residual):
-        # variant="fused_add"：残差流在输入 dtype 下相加并原样直通输出；
-        # variant="rmsnorm"：直接对 x 归一化，residual 不参与计算
-        # （用条件表达式分流，避免多子句复合语句）
+        # variant="fused_add": the residual stream is added in the input dtype and
+        # passes straight through to the output; variant="rmsnorm": normalize x
+        # directly and residual takes no part in the computation
+        # (a conditional expression splits the paths, avoiding a multi-clause
+        # compound statement).
         fused = self.variant == "fused_add"
         norm_input = x + residual if fused else x
         residual_out = norm_input
 
-        # RMSNorm 主体：float32 中间计算，输出 cast 回输入 dtype
+        # The RMSNorm body: float32 intermediates, output cast back to the input dtype
         xf = norm_input.to(torch.float32)
         wf = weight.to(torch.float32)
         mean_sq = (xf * xf).mean(dim=-1, keepdim=True)
         y = (xf * torch.rsqrt(mean_sq + self.eps) * wf).to(x.dtype)
 
-        # 单张量输出：fused_add 把 y 与 residual_out 沿最后一维列拼接
-        # （前 N 列 y、后 N 列 residual_out）
+        # Single-tensor output: fused_add concatenates y and residual_out along the
+        # last dimension (first N columns y, last N columns residual_out).
         return torch.cat([y, residual_out], dim=-1) if fused else y
 
 
@@ -85,8 +100,9 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family; the random part consumes the global RNG -- the evaluator
+    # calls this function after set_seed, so multiple correctness trials therefore
+    # see diverse inputs.
     m, n = 1024, 4096
     x = torch.randn(m, n).to(torch.float16)
     weight = torch.randn(n).to(torch.float16)
@@ -96,16 +112,21 @@ def get_inputs():
 
 def make_inputs(m: int, n: int, variant: str = "fused_add",
                 dtype: str = "float16", seed: int = 0):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description.
 
-    消费顺序固定：x -> weight -> residual（均 torch.randn 后 cast 到 dtype），
-    全部来自同一 torch.Generator(seed)，同 seed 下逐位可复现。
-    variant 同时是构造 Model 的 init 超参，此处仅做合法性校验。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    The consumption order is fixed: x -> weight -> residual (all torch.randn, then
+    cast to dtype), from the same torch.Generator(seed), so the same seed
+    reproduces inputs bit-for-bit.
+    variant is also the init hyper-parameter used to construct the Model and is
+    only validated here.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
-    assert variant in ("rmsnorm", "fused_add"), "variant 必须是 rmsnorm / fused_add 之一"
-    assert m >= 1 and n >= 1, "需 M >= 1 且 N >= 1"
+    assert variant in ("rmsnorm", "fused_add"), "variant must be one of rmsnorm / fused_add"
+    assert m >= 1 and n >= 1, "requires M >= 1 and N >= 1"
     x = torch.randn(m, n, generator=gen).to(dt)
     weight = torch.randn(n, generator=gen).to(dt)
     residual = torch.randn(m, n, generator=gen).to(dt)

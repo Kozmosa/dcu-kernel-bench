@@ -1,5 +1,57 @@
 {
   "task_id": "7001_ctc_loss",
-  "status": "placeholder",
-  "baselines": []
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_t1024_b16_c32_f32",
+      "us": 11420844.727,
+      "mean_us": 11410350.065,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 1.5e-05,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_t2048_b8_c64_f32",
+      "us": 9565692.383,
+      "mean_us": 10759854.557,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 3.1e-05,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_t512_b32_c128_f16",
+      "us": 11017351.074,
+      "mean_us": 10998146.419,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    }
+  ],
+  "impls": [
+    "torch_eager"
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  }
 }

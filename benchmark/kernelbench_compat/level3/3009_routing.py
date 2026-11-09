@@ -1,55 +1,70 @@
-# 3009_routing — MoE 门控 sigmoid top-1 路由（固定 config 简洁版）的
-# model_class（KernelBench 兼容）题目文件。
+# 3009_routing -- MoE gating sigmoid top-1 routing (a compact version with a
+# fixed config), as a model_class (KernelBench-compatible) task file.
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=3009, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=3009, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """MoE（Mixture of Experts）门控的 sigmoid top-1 路由：为每个 token 从
-    N 个专家中选出路由得分最高的一個（top_k 恒为 1）。
+    """Sigmoid top-1 routing of MoE (Mixture of Experts) gating: pick the expert
+    with the highest routing score for each token out of N experts (top_k is
+    always 1).
 
-    【算子语义】给定门控输入 x（[M, K]，M 个 token、K 维门控特征）与路由
-    权重 w（[K, N]，每列一个专家），对每个 token m 与专家 n：
+    Operator semantics: given the gating input x ([M, K], M tokens and K gating
+    features) and the routing weight w ([K, N], one column per expert), for each
+    token m and expert n:
         score[m, n] = sigmoid( sum_k x[m, k] * w[k, n] )
         sigmoid(z)  = 1 / (1 + exp(-z))
-    top-1 路由输出：
-        topk_ids[m]     = argmax_n score[m, n]，平局取最小专家下标
+    top-1 routing output:
+        topk_ids[m]     = argmax_n score[m, n], ties resolved to the smallest
+                          expert index
         topk_weights[m] = max_n score[m, n]
-    内积（矩阵乘）以 float32 累加求值；top_k = 1 时归一化系数恒为 1，
-    权重即原 sigmoid 得分，无需再除以和。
+    The inner product (matrix multiply) is evaluated with float32 accumulation;
+    with top_k = 1 the normalization coefficient is always 1, so the weight is
+    the raw sigmoid score and there is no need to divide by a sum.
 
-    【融合共享专家列】fused_shared_experts=True 时在 top-1 结果之后追加一
-    列固定的共享专家：id 列追加 N（= 专家数，落在真实专家编号区间之外），
-    权重列追加 1.0。False 时不追加，输出仅一列。
+    Fused shared expert column: with fused_shared_experts=True one fixed shared
+    expert column is appended after the top-1 result -- the id column gets N
+    (= the number of experts, outside the real expert id range) and the weight
+    column gets 1.0. With False nothing is appended and the output has a single
+    column.
 
-    【输入输出规格】
-        x   [M, K] float16/bfloat16，连续；M/K/N >= 1，允许非 2 次幂
-        w   [K, N] 与 x 同 dtype，连续
-        输出 单个 float32 张量 [M, 2*C]，C = 1 + fused_shared_experts：
-            out[:, :C] = topk_ids 的整数以 fp32 表示（< 2^24，精确）
-            out[:, C:] = topk_weights（fp32 sigmoid 得分；融合列恒 1.0）
-        评测器会把全部输入 cast 成 fp32 传入（本算子输入均为浮点，无损）。
+    Input/output specification:
+        x   [M, K] float16/bfloat16, contiguous; M/K/N >= 1, non powers of two
+            allowed
+        w   [K, N] same dtype as x, contiguous
+        output  a single float32 tensor [M, 2*C], C = 1 + fused_shared_experts:
+            out[:, :C] = the integers of topk_ids represented in fp32 (< 2^24,
+                         exact)
+            out[:, C:] = topk_weights (fp32 sigmoid scores; the fused column is
+                         always 1.0)
+        The evaluator casts all inputs to fp32 before passing them in (all
+        inputs of this operator are floating point, so this is lossless).
 
-    实现约束（违规判负）：
-      - 核心计算（x·w 的逐块矩阵乘、sigmoid、top-1 选择与平局裁决、融合
-        共享专家列写回）必须在提交文件内的 Triton kernel 中完成；官方实现
-        为单 kernel 全融合（得分矩阵不落存），拆成多个 Triton kernel 不判
-        负，但调用 ATen 捷径判负。
-      - 矩阵乘内积累加一律 float32（输入可为 fp16/bf16/fp32）。
-      - 输出严格按上述单张量打包协议为 float32。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
+    Implementation constraints (violations are scored as failures):
+      - Core computation (the block-wise x * w matrix multiply, sigmoid, the
+        top-1 selection and tie-break, writing back the fused shared expert
+        column) must be done in a Triton kernel inside the submitted file; the
+        official implementation fully fuses everything into a single kernel (the
+        score matrix is never materialized), splitting it into several Triton
+        kernels is not scored as a failure, but calling ATen shortcuts is.
+      - Accumulation inside the matrix multiply is always float32 (inputs may be
+        fp16/bf16/fp32).
+      - The output is strictly float32 per the single-tensor packing protocol
+        above.
+      - The __init__ and forward signatures of ModelNew must not be changed.
 
-    禁用列表：aiter / torch.matmul / torch.bmm / torch.einsum /
-    torch.nn.functional.linear / torch.topk / torch.argmax / torch.sigmoid。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    Disallowed list: aiter / torch.matmul / torch.bmm / torch.einsum /
+    torch.nn.functional.linear / torch.topk / torch.argmax / torch.sigmoid.
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
     """
 
     def __init__(self, fused_shared_experts: bool = True):
@@ -57,39 +72,43 @@ class Model(nn.Module):
         self.fused_shared_experts = bool(fused_shared_experts)
 
     def forward(self, x, w):
-        assert x.dim() == 2 and w.dim() == 2, "x / w 必须是 2 维张量"
+        assert x.dim() == 2 and w.dim() == 2, "x / w must be 2-D tensors"
         M, K = x.shape
         Kb, N = w.shape
-        assert K == Kb, "x 的最后一维必须等于 w 的行数"
+        assert K == Kb, "the last dimension of x must equal the number of rows of w"
 
-        # 参考实现自由使用 torch 算子；得分在 float32 中求值
+        # The reference implementation may use torch operators freely; scores are
+        # evaluated in float32
         scores = torch.sigmoid(
             torch.matmul(x.to(torch.float32), w.to(torch.float32)))   # [M, N]
 
-        # top-1：torch.max 平局取首个（最小）下标，与官方 kernel 的
-        # tl.argmax(tie_break_left=True) 语义一致
+        # top-1: torch.max resolves ties to the first (smallest) index, matching
+        # the tl.argmax(tie_break_left=True) semantics of the official kernel
         top1_weights, top1_ids = torch.max(scores, dim=1)
 
         ids = top1_ids.to(torch.int32).unsqueeze(1)
         weights = top1_weights.unsqueeze(1)
         if self.fused_shared_experts:
-            # 融合共享专家列：id 追加 N（专家数，真实专家区间之外）、权重追加 1.0
+            # Fused shared expert column: append N to the ids (the expert count,
+            # outside the real expert range) and 1.0 to the weights
             ids = torch.cat([ids, torch.full((M, 1), N, dtype=torch.int32, device=ids.device)], dim=1)
             weights = torch.cat([weights, torch.ones((M, 1), dtype=torch.float32, device=weights.device)], dim=1)
 
-        # 单张量打包协议：[ids（整数，fp32 精确）| weights]
+        # Single-tensor packing protocol: [ids (integers, exact in fp32) | weights]
         return torch.cat([ids.to(torch.float32), weights.to(torch.float32)], dim=1)
 
 
 def get_init_inputs():
-    return [True]   # fused_shared_experts（官方测试恒开）
+    return [True]   # fused_shared_experts (always on in the official test)
 
 
 def get_inputs():
-    # 固定 shape 族（M=1024, K=5120, N=128，bf16，融合共享专家）；随机部分
-    # 消费全局 RNG——评测器在 set_seed 后调用本函数，多轮 correctness trial
-    # 因此获得输入多样性。取值分布对齐官方测试的 [-2, 2] 均匀整数（整数得
-    # 分在 fp32 累加链上精确可复现，平局裁决确定）
+    # Fixed shape family (M=1024, K=5120, N=128, bf16, fused shared expert); the
+    # random part consumes the global RNG -- the evaluator calls this function
+    # after set_seed, so multiple correctness trials see diverse inputs. The value
+    # distribution matches the official test's uniform integers over [-2, 2]
+    # (integer scores are exactly reproducible along the fp32 accumulation chain,
+    # so the tie-break is deterministic)
     M, K, N = 1024, 5120, 128
     x = torch.randint(-2, 3, (M, K)).to(torch.bfloat16)
     w = torch.randint(-2, 3, (K, N)).to(torch.bfloat16)
@@ -98,14 +117,18 @@ def get_inputs():
 
 def make_inputs(m: int, k: int, n: int, fused_shared_experts: bool = True,
                 dtype: str = "bfloat16", dist: str = "int", seed: int = 0):
-    """按公开/隐藏/性能案例描述生成输入。仅在评测端运行（CPU 生成，评测器
-    搬运到设备）。字段与 hidden/perf case 一一对应；fused_shared_experts
-    同时是 Model 构造超参，原样传给 Model。
+    """Generate inputs from a public/hidden/perf case description. Runs on the
+    evaluation side only (generated on CPU; the evaluator moves them to the
+    device). The fields map one-to-one onto the hidden/perf cases;
+    fused_shared_experts is also the Model constructor hyperparameter and is
+    passed to Model as it is.
 
-    dist="int"：[-2, 2] 均匀整数（与官方测试的输入生成同分布；整数得分在
-    fp32 中精确，平局裁决确定）。dist="bench"：x ~ randn、w ~ randn*0.1
-    （与官方基准的输入生成同分布）。消费顺序固定：先 x 后 w，同 seed 下
-    逐位可复现。
+    dist="int": uniform integers over [-2, 2] (the same distribution as the
+    official test input generator; integer scores are exact in fp32, so the
+    tie-break is deterministic). dist="bench": x ~ randn, w ~ randn*0.1 (the
+    same distribution as the official benchmark input generator). The
+    consumption order is fixed: x first, then w; bit-reproducible under the same
+    seed.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)

@@ -1,84 +1,112 @@
-# 5002_conv2d_bwd —— 标准 2D 卷积反向（dgrad / wgrad）的 model_class
-# （KernelBench 兼容）题目文件。
+# 5002_conv2d_bwd -- model_class (KernelBench compatible) task file for the
+# standard 2D convolution backward pass (dgrad / wgrad).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=5002, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=5002, backend=cuda (HIP).
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """标准 2D 卷积反向：对输入求梯度（dgrad）与对权值求梯度（wgrad）。
+    """Standard 2D convolution backward: gradient with respect to the input
+    (dgrad) and gradient with respect to the weights (wgrad).
 
-    语义（NCHW、groups=1、无 bias，与 PyTorch 前向 conv2d 严格一致）：
-        前向 y = conv2d(x, weight, stride=(stride_h,stride_w),
-                        padding=(pad_h,pad_w), dilation=(dil_h,dil_w))，
-        输出尺寸
+    Semantics (NCHW, groups=1, no bias, strictly consistent with the PyTorch
+    forward conv2d):
+        forward y = conv2d(x, weight, stride=(stride_h,stride_w),
+                        padding=(pad_h,pad_w), dilation=(dil_h,dil_w)),
+        output size
             out_h = floor((H + 2*pad_h - dil_h*(R-1) - 1) / stride_h) + 1
-        （out_w 同理）；给定上游梯度 dy = dL/dy（形状
-        (N, out_c, out_h, out_w)）：
-            dgrad：dx = dL/dx，形状 (N, C, H, W)
-            wgrad：dw = dL/dw，形状 (out_c, C, R, S)
-    __init__ 参数 variant 选择返回的方向：
-        "dgrad"：返回 dx；此时 x 的数值不参与输出（仅形状约定）；
-        "wgrad"：返回 dw；此时 weight 的数值不参与输出（仅形状约定）。
-    forward(dy, weight, x) 为固定三输入签名，各张量含义：
-        dy     (N, out_c, out_h, out_w)   上游梯度，两方向都消费
-        weight (out_c, C, R, S)           卷积核（out_c 输出通道 / C 输入通道）
-        x      (N, C, H, W)               前向输入
-    forward 返回单张量 out——两方向均天然单输出，无拼接打包：
-        dgrad → (N, C, H, W)；wgrad → (out_c, C, R, S)；dtype 同输入
-        （本题为 float32）。
+        (likewise for out_w); given the upstream gradient dy = dL/dy (shape
+        (N, out_c, out_h, out_w)):
+            dgrad: dx = dL/dx, shape (N, C, H, W)
+            wgrad: dw = dL/dw, shape (out_c, C, R, S)
+    The __init__ parameter variant selects which direction is returned:
+        "dgrad": returns dx; the values of x do not take part in the output
+                 here (shape convention only);
+        "wgrad": returns dw; the values of weight do not take part in the
+                 output here (shape convention only).
+    forward(dy, weight, x) has a fixed three-input signature; the tensors mean:
+        dy     (N, out_c, out_h, out_w)   upstream gradient, consumed by both
+                                          directions
+        weight (out_c, C, R, S)           convolution kernel (out_c output
+                                          channels / C input channels)
+        x      (N, C, H, W)               forward input
+    forward returns the single tensor out -- both directions are inherently
+    single-output, with no concatenation packing:
+        dgrad -> (N, C, H, W); wgrad -> (out_c, C, R, S); dtype as the inputs
+        (float32 for this task).
 
-    输入输出规格：
-        dy / weight / x 均为 float32、contiguous、NCHW 排布；各维 >= 1；
-        R/S 允许 1（1x1 卷积）；H/W 允许 1、奇数、非 2 的幂、非 16 对齐；
-        stride/dilation >= 1、padding >= 0，padding 为前向 conv 的四向对称
-        (pad_h, pad_w) 语义（非对称 pre/post padding 不在本题域内）；一致性约束
-            H + 2*pad_h >= dil_h*(R-1) + 1，W + 2*pad_w >= dil_w*(S-1) + 1，
-        且 dy 的空间尺寸必须等于前向公式的 out_h/out_w。
-        输入值域为常规 randn 量级（无 inf/NaN）。评测器会把全部输入 cast
-        成 fp32 传入。
+    Input/output specification:
+        dy / weight / x are all float32, contiguous, NCHW layout; every
+        dimension >= 1;
+        R/S may be 1 (1x1 convolution); H/W may be 1, odd, non-power-of-two,
+        not 16-aligned;
+        stride/dilation >= 1, padding >= 0, padding follows the four-sided
+        symmetric (pad_h, pad_w) semantics of the forward conv (asymmetric
+        pre/post padding is outside the domain of this task); consistency
+        constraint
+            H + 2*pad_h >= dil_h*(R-1) + 1, W + 2*pad_w >= dil_w*(S-1) + 1,
+        and the spatial size of dy must equal out_h/out_w from the forward
+        formula.
+        Input values are ordinary randn magnitude (no inf/NaN). The evaluator
+        casts all inputs to fp32 before the call.
 
-    实现约束（违规判负）：
-        - 核心计算必须在提交文件内以 Triton kernel 完成：dgrad 的散射累加
-          （dy 对卷积窗按 stride/dilation 反卷积累加）或 wgrad 的相关累加
-          （x 窗口与 dy 的互相关求和），禁止回退到 torch 卷积或 autograd。
-        - ModelNew 的 __init__ 与 forward 签名不可更改；forward 返回单张量
-          out（评测器按单输出比较）。
-        - 数值约定：float32 输入直接以 float32 累加，不做半精度下转。
+    Implementation constraints (violations are scored as failures):
+        - The core computation must be done with a HIP kernel inside the
+          submitted file: the scatter accumulation of dgrad (dy convolved back
+          over the kernel window following stride/dilation) or the correlation
+          accumulation of wgrad (summing the cross-correlation of x windows
+          with dy); falling back to torch convolution or autograd is
+          forbidden.
+        - The __init__ and forward signatures of ModelNew must not be changed;
+          forward returns the single tensor out (the evaluator compares a
+          single output).
+        - Numeric contract: float32 inputs are accumulated directly in float32,
+          with no downcast to half precision.
 
-    禁用列表：aiter / torch.nn.functional.conv2d / F.conv2d / torch.conv2d /
+    Forbidden (static audit strips docstrings and comments, then does literal
+    substring matching):
+    aiter / torch.nn.functional.conv2d / F.conv2d / torch.conv2d /
     torch.nn.Conv2d / torch.nn.functional.conv_transpose2d /
     F.conv_transpose2d / torch.nn.ConvTranspose2d /
     torch.nn.grad.conv2d_input / torch.nn.grad.conv2d_weight /
     aten.conv2d / aten.convolution / aten._convolution /
-    aten.conv_transpose2d / aten.convolution_backward（含 torch.ops.aten.*、
-    at::.* 等一切拼写） / torch.autograd / .backward( / unfold /
-    F.fold / torch.nn.functional.fold / im2col / col2im / as_strided；
-    闭源库 MIOpen / hipDNN / cuDNN / rocBLAS / hipBLASLt 同样禁止（全局黑名单）。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    aten.conv_transpose2d / aten.convolution_backward (including every
+    spelling such as torch.ops.aten.*, at::.*) / torch.autograd / .backward( /
+    unfold / F.fold / torch.nn.functional.fold / im2col / col2im / as_strided;
+    the closed-source libraries MIOpen / hipDNN / cuDNN / rocBLAS / hipBLASLt
+    are forbidden as well (global blacklist).
+    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
+    regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
+    is not available on this machine).
     """
 
     def __init__(self, variant: str = "dgrad", stride_h: int = 1, stride_w: int = 1, pad_h: int = 1, pad_w: int = 1, dil_h: int = 1, dil_w: int = 1):
-        # 注意：__init__/forward 的 def 签名必须保持单行（框架 loader 按首行
-        # 提取签名生成 ModelNew scaffold）。
+        # Note: the def signatures of __init__/forward must stay single-line
+        # (the framework loader extracts the signature from the first line to
+        # generate the ModelNew scaffold).
         super().__init__()
-        assert variant in ("dgrad", "wgrad"), "variant 必须是 dgrad / wgrad 之一"
+        assert variant in ("dgrad", "wgrad"), "variant must be either dgrad or wgrad"
         self.variant = variant
         self.stride_h, self.stride_w = int(stride_h), int(stride_w)
         self.pad_h, self.pad_w = int(pad_h), int(pad_w)
         self.dil_h, self.dil_w = int(dil_h), int(dil_w)
 
     def forward(self, dy, weight, x):
-        # 对前向 conv2d 构图后用 autograd 反传：保证 dgrad / wgrad 与前向
-        # 卷积语义严格一致（reference 不受禁用列表约束；数学上 dx 与 x 的
-        # 数值无关、dw 与 weight 的数值无关，autograd 自然给出该定义）。
+        # Build the forward conv2d graph and backpropagate with autograd: this
+        # keeps dgrad / wgrad strictly consistent with the forward convolution
+        # semantics (the reference is not bound by the forbidden list;
+        # mathematically dx does not depend on the values of x and dw does not
+        # depend on the values of weight, and autograd naturally yields exactly
+        # that definition).
         xg = x.detach().requires_grad_(True)
         wg = weight.detach().requires_grad_(True)
         y = torch.nn.functional.conv2d(
@@ -99,9 +127,11 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族（样例口径：stride=1、pad=1、dilation=1，故 dy 与 x 同为
-    # (4, 64/32, 16, 16) 族的对应件）；随机部分消费全局 RNG——评测器在 set_seed
-    # 后调用本函数，多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family (sample convention: stride=1, pad=1, dilation=1, so dy
+    # and x are corresponding members of the same (4, 64/32, 16, 16) family);
+    # the random part consumes the global RNG -- the evaluator calls this
+    # function after set_seed, so multiple correctness trials therefore see
+    # diverse inputs
     n, c, h, w = 4, 32, 16, 16
     out_c, r, s = 64, 3, 3
     dy = torch.randn(n, out_c, h, w).to(torch.float32)
@@ -114,22 +144,28 @@ def make_inputs(n: int, c: int, h: int, w: int, out_c: int, r: int, s: int,
                 stride_h: int = 1, stride_w: int = 1, pad_h: int = 1, pad_w: int = 1,
                 dil_h: int = 1, dil_w: int = 1, variant: str = "dgrad",
                 dtype: str = "float32", seed: int = 0):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description.
 
-    消费顺序固定：dy -> weight -> x（均 torch.randn 后 cast 到 dtype），全部
-    来自同一 torch.Generator(seed)，同 seed 下逐位可复现。dy 的空间尺寸由
-    前向公式从 x/weight/卷积属性推出（out = floor((in + 2*pad - dil*(k-1) - 1)
-    / stride) + 1），保证三张量对任意 variant 始终自洽。variant 与各卷积属性
-    同时是构造 Model 的 init 超参，此处仅做合法性校验。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    The consumption order is fixed: dy -> weight -> x (all torch.randn, then
+    cast to dtype), all drawn from the same torch.Generator(seed), so the same
+    seed reproduces inputs bit-for-bit. The spatial size of dy is derived by the
+    forward formula from x/weight/the convolution attributes
+    (out = floor((in + 2*pad - dil*(k-1) - 1) / stride) + 1), which keeps the
+    three tensors self-consistent for any variant. variant and the convolution
+    attributes are also the init hyper-parameters used to construct the Model;
+    only validity checks are done here.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
-    assert variant in ("dgrad", "wgrad"), "variant 必须是 dgrad / wgrad 之一"
-    assert min(n, c, h, w, out_c, r, s) >= 1, "各维需 >= 1"
+    assert variant in ("dgrad", "wgrad"), "variant must be either dgrad or wgrad"
+    assert min(n, c, h, w, out_c, r, s) >= 1, "every dimension must be >= 1"
     assert min(stride_h, stride_w, dil_h, dil_w) >= 1 and min(pad_h, pad_w) >= 0, \
-        "stride/dilation >= 1 且 padding >= 0"
+        "stride/dilation >= 1 and padding >= 0"
     eff_r, eff_s = dil_h * (r - 1) + 1, dil_w * (s - 1) + 1
-    assert h + 2 * pad_h >= eff_r and w + 2 * pad_w >= eff_s, "前向卷积尺寸不自洽"
+    assert h + 2 * pad_h >= eff_r and w + 2 * pad_w >= eff_s, "the forward convolution sizes are inconsistent"
     out_h = (h + 2 * pad_h - eff_r) // stride_h + 1
     out_w = (w + 2 * pad_w - eff_s) // stride_w + 1
     dy = torch.randn(n, out_c, out_h, out_w, generator=gen).to(dt)

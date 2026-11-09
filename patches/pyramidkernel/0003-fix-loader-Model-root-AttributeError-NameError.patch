@@ -1,0 +1,275 @@
+From 9f9549f4de7c82bde1a492c55107d68e5b2ded6b Mon Sep 17 00:00:00 2001
+From: uestcpyp <240867617@qq.com>
+Date: Fri, 16 Oct 2026 23:35:35 +0800
+Subject: [PATCH 3/6] =?UTF-8?q?fix(loader):=20=E8=84=9A=E6=89=8B=E6=9E=B6?=
+ =?UTF-8?q?=E8=A1=A5=E9=BD=90=20Model=20=E7=9A=84=E8=BE=85=E5=8A=A9?=
+ =?UTF-8?q?=E6=96=B9=E6=B3=95=E4=B8=8E=E6=A8=A1=E5=9D=97=E7=BA=A7=E5=AE=9A?=
+ =?UTF-8?q?=E4=B9=89=EF=BC=88root=20=E5=9F=BA=E7=BA=BF=E4=B8=8D=E5=86=8D?=
+ =?UTF-8?q?=20AttributeError/NameError=EF=BC=89?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+真机 dcukb_final 全量回扫：66 道里 13 道 root 基线不合法（9 道被判完全失败、4 道
+靠 Agent 自己绕过去）。这两类共 3 道，都是"抽取时漏东西"：
+
+缺陷 4 —— 丢掉 Model 的辅助方法
+  `_append_class_body` 只输出 class_preamble（非函数类体）+ __init__ + forward，
+  而 `_extract_class_preamble` 显式跳过 FunctionDef，于是 forward 用 `self._xxx(...)`
+  调用的私有辅助方法全丢：
+    5004_deform_conv2d_bwd  AttributeError: ... no attribute '_deform_conv2d_forward'
+    5009_conv_depthtospace   AttributeError: ... no attribute '_depth_to_space'
+    7001_ctc_loss            AttributeError: ... no attribute '_ctc_one'
+  （7001 早前那轮全量就已是这个错，靠 Agent 拿 1212x 才没暴露）
+  修法：新增 `_extract_extra_methods` 与 `_node_source_segment`（**含装饰器** ——
+  Python 3.8+ 的 FunctionDef.lineno 指向 def 行、装饰器只在 decorator_list 里，
+  ast.get_source_segment 会静默丢掉 @staticmethod / @torch.no_grad()）；
+  ProblemInfo 加 extra_methods；`_append_class_body` 在 forward 之后原样输出
+  （放在锚点区之外，不参与打分）。
+
+缺陷 5 —— 丢掉 Model 依赖的模块级定义
+  `_extract_imports` 只收集 Import/ImportFrom，模块级的 def 与赋值全都进不了脚手架：
+    3006_moe_op_mxfp4      NameError: name '_dequant_mxfp4' is not defined
+    4005_fused_mxfp4_quant NameError: name '_rmsnorm' is not defined
+  修法：新增 `_referenced_names` / `_defined_names` / `_extract_module_helpers`，
+  从 class 各片段直接引用的名字出发求**闭包**（3006 的 _dequant_mxfp4 内部还用
+  _E2M1_TABLE，实测这 2 道各带进 2 个模块级定义），按原文件顺序输出；三个 builder
+  在 imports 之后、类定义之前插入。`_class_member_segment` 正名为 `_node_source_segment`
+  （对模块级节点同样适用）。
+
+验证：
+  - verify_scaffold_fix2.py：66 道脚手架全部 ast.parse 通过；带辅助方法的 3 道全部
+    带过来；合成用例确认 @staticmethod 与 @torch.no_grad() 装饰器都保留
+  - verify_scaffold_fix3.py（功能验证，本地 CPU，最强判据）：13 道曾 root 不合法的题
+    全部 exec 脚手架 -> 实例化 ModelNew -> 跑 forward -> 与参考 allclose，
+    PASS 13 / NEED-GPU 0 / FAIL 0
+  - 本地全套测试 297 pass / 0 fail
+---
+ pyramidkernel/core/loader.py | 158 +++++++++++++++++++++++++++++++++--
+ 1 file changed, 153 insertions(+), 5 deletions(-)
+
+diff --git a/pyramidkernel/core/loader.py b/pyramidkernel/core/loader.py
+index cdf5c48..059f0c4 100644
+--- a/pyramidkernel/core/loader.py
++++ b/pyramidkernel/core/loader.py
+@@ -11,7 +11,7 @@ import ast
+ import hashlib
+ import re
+ import textwrap
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ from pathlib import Path
+ 
+ from ..backends import (
+@@ -43,6 +43,10 @@ class ProblemInfo:
+     forward_signature: str
+     forward_body: str
+     forward_steps: list[str]
++    # Model 上除 __init__/forward 之外的成员方法，原样保留（见 _extract_extra_methods）
++    extra_methods: list[str] = field(default_factory=list)
++    # Model 依赖的模块级定义（函数 / 常量 / 辅助类），原样保留（见 _extract_module_helpers）
++    module_helpers: list[str] = field(default_factory=list)
+ 
+ 
+ class KernelBenchLoader:
+@@ -157,17 +161,29 @@ class KernelBenchLoader:
+         self._find_function(module, "get_init_inputs", path)
+         init_node = self._find_method(model_class, "__init__", path)
+         forward_node = self._find_method(model_class, "forward", path)
++        class_preamble = self._extract_class_preamble(source, model_class)
++        init_body = self._extract_body(source, init_node, drop_super_init=True)
++        forward_body = self._extract_body(source, forward_node, drop_super_init=False)
++        forward_steps = self._extract_forward_steps(source, forward_node)
++        extra_methods = self._extract_extra_methods(source, model_class)
++        # 模块级定义按**闭包**取：样板 3006 的 forward 调 _dequant_mxfp4，而它内部又用
++        # _E2M1_TABLE —— 只看 class 的直接引用会漏掉后者。
++        wanted = KernelBenchLoader._referenced_names(
++            [class_preamble, init_body, forward_body, *forward_steps, *extra_methods]
++        )
+         return ProblemInfo(
+             path=path,
+             source_code=source,
+             description=ast.get_docstring(model_class) or path.stem.replace("_", " "),
+             imports_block=self._extract_imports(source, module),
+-            class_preamble=self._extract_class_preamble(source, model_class),
++            class_preamble=class_preamble,
+             init_signature=self._extract_signature(source, init_node),
+-            init_body=self._extract_body(source, init_node, drop_super_init=True),
++            init_body=init_body,
+             forward_signature=self._extract_signature(source, forward_node),
+-            forward_body=self._extract_body(source, forward_node, drop_super_init=False),
+-            forward_steps=self._extract_forward_steps(source, forward_node),
++            forward_body=forward_body,
++            forward_steps=forward_steps,
++            extra_methods=extra_methods,
++            module_helpers=self._extract_module_helpers(source, module, wanted),
+         )
+ 
+     def _build_scaffold(self, info: ProblemInfo, level: int, problem_id: int, backend: str) -> str:
+@@ -207,6 +223,7 @@ class KernelBenchLoader:
+ 
+     def _build_python_scaffold(self, info: ProblemInfo, level: int) -> str:
+         parts = self._imports_and_helpers(info.imports_block, helper_lines=[])
++        self._append_module_helpers(parts, info)
+         parts.append("class ModelNew(nn.Module):")
+         self._append_class_body(parts, info, level=level, forward_intro=[])
+         return "\n".join(parts).rstrip() + "\n"
+@@ -220,6 +237,7 @@ class KernelBenchLoader:
+         kernel_comment: str,
+     ) -> str:
+         parts = self._imports_and_helpers(info.imports_block, helper_lines=helper_lines)
++        self._append_module_helpers(parts, info)
+         parts.extend(
+             [
+                 f"# <<<IMPROVE:{kernel_anchor}>>>",
+@@ -280,6 +298,7 @@ class KernelBenchLoader:
+         if imports:
+             parts.append(imports)
+             parts.append("")
++        self._append_module_helpers(parts, info)
+         parts.extend(helper_lines)
+         parts.extend(["", "# <<<IMPROVE:user_helpers>>>", "# <<<END_IMPROVE>>>", ""])
+         parts.extend(
+@@ -363,6 +382,13 @@ class KernelBenchLoader:
+                     parts.append(f"        {line}" if line else "")
+             parts.append("        # <<<END_IMPROVE>>>")
+         parts.append("")
++        if info.extra_methods:
++            # Model 的辅助方法：forward 会以 self._xxx(...) 调用它们，缺了 root 节点
++            # 直接 AttributeError。它们不是优化目标，故放在锚点区之外、不参与打分。
++            for method in info.extra_methods:
++                for line in method.splitlines():
++                    parts.append(f"    {line}" if line else "")
++                parts.append("")
+ 
+     @staticmethod
+     def _ensure_cuda_imports(imports: str) -> str:
+@@ -403,6 +429,128 @@ class KernelBenchLoader:
+                 segments.append(ast.get_source_segment(source, node) or "")
+         return "\n".join(segment for segment in segments if segment)
+ 
++    @staticmethod
++    def _node_source_segment(source: str, node: ast.AST) -> str | None:
++        """取任意节点（类成员 / 模块级定义）的完整源码，**含装饰器**，并 dedent 到深度 0。
++
++        不能复用 `_normalized_segment`：Python 3.8+ 里 FunctionDef.lineno 指向 `def`
++        那一行，装饰器只存在于 decorator_list，`ast.get_source_segment` 会把
++        `@staticmethod` / `@torch.no_grad()` 之类静默丢掉。
++        """
++        lines = source.splitlines()
++        start = getattr(node, "lineno", 1)
++        for dec in getattr(node, "decorator_list", None) or []:
++            start = min(start, getattr(dec, "lineno", start))
++        end = getattr(node, "end_lineno", None) or getattr(node, "lineno", 1)
++        segment = "\n".join(lines[start - 1:end])
++        return textwrap.dedent(segment).strip("\n") or None
++
++    @staticmethod
++    def _referenced_names(segments: list[str]) -> set[str]:
++        """收集若干代码片段里出现的全部裸名字。
++
++        含局部名也无妨 —— 宁可多带一个模块级定义，也不能漏（漏了就是 NameError）。
++        """
++        names: set[str] = set()
++        for segment in segments:
++            if not segment:
++                continue
++            try:
++                tree = ast.parse(textwrap.dedent(segment))
++            except SyntaxError:
++                continue
++            for node in ast.walk(tree):
++                if isinstance(node, ast.Name):
++                    names.add(node.id)
++        return names
++
++    @staticmethod
++    def _defined_names(node: ast.AST) -> list[str]:
++        """模块级节点定义出来的名字（函数 / 类名、赋值目标）。"""
++        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
++            return [node.name]
++        if isinstance(node, ast.Assign):
++            out: list[str] = []
++            for target in node.targets:
++                out.extend(e.id for e in ast.walk(target) if isinstance(e, ast.Name))
++            return out
++        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
++            return [node.target.id]
++        return []
++
++    @staticmethod
++    def _extract_module_helpers(source: str, module: ast.Module, wanted: set[str]) -> list[str]:
++        """把 Model 依赖的**模块级**定义（函数 / 常量 / 辅助类）原样带进脚手架。
++
++        为什么要：`_extract_imports` 只取 Import/ImportFrom，模块级的 def 与赋值全都
++        进不了脚手架，forward 一调用就
++        `NameError: name '_dequant_mxfp4' is not defined`（真机实测 3006_moe_op_mxfp4
++        与 4005_fused_mxfp4_quant 的 root 都因此跑不起来，best 只能靠 Agent 自己绕）。
++
++        取法：从 class 各片段直接引用的名字出发求**闭包** —— 被选中的定义内部引用到的
++        模块级名字也要带上（3006 的 `_dequant_mxfp4` 内部用 `_E2M1_TABLE`），
++        最后按原文件顺序输出。
++        """
++        by_name: dict[str, ast.AST] = {}
++        for node in module.body:
++            for name in KernelBenchLoader._defined_names(node):
++                by_name.setdefault(name, node)
++
++        selected: list[ast.AST] = []
++        seen_ids: set[int] = set()
++        seen_names: set[str] = set()
++        queue = list(wanted)
++        while queue:
++            name = queue.pop()
++            if name in seen_names:
++                continue
++            seen_names.add(name)
++            node = by_name.get(name)
++            if node is None or id(node) in seen_ids:
++                continue
++            seen_ids.add(id(node))
++            selected.append(node)
++            queue.extend(n.id for n in ast.walk(node) if isinstance(n, ast.Name))
++
++        order = {id(node): index for index, node in enumerate(module.body)}
++        selected.sort(key=lambda node: order[id(node)])
++        out: list[str] = []
++        for node in selected:
++            segment = KernelBenchLoader._node_source_segment(source, node)
++            if segment:
++                out.append(segment)
++        return out
++
++    @staticmethod
++    def _append_module_helpers(parts: list[str], info: ProblemInfo) -> None:
++        """把 module_helpers 原样插进脚手架（imports 之后、类定义之前）。"""
++        for block in info.module_helpers:
++            parts.extend(block.splitlines())
++            parts.append("")
++
++    @staticmethod
++    def _extract_extra_methods(source: str, class_node: ast.ClassDef) -> list[str]:
++        """Model 上除 __init__ / forward 之外的成员方法，原样保留。
++
++        为什么必须有：多个 Model 把核心计算放在私有辅助方法里（样板：
++        `5004_deform_conv2d_bwd` 的 `Model._deform_conv2d_forward`、
++        `5009_conv_depthtospace` 的 `Model._depth_to_space`），forward 通过
++        `self._xxx(...)` 调用它们。脚手架只输出 __init__ + forward 的话，ModelNew
++        上就没有这些方法，root 节点直接报
++        `AttributeError: 'ModelNew' object has no attribute '_deform_conv2d_forward'`，
++        整道题失去可比基线。
++        """
++        out: list[str] = []
++        for node in class_node.body:
++            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
++                continue
++            if node.name in ("__init__", "forward"):
++                continue
++            segment = KernelBenchLoader._node_source_segment(source, node)
++            if segment:
++                out.append(segment)
++        return out
++
+     @staticmethod
+     def _normalized_segment(source: str, node: ast.AST) -> str | None:
+         """取节点的源码片段，并把缩进归一化到"该节点自身深度为 0"。

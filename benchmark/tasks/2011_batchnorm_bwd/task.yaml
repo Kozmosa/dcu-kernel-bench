@@ -1,7 +1,7 @@
 id: "2011_batchnorm_bwd"
 name: batchnorm_bwd
 family: norm
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -26,8 +26,7 @@ description: >
   同时镜像到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel
   的原生 model_class 路径（--kernelbench-root benchmark/kernelbench_compat
   --level 3 --problem-id 2011），无需任何框架改动。starter 由框架 loader
-  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
-  forward_stmt_N），本任务包不单独提供 starter。
+  从 Model 自动生成 ModelNew scaffold（锚点：user_helpers / cuda_cpp / cuda_cu / init_body / forward_stmt_N），本任务包不单独提供 starter。
 
 io:
   inputs:
@@ -65,13 +64,13 @@ tolerance:
     float32 重结合误差留出余量。以上为本评测集的验收容差，用于离线终审，
     与 2010 同口径前向（batch_norm 训练语义）autograd 反传的交叉验证相容
     （构建自检实测闭式解与 autograd 一致性在 1e-6 量级）。在线（搜索循环
-    内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与模型统一 cast
+    内）由 KernelBenchPaperEvaluator 判定：cuda 后端输入与模型统一 cast
     为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）。
 # 条目按 2007_rmsnorm 家族口径写成 API 全限定形式、不用裸子串
 # （batch_norm / batchnorm 裸词会误杀命名如 _batchnorm_bwd_kernel 的
-# 合法 Triton kernel）；miopen/cudnn/hipdnn 等闭源库由全局黑名单覆盖。
+# 合法 HIP kernel）；miopen/cudnn/hipdnn 等闭源库由全局黑名单覆盖。
 forbidden:
   - aiter
   - torch.batch_norm

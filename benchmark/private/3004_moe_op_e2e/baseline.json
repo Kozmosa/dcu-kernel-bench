@@ -1,1 +1,100 @@
-{"task_id": "3004_moe_op_e2e", "status": "placeholder", "baselines": []}
+{
+  "task_id": "3004_moe_op_e2e",
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_prefill_m1024_n4096_k2560_topk2",
+      "us": 5060.8,
+      "mean_us": 5064.885,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 16384.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_decode_m8_n8192_k2048_topk2",
+      "us": 6634.959,
+      "mean_us": 6671.754,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 16384.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_mid_m256_n2048_k1024_topk2",
+      "us": 1964.8,
+      "mean_us": 1965.397,
+      "impl": "aiter",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 2048.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_prefill_m1024_n4096_k2560_topk2",
+      "us": 6145.2,
+      "mean_us": 6147.263,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_decode_m8_n8192_k2048_topk2",
+      "us": 4859.04,
+      "mean_us": 4861.477,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_mid_m256_n2048_k1024_topk2",
+      "us": 4029.6,
+      "mean_us": 4186.49,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    }
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  },
+  "impls": [
+    "aiter",
+    "torch_eager"
+  ]
+}

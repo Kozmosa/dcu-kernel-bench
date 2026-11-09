@@ -1,0 +1,20 @@
+--- a/src/kernelbench/eval.py
++++ b/src/kernelbench/eval.py
+@@ -753,7 +753,16 @@
+         torch.randint(0, 2**32 - 1, (1,)).item() for _ in range(num_correct_trials)
+     ]
+ 
+-    with torch.no_grad():
++    # 注意：这里**不能**用 torch.no_grad()。若干「反向」题（1032_deform_attention_bwd /
++    # 5002_conv2d_bwd / 5006_spconv_bwd）的参考实现本身就是用 torch.autograd.grad 反传
++    # 求梯度的（reference 不受题面禁用列表约束），而 PyramidKernel 的 root 节点就是这份
++    # 参考的直通 —— 一旦包进 no_grad，root 自己就报
++    # "element 0 of tensors does not require grad and does not have a grad_fn"，
++    # 整道题无论 Agent 写什么都必判负（真机实测 root/stage=runtime 正是此错误）。
++    # 用 enable_grad() 而不是直接删掉 with：对无 requires_grad 张量的前向题零开销
++    # （PyTorch 根本不会建图），同时显式覆盖调用方可能存在的 no_grad 上下文。
++    # 反绕过不靠这里 —— 线上 forbidden 仅为 docstring 软约束，硬审计是离线 static_audit。
++    with torch.enable_grad():
+ 
+         for trial in range(num_correct_trials):
+ 

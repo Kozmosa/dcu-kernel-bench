@@ -1,69 +1,81 @@
-# 3003_moe_op — MoE（Mixture-of-Experts）路由 grouped GEMM（model_class 形态）。
+# 3003_moe_op -- MoE (Mixture-of-Experts) routed grouped GEMM (model_class
+# form).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。计算语义与上游 MoE grouped GEMM
-# 内核一致：float32 中间计算，输出 cast 回输入 dtype。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here. The computation
+# matches the upstream MoE grouped GEMM kernel: float32 intermediate math, the
+# output cast back to the input dtype.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=3003, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=3003, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """MoE（Mixture-of-Experts）路由 grouped GEMM：非量化权重、含路由加权。
+    """MoE (Mixture-of-Experts) routed grouped GEMM: non-quantized weights, with
+    routing weighting.
 
-    每个 token 的特征向量 A[m]（K 维）按路由表 topk_ids 被发送到
-    num_experts 个专家中的 top_k 个；专家 e 的权重是矩阵 B[e]（N×K）。对
-    每个 token m 与其第 j 个路由槽位（记 e = topk_ids[m, j]），输出定义为
+    Each token's feature vector A[m] (K dimensions) is dispatched by the routing
+    table topk_ids to top_k of the num_experts experts; expert e owns the weight
+    matrix B[e] (N x K). For each token m and its j-th routing slot (write
+    e = topk_ids[m, j]), the output is defined as
 
-        C[m, j, n] = topk_weights[m, j] * Σ_k A[m, k] · B[e, n, k]
+        C[m, j, n] = topk_weights[m, j] * sum_k A[m, k] * B[e, n, k]
 
-    即 grouped GEMM 后逐槽位乘以路由权重；中间累加 float32，输出 cast 回
-    输入 dtype。所有 (m, j) 槽位都命中 [0, num_experts) 内的合法专家，不存在
-    未定义输出。
+    i.e. grouped GEMM followed by a per-slot multiply by the routing weight;
+    intermediate accumulation is float32 and the output is cast back to the
+    input dtype. Every (m, j) slot hits a legal expert inside [0, num_experts),
+    so no output is undefined.
 
-    输入还携带 grouped GEMM 的块对齐布局（由上游 router 产出，按它取数与
-    按上式直接计算完全等价）：
-      - sorted_token_ids：int32，长度 EM = M*top_k + num_experts*(block_m-1)，
-        本题 block_m 恒为 64。把槽位展平编号 p = m*top_k + j，按专家编号
-        升序分组重排，每组内补齐到 block_m 的整数倍；组内补齐位与数组尾部
-        填哨兵值 M*top_k（即 num_valid_tokens；offs_token ≥ 它即为 padding，
-        不产生输出）。
-      - expert_ids：int32，长度 M*top_k + num_experts；第 t 块（覆盖
-        sorted_token_ids[t*block_m : (t+1)*block_m]）所属专家编号，取值
-        [0, num_experts)，无 -1；超出 num_tokens_post_padded 对应块数的尾部
-        为哨兵填充，不得读取。
-      - num_tokens_post_padded：int32 标量（长度 1），sorted_token_ids 的
-        有效长度（含块内 padding），恒为 block_m 的整数倍。
-    kernel 的 BLOCK_SIZE_M 必须整除 block_m（即取 64 的因子），才能保证每个
-    program 块内专家唯一。
+    The inputs also carry the block-aligned layout of grouped GEMM (produced by
+    the upstream router; fetching data through it is exactly equivalent to
+    computing the formula above directly):
+      - sorted_token_ids: int32, length EM = M*top_k + num_experts*(block_m-1),
+        with block_m always 64 in this task. Number the slots flat as
+        p = m*top_k + j, regroup them by ascending expert id, and pad each group
+        up to a multiple of block_m; the intra-group padding positions and the
+        array tail hold the sentinel value M*top_k (that is num_valid_tokens;
+        offs_token >= it means padding and produces no output).
+      - expert_ids: int32, length M*top_k + num_experts; the expert id owning
+        block t (covering sorted_token_ids[t*block_m : (t+1)*block_m]), values
+        in [0, num_experts), no -1; positions past the number of blocks implied
+        by num_tokens_post_padded are sentinel fill and must not be read.
+      - num_tokens_post_padded: int32 scalar (length 1), the valid length of
+        sorted_token_ids (intra-block padding included), always a multiple of
+        block_m.
+    The kernel's BLOCK_SIZE_M must divide block_m (that is, be a factor of 64)
+    so that every program block sees a single expert.
 
-    输入输出规格：
+    Input/output specification:
         A                       (M, K)             float16/bfloat16
-        B                       (E, N, K)          同 A（E = num_experts）
+        B                       (E, N, K)          same as A (E = num_experts)
         topk_weights            (M, top_k)         float32
         topk_ids                (M, top_k)         int32
         sorted_token_ids        (EM,)              int32
         expert_ids              (M*top_k + E,)     int32
         num_tokens_post_padded  (1,)               int32
-        返回 C                  (M, top_k, N)      dtype 同 A
+        returns C               (M, top_k, N)      dtype same as A
 
-    实现约束（违规判负）：
-        - 核心计算（按布局取数 + grouped GEMM + 路由加权写出）必须在提交
-          文件内的 Triton kernel 中完成，禁止调用 torch.matmul /
-          torch.mm / torch.bmm / torch.baddbmm / torch.addmm /
-          torch.einsum / torch.nn.functional.linear 或任何预编译算子库
-          完成任何矩阵乘。
-        - ModelNew 的 __init__ 与 forward 签名不可更改。
-        - 中间累加用 float32；输出 cast 回输入 dtype。
-        - 哨兵 padding 槽位不得污染任何有效输出。
+    Implementation constraints (violations are scored as failures):
+        - Core computation (layout-driven data fetch + grouped GEMM + weighted
+          routing write-out) must be done in a Triton kernel inside the
+          submitted file; calling torch.matmul / torch.mm / torch.bmm /
+          torch.baddbmm / torch.addmm / torch.einsum /
+          torch.nn.functional.linear or any precompiled operator library for
+          any matrix multiply is forbidden.
+        - The __init__ and forward signatures of ModelNew must not be changed.
+        - Use float32 for intermediate accumulation; the output is cast back to
+          the input dtype.
+        - Sentinel padding slots must not contaminate any valid output.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：非量化 fp16/bf16 权重与激活（无 w8a8 / int4 / mxfp4 量化），
-    无激活融合（SiLU/GELU 等），无 bias，top_k ≤ 8，num_experts ≤ 256。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: non-quantized fp16/bf16 weights and activations (no w8a8 / int4 /
+    mxfp4 quantization), no fused activation (SiLU/GELU etc.), no bias,
+    top_k <= 8, num_experts <= 256.
     """
 
     def __init__(self, num_experts: int, top_k: int):
@@ -72,9 +84,10 @@ class Model(nn.Module):
         self.top_k = top_k
 
     def forward(self, A, B, topk_weights, topk_ids, sorted_token_ids, expert_ids, num_tokens_post_padded):
-        # KernelBench 评测器会把全部输入张量 cast 成评测 precision（triton
-        # 后端为 fp32）；专家编号/排序表都是小整数，fp32 可精确表示，此处
-        # 无损恢复
+        # The KernelBench evaluator casts every input tensor to the evaluation
+        # precision (fp32 for the triton backend); expert ids and the sorted
+        # tables are small integers and exactly representable in fp32, so
+        # restore them here losslessly
         topk_ids = topk_ids.to(torch.long)
         sorted_token_ids = sorted_token_ids.to(torch.long)
         expert_ids = expert_ids.to(torch.long)
@@ -88,12 +101,13 @@ class Model(nn.Module):
         b = B.to(torch.float32)
         w = topk_weights.to(torch.float32).reshape(-1)
 
-        # 参考实现按专家分组做 GEMM（与按槽位逐个点积等价）；
-        # sorted_token_ids / expert_ids / num_tokens_post_padded 是供 kernel
-        # 消费的块对齐布局，参考实现不依赖它们
+        # The reference implementation does the GEMM grouped by expert (which is
+        # equivalent to a per-slot dot product); sorted_token_ids / expert_ids /
+        # num_tokens_post_padded are the block-aligned layout the kernel
+        # consumes, and the reference implementation does not depend on them
         out = torch.zeros(M, top_k, N, dtype=torch.float32, device=A.device)
         flat_out = out.view(M * top_k, N)
-        a_rp = a.repeat_interleave(top_k, dim=0)   # 槽位 p = m*top_k + j -> a[m]
+        a_rp = a.repeat_interleave(top_k, dim=0)   # slot p = m*top_k + j -> a[m]
         flat_ids = topk_ids.reshape(-1)
         for e in range(E):
             mask = flat_ids == e
@@ -103,12 +117,13 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    return [16, 4]   # num_experts, top_k（与 get_inputs 的 shape 族一致）
+    return [16, 4]   # num_experts, top_k (consistent with the shape family of get_inputs)
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family; the random part consumes the global RNG -- the
+    # evaluator calls this function after set_seed, so multiple correctness
+    # trials see diverse inputs
     return _generate_inputs(
         num_tokens=64, num_experts=16, top_k=4,
         in_features=512, out_features=256,
@@ -119,10 +134,11 @@ def get_inputs():
 def make_inputs(num_tokens: int, num_experts: int, top_k: int,
                 in_features: int, out_features: int, block_m: int = 64,
                 dtype: str = "float16", seed: int = 0):
-    """确定性 case 生成器（评测端专用，CPU 生成，评测器搬运到设备）。
+    """Deterministic case generator (evaluation side only; generated on CPU and
+    moved to the device by the evaluator).
 
-    参数字段与 hidden/perf case 一一对应；block_m 为 sorted 布局的块对齐
-    粒度，本题恒为 64。
+    The parameter fields map one-to-one onto the hidden/perf cases; block_m is
+    the block alignment granularity of the sorted layout, always 64 here.
     """
     gen = torch.Generator().manual_seed(seed)
     return _generate_inputs(num_tokens, num_experts, top_k, in_features,
@@ -131,8 +147,9 @@ def make_inputs(num_tokens: int, num_experts: int, top_k: int,
 
 def _generate_inputs(num_tokens, num_experts, top_k, in_features,
                      out_features, block_m, dtype, gen):
-    # gen=None 时消费全局 RNG（get_inputs 路径）；官方输入分布：激活 randn/10、
-    # 权重 rand/10，路由权重取 logits 过 softmax 后的 top-k
+    # gen=None consumes the global RNG (the get_inputs path); official input
+    # distribution: activations randn/10, weights rand/10, routing weights are
+    # the top-k of softmax over the logits
     a = torch.randn(num_tokens, in_features, dtype=dtype, generator=gen) / 10
     b = torch.rand(num_experts, out_features, in_features, dtype=dtype,
                    generator=gen) / 10
@@ -149,11 +166,14 @@ def _generate_inputs(num_tokens, num_experts, top_k, in_features,
 
 
 def _moe_align_block_size(topk_ids, num_experts, block_m):
-    """把 (M, top_k) 路由表展开为按专家分组、块对齐的 grouped GEMM 布局。
+    """Expand the (M, top_k) routing table into the expert-grouped, block-aligned
+    grouped GEMM layout.
 
-    对齐协议：槽位 p = m*top_k + j 按专家升序分组重排；每组补齐到 block_m
-    的整数倍，组内 padding 与数组尾部填哨兵值 M*top_k；expert_ids 按块记录
-    所属专家，尾部同样以哨兵填充；num_tokens_post_padded 记录有效长度。
+    Alignment protocol: slots p = m*top_k + j are regrouped by ascending expert
+    id; every group is padded up to a multiple of block_m, with the intra-group
+    padding and the array tail filled with the sentinel value M*top_k;
+    expert_ids records the owning expert per block, its tail filled with the
+    sentinel as well; num_tokens_post_padded records the valid length.
     """
     M, top_k = topk_ids.shape
     num_valid = topk_ids.numel()

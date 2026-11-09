@@ -1,7 +1,7 @@
 id: "5008_conv_bias_act"
 name: conv_bias_act_fused
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -23,8 +23,7 @@ description: >
   到 benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的
   原生 model_class 路径（--kernelbench-root benchmark/kernelbench_compat
   --level 3 --problem-id 5008），无需任何框架改动。starter 由框架 loader
-  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
-  forward_stmt_N），本任务包不单独提供 starter。
+  从 Model 自动生成 ModelNew scaffold（锚点：user_helpers / cuda_cpp / cuda_cu / init_body / forward_stmt_N），本任务包不单独提供 starter。
 
 io:
   inputs:

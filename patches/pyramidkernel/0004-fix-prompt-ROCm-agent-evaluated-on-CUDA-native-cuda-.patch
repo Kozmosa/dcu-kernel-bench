@@ -1,0 +1,112 @@
+From e62860466348d2a873b5e3ffba5089ebc9b69500 Mon Sep 17 00:00:00 2001
+From: uestcpyp <240867617@qq.com>
+Date: Sun, 18 Oct 2026 20:45:06 +0800
+Subject: [PATCH 4/6] =?UTF-8?q?fix(prompt):=20ROCm=20=E4=B8=8A=E4=B8=8D?=
+ =?UTF-8?q?=E5=86=8D=E5=AF=B9=20agent=20=E8=AF=B4=20evaluated=20on=20CUDA?=
+ =?UTF-8?q?=EF=BC=8C=E5=B9=B6=E7=BB=99=20native-cuda=20=E5=90=8E=E7=AB=AF?=
+ =?UTF-8?q?=E8=A1=A5=20HIP=20=E6=8F=90=E7=A4=BA?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+原实现对所有 KernelBench 题都在 system prompt 里硬写
+"This task comes from the real KernelBench benchmark and is evaluated on CUDA."
+（4 处，分别对应 plan / code|debug / search / 其它 四个角色分支），而
+`_kernelbench_backend_hint()` 对 `is_native_cuda_backend` 返回空字符串 ——
+Triton / TileLang / CuTe 都有专属后端提示，唯独 cuda 后端没有。
+
+后果（海光 DCU 上）：框架告诉 agent 这是 CUDA 任务且不给任何后端信息，而
+cuda 后端的脚手架默认模板里 include 的恰是 <cuda_runtime.h>，本机根本没有；
+agent 能知道要写 HIP 的唯一来源是题目 docstring。
+
+改法：
+1. 4 处措辞改为后端中性的 "evaluated on the target GPU"；
+2. 新增 `_runtime_is_rocm()`（惰性 import torch，读 torch.version.hip）；
+3. `_kernelbench_backend_hint`：native-cuda 后端在 ROCm 上返回 HIP 提示
+   （hipcc 构建、必须 include <hip/hip_runtime.h>、无 <cuda_runtime.h>、
+   编辑落在 user_helpers/cuda_cpp/cuda_cu 锚点）。
+   非 ROCm 仍返回空字符串，NVIDIA 上行为与上游完全一致。
+
+影响面：仅 prompt 文本，不改评测判据、不改 scaffold 结构。
+---
+ pyramidkernel/providers/openai_provider.py | 41 +++++++++++++++++++---
+ 1 file changed, 36 insertions(+), 5 deletions(-)
+
+diff --git a/pyramidkernel/providers/openai_provider.py b/pyramidkernel/providers/openai_provider.py
+index fe18fb3..a5d8abc 100644
+--- a/pyramidkernel/providers/openai_provider.py
++++ b/pyramidkernel/providers/openai_provider.py
+@@ -773,22 +773,22 @@ def _task_prompt_suffix(task: TaskSpec, role: str) -> str:
+         backend_hint = _kernelbench_backend_hint(task, role)
+         if role == "plan":
+             base = (
+-                "\nThis task comes from the real KernelBench benchmark and is evaluated on CUDA. "
++                "\nThis task comes from the real KernelBench benchmark and is evaluated on the target GPU. "
+                 "Return the requested planning JSON only and do not include markdown fences or prose."
+             )
+         elif role in {"code", "debug"}:
+             base = (
+-                "\nThis task comes from the real KernelBench benchmark and is evaluated on CUDA. "
++                "\nThis task comes from the real KernelBench benchmark and is evaluated on the target GPU. "
+                 "Return the requested region-patch JSON only and do not include markdown fences or prose."
+             )
+         elif role == "search":
+             base = (
+-                "\nThis task comes from the real KernelBench benchmark and is evaluated on CUDA. "
++                "\nThis task comes from the real KernelBench benchmark and is evaluated on the target GPU. "
+                 "Return the requested JSON object only; its code field must contain executable Python source without markdown fences or prose."
+             )
+         else:
+             base = (
+-                "\nThis task comes from the real KernelBench benchmark and is evaluated on CUDA. "
++                "\nThis task comes from the real KernelBench benchmark and is evaluated on the target GPU. "
+                 "Return executable Python code only and do not include markdown fences or prose."
+             )
+         anchor_hint = _kernelbench_anchor_hint(task)
+@@ -844,6 +844,22 @@ def _task_prompt_suffix(task: TaskSpec, role: str) -> str:
+     )
+ 
+ 
++def _runtime_is_rocm() -> bool:
++    """True when the installed torch is a ROCm/HIP build (e.g. Hygon DCU).
++
++    PyramidKernel's `cuda` backend really means "build a C++/CUDA extension via
++    torch.utils.cpp_extension"; on ROCm that extension is compiled by hipcc and
++    the device code must use HIP headers. Upstream tells the agent the task "is
++    evaluated on CUDA" and gives no backend hint for this path, which is wrong on
++    DCU. Detect it at runtime so behaviour on NVIDIA stays exactly as before.
++    """
++    try:
++        import torch
++    except Exception:  # pragma: no cover - torch should be present at run time
++        return False
++    return bool(getattr(torch.version, "hip", None))
++
++
+ def _kernelbench_anchor_hint(task: TaskSpec) -> str:
+     anchors = extract_anchor_names(task.source_code)
+     if is_native_cuda_backend(task.backend):
+@@ -864,7 +880,22 @@ def _kernelbench_anchor_hint(task: TaskSpec) -> str:
+ def _kernelbench_backend_hint(task: TaskSpec, role: str) -> str:
+     backend = normalize_backend(task.backend)
+     if is_native_cuda_backend(backend):
+-        return ""
++        if not _runtime_is_rocm():
++            return ""
++        # ROCm/HIP (Hygon DCU): the extension is compiled by hipcc and there is
++        # no <cuda_runtime.h>; say so explicitly instead of leaving it to the
++        # task docstring alone.
++        if role == "plan":
++            return (
++                " Treat this as a HIP task on an AMD/ROCm GPU: the extension is built by hipcc, "
++                "device code must include <hip/hip_runtime.h> (there is no <cuda_runtime.h> on this "
++                "machine), and prefer edits inside the user_helpers/cuda_cpp/cuda_cu anchors."
++            )
++        return (
++            " Treat this as a HIP task on an AMD/ROCm GPU: return executable Python that builds the "
++            "extension with hipcc, keep device code inside the cuda_cpp/cuda_cu anchors, include "
++            "<hip/hip_runtime.h>, and keep ModelNew and evaluator I/O unchanged."
++        )
+     if is_tilelang_backend(backend):
+         if role == "plan":
+             return (

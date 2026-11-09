@@ -741,7 +741,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/deformconvolution/deform_convolution.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标（采样网格构建 + 手写四角点双线性插值·越界零填充 + float32 加权归约），样例口径为 hipDNN deform_conv_fprop 的张量 shape/参数：offset (N,2RS,H_out,W_out)、mask (N,RS,H_out,W_out)、weight (K,C,R,S)、bias (K)、fp32、含调制掩码；hipDNN 设备路径仅作语义口径与性能基线方向，不作 core_compute 证据"
     external_calls: []
@@ -756,7 +756,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/deformconvolution/deform_convolution_bwd.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标：手写 DCNv2 前向（零填充双线性采样 + mask 调制）autograd 反传，输出契约对齐样例 deform_conv_dgrad（dx/doffset/dmask 一维拼接打包）与 deform_conv_wgrad（dw，天然单输出）"
     external_calls: []
@@ -771,7 +771,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/spconv_fprop/spconv_fprop.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（gather + index_add 逐 kernel 偏移累加，无 torch.sparse）；样例 hipDNN spconv_fprop 仅作语义口径（filters as_strided(c_in*kv,1,c_in) 布局映射 => W[o,i,k] = F.reshape(c_out,kv,c_in)[o,k,i]）与性能基线方向"
     external_calls: []
@@ -786,7 +786,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/spconv_dgrad/spconv_dgrad.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标：对同族 spconv_fprop 前向（gather-GEMM-scatter，W[o,i,k]=F.reshape(c_out,kv,c_in)[o,k,i]）构图后 autograd 精确反传给出 dgrad/wgrad；样例口径为 hipdnn_samples spconv_dgrad/spconv_wgrad 两图的 I/O 契约与 filters as_strided 布局重排"
     external_calls: []
@@ -801,7 +801,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/spconv_indice_pairs/spconv_indice_pairs.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（每维整除/范围判定 + 输出点首次出现序去重编号 + out_indices/indice_pairs/indice_num_per_loc 三表填充）；样例口径：hipdnn_samples spconv_indice_pairs 图节点的索引表生成契约（indices int32 (n, ndim+1) + 6 几何超参 → 三个 int32 表），数值生成规则按 spconv 上游 generate_conv_inds CPU 实现逐行移植"
     external_calls: []
@@ -816,7 +816,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/conv_fusion/conv_bias_relu.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标（F.conv2d fp32 中间累加 + bias (1,K,1,1) 广播 + relu/swish/prelu 逐元素激活，输出单次 cast 回输入 dtype）；样例口径：hipDNN conv_fprop+bias+pointwise 激活融合图（io fp16、intermediate/compute fp32，stride/pad/dil 恒 (1,1)/(1,1)/(1,1)）"
     external_calls: []
@@ -831,7 +831,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/conv_depthtospace_fusion/conv_bias_dts_add.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标（F.conv2d fp32 累加 + bias (1,K,1,1) 广播 + reshape/permute/reshape 六维重排的 ATen 组合）；样例口径：conv_depthtospace_fusion 融合族 conv_fprop→add(bias)→D2S 图，CRD 排列 ≡ pixel_shuffle、DCR 为通道重排变体，fp32 中间单次 cast 回 io dtype"
     external_calls: []
@@ -846,7 +846,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/batchnorm/batchnorm_training.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标（inference 给定 mean/variance 的 per-channel 仿射 + training 有偏批统计归一化与 running 统计更新，口径取自 hipDNN 官方样例 python/batchnorm/batchnorm_inference.py 与 batchnorm_training.py 的算子契约，公式经 PyTorch F.batch_norm CPU 逐位核对）"
     external_calls: []
@@ -861,7 +861,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/batchnorm/batchnorm_backward.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标：BatchNorm 训练反向闭式解（xhat=(x-saved_mean)*saved_inv_variance 重构 + dgamma/dbeta 两路通道归约 + dx 链式乘加，ATen 组合，float32 中间计算）；样例 hipDNN graph 仅提供 I/O 契约与性能基线方向，题目本体不调用闭源库"
     external_calls: []
@@ -876,7 +876,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/groupnorm/groupnorm_bwd.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch：2012 同口径 GroupNorm 前向（组内有偏统计→rsqrt(有偏方差+eps)→通道广播→逐通道仿射）的 autograd 反传求 dx/dgamma/dbeta 全梯度，保存统计量经恒等拼接按给定值消费；样例口径为 hipDNN graph.groupnorm_backward（x/dy/scale/mean/inv_var -> dx/dbias/dscale，统计量入参声明 (groups*batch,) float32）"
     external_calls: []
@@ -891,7 +891,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/deformattention/deform_attention.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（attention_weights 沿 (levels×points) softmax 归一化 + 手写四角点双线性插值（越界角点记 0 零填充）+ 跨采样点加权归约，float32 中间计算）；样例 hipdnn 图调用仅提供张量布局与 fp32 口径（value(N,n_keys,heads,D)/spatial_shapes(L,2)~randint[1,16)/level_start_index 前缀和/sampling_locations(N,Q,heads,L,P,2)/attention_weights(N,Q,heads,L,P)），数学口径为通行多尺度可变形注意力前向"
     external_calls: []
@@ -906,7 +906,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/deformattention/deform_attention_bwd.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标（1031 同口径手写可导前向 + torch.autograd.grad 反传得 value/sampling_locations/attention_weights 三梯度，一维拼接单输出）；样例仅给出 deform_attn_dgrad 图调用与张量布局口径"
     external_calls: []
@@ -921,7 +921,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/cumsum/cumsum.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标（fp32 中累加的 inclusive 前缀和 + cast 回输入 dtype，torch.cumsum 内联）；样例口径为 hipdnn_samples 官方样例的 cumsum 调用（4D、axis=2、io/intermediate/compute 均 FLOAT）"
     external_calls: []
@@ -936,7 +936,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/convolution/convolution_fwd.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标（torch.nn.functional.pad + conv2d 的 ATen 组合，reference 不受 forbidden 约束）；样例口径：hipDNN conv_fprop NCHW/fp32 无 bias 标准 2D 卷积前向（stride/padding/dilation=(1,1)/(1,1)/(1,1)）与非对称 padding（pre (2,2) / post (1,1)）两 variant，cross-correlation 语义"
     external_calls: []
@@ -951,7 +951,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/convolution/convolution_bwd.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch（F.conv2d 前向构图 + autograd 反传为语义金标，dx/dw 与前向严格一致）；样例以 hipDNN conv_dgrad/conv_wgrad 图定义标准 2D 卷积反向的 dgrad/wgrad 语义口径（NCHW、无 bias、groups=1）"
     external_calls: []
@@ -966,7 +966,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/groupnorm/groupnorm_fwd.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（(N,G) 组内有偏统计 + rsqrt(var+eps) + 逐通道仿射 + swish 融合的 ATen 组合，不依赖闭源库）；样例口径：hipDNN groupnorm 前向 TRAINING 三输出 y/mean/inv_var，NCHW、scale/bias (C,)、eps=1e-5、groups=2，swish 样例定融合式 y=gn*sigmoid(gn)"
     external_calls: []
@@ -981,7 +981,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/instancenorm/instancenorm.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标：per-(N,C) 平面在 (H,W) 有偏统计、rsqrt(var+eps)、(1,C,1,1) 逐通道仿射，float32 中间计算 cast 回输入 dtype；样例口径 hipDNN graph.instancenorm(INFERENCE) 仅 y set_output(True)，eps=1e-5 graph 标量"
     external_calls: []
@@ -996,7 +996,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/adamw/adamw.py"   # transformer 变体同源 python/adamw/transformer_adamw.py
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "reference.py 自包含纯 PyTorch 语义金标（解耦权重衰减 + 一二阶矩更新 + bias correction 幂 + sqrt 逐元素式）；样例的 hipDNN 设备路径仅作语义口径与性能基线方向，不作 core_compute 证据，生成侧 forbidden 明确禁用"
     external_calls: []
@@ -1026,7 +1026,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/gather/gather.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "题目 reference.py 自包含纯 PyTorch 语义金标（torch.gather 两分支：一维索引 view+expand 广播 / 同形索引）；样例口径为 hipDNN graph.gather / graph.gather_elements 的 ONNX Gather / GatherElements 语义"
     external_calls: []
@@ -1041,7 +1041,7 @@ operators:
       repo: opendtk/hipdnn_samples
       commit: b67a3f96f4f11c34829929387e73739d2853b76c
       path: "python/scatterND/scatterND.py"
-    impl_lang: triton
+    impl_lang: hip
     entry: model_class
     core_compute: "scatterND.py: graph.scatter_nd(data, indices, updates, reduction=NONE)——int64 (K,r) 全索引坐标元组把一维 updates 覆盖写进 data 拷贝、未命中位置原值保留；题目 reference.py 自包含纯 PyTorch 语义金标（clone + 高级索引 setitem），样例口径为覆盖写、坐标互异"
     external_calls: []

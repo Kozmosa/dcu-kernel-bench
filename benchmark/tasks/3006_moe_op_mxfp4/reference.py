@@ -1,18 +1,19 @@
-# 3006_moe_op_mxfp4 — MoE 分组 GEMM（mxfp4 e2m1 打包激活 × mxfp4 e2m1 打包
-# 专家权重，e8m0 块 scale，含路由权重乘）的 model_class（KernelBench 兼容）
-# 题目文件。
+# 3006_moe_op_mxfp4 -- MoE grouped GEMM (mxfp4 e2m1 packed activations x mxfp4
+# e2m1 packed expert weights, e8m0 block scales, with the routing weight
+# multiply), as a model_class (KernelBench-compatible) task file.
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=3006, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=3006, backend=triton.
 
 import torch
 import torch.nn as nn
 
-# e2m1 nibble（4 bit）解码表：bit3 为符号位，低 3 位查本表
+# e2m1 nibble (4 bit) decode table: bit3 is the sign, the low 3 bits index this table
 _E2M1_TABLE = torch.tensor(
     [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
      -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0],
@@ -21,9 +22,10 @@ _E2M1_TABLE = torch.tensor(
 
 
 def _dequant_mxfp4(codes, scales):
-    """mxfp4 反量化：(..., K//2) uint8 码字 + (..., K//32) uint8 e8m0 块 scale
-    -> (..., K) float32。每字节低 4 位是偶下标元素、高 4 位是奇下标元素；
-    x[..., k] = e2m1(nibble) * 2^(scales[..., k // 32] - 127)。"""
+    """mxfp4 dequantization: (..., K//2) uint8 code words plus (..., K//32) uint8
+    e8m0 block scales -> (..., K) float32. In every byte the low 4 bits are the
+    even-index element and the high 4 bits the odd-index element;
+    x[..., k] = e2m1(nibble) * 2^(scales[..., k // 32] - 127)."""
     lo = codes & 0xF
     hi = codes >> 4
     nib = torch.stack((lo, hi), dim=-1).flatten(-2)      # (..., K)
@@ -33,8 +35,9 @@ def _dequant_mxfp4(codes, scales):
 
 
 def _mxfp4_quant(x):
-    """MXFP4 动态量化（块大小 32、even 圆整），与官方测试的输入生成器逐位
-    一致。仅在输入生成侧使用，不属于 Agent 需要实现的计算。"""
+    """MXFP4 dynamic quantization (block size 32, round to even), bit-identical
+    to the input generator of the official test. Used on the input generation
+    side only; it is not part of the computation the Agent has to implement."""
     MXFP4_QUANT_BLOCK_SIZE = 32
     x_shape = x.shape
     if x.shape[-1] % MXFP4_QUANT_BLOCK_SIZE != 0:
@@ -48,7 +51,7 @@ def _mxfp4_quant(x):
     else:
         x_padded = x
 
-    # 块 scale：amax 圆整到 2 的幂，e = clamp(floor(log2(amax)) - 2, -127, 127)
+    # Block scale: amax rounded up to a power of two, e = clamp(floor(log2(amax)) - 2, -127, 127)
     x_padded = x_padded.reshape(
         -1, x_padded.shape[-1] // MXFP4_QUANT_BLOCK_SIZE, MXFP4_QUANT_BLOCK_SIZE
     ).to(torch.float32)
@@ -63,7 +66,7 @@ def _mxfp4_quant(x):
     qx = x_padded * quant_scale.unsqueeze(-1)
     bs_e8m0 = scale_e8m0_unbiased.to(torch.uint8) + 127
 
-    # e2m1 舍入：round-half-up，超出饱和（对 (E<<2 | M>>21) + 1 >> 1 取 min(·,7)）
+    # e2m1 rounding: round-half-up, saturating on overflow (min(.,7) of (E<<2 | M>>21) + 1 >> 1)
     qx = qx.view(torch.int32)
     s = qx & 0x80000000
     e = (qx >> 23) & 0xFF
@@ -79,7 +82,7 @@ def _mxfp4_quant(x):
     e2m1_tmp = torch.where(combined_val < 0x7, combined_val, 0x7)
     e2m1_value = (((s >> 28) & 0xF) | e2m1_tmp).to(torch.uint8)
 
-    # 每字节打包 2 个 4-bit 码字：偶数下标在低 4 位
+    # Pack 2 four-bit code words per byte: the even index goes in the low 4 bits
     x_mxfp4 = e2m1_value[..., ::2] | (e2m1_value[..., 1::2] << 4)
     x_mxfp4 = torch.flatten(x_mxfp4, -2, -1)
 
@@ -94,8 +97,9 @@ def _mxfp4_quant(x):
 
 
 def _gen_case(M, N, K, E, top_k, dtype, generator):
-    # 官方测试生成器：randn 激活/权重 -> 动态 mxfp4 量化；softmax+topk 路由。
-    # 消费顺序固定：a_raw -> b_raw -> values。
+    # Official test generator: randn activations/weights -> dynamic mxfp4
+    # quantization; softmax+topk routing. The consumption order is fixed:
+    # a_raw -> b_raw -> values.
     a_raw = torch.randn(M, K, dtype=dtype, generator=generator)
     b_raw = torch.randn(E, N, K, dtype=dtype, generator=generator)
     values = torch.randn(M, E, dtype=dtype, generator=generator)
@@ -107,63 +111,76 @@ def _gen_case(M, N, K, E, top_k, dtype, generator):
 
 
 class Model(nn.Module):
-    """MoE（Mixture of Experts）分组 GEMM：mxfp4 量化激活 × mxfp4 量化专家权重。
+    """MoE (Mixture of Experts) grouped GEMM: mxfp4 quantized activations x
+    mxfp4 quantized expert weights.
 
-    路由已完成（topk_ids 给出每个 token 选中的专家），本算子对每个
-    (token, 选中专家) 槽位做一次 GEMM 并乘以路由权重（mul_routed_weight
-    恒为 True）：
-      c[m, j, n] = topk_weights[m, j] * Σ_k adeq[m, k] * bdeq[topk_ids[m, j], n, k]
-    求和沿 K 维、中间累加 float32，结果 cast 到 bfloat16 输出。
+    Routing is already done (topk_ids gives the experts selected for each
+    token); this operator runs one GEMM per (token, selected expert) slot and
+    multiplies by the routing weight (mul_routed_weight is always True):
+      c[m, j, n] = topk_weights[m, j] * sum_k adeq[m, k] * bdeq[topk_ids[m, j], n, k]
+    The sum runs along the K dimension, intermediate accumulation is float32 and
+    the result is cast to bfloat16 for output.
 
-    mxfp4 反量化定义（对激活 a 与权重 b 相同）：
-      - 码字 tensor 最后一维每字节含 2 个 e2m1 码：低 4 位是偶下标元素，
-        高 4 位是奇下标元素，即 code[..., i] 的低/高 nibble 对应元素
-        2i / 2i+1。
-      - e2m1 nibble（4 bit）解码：bit3 为符号位，低 3 位查表
-        {0: 0.0, 1: 0.5, 2: 1.0, 3: 1.5, 4: 2.0, 5: 3.0, 6: 4.0, 7: 6.0}，
-        符号位为 1 时取负（-0.0 视作 0 参与乘加）。
-      - e8m0 块 scale：最后一维每 32 个元素共享 1 个 uint8 scale 字节
-        s = scales[..., k // 32]，解码为 2^(s - 127)。
-      - 反量化：x[..., k] = e2m1(nibble(..., k)) * 2^(scales[..., k // 32] - 127)。
+    mxfp4 dequantization definition (the same for activation a and weight b):
+      - every byte of the last dimension of the code word tensor holds 2 e2m1
+        codes: the low 4 bits are the even-index element and the high 4 bits the
+        odd-index element, i.e. the low/high nibble of code[..., i] correspond
+        to elements 2i / 2i+1.
+      - e2m1 nibble (4 bit) decoding: bit3 is the sign, the low 3 bits index the
+        table {0: 0.0, 1: 0.5, 2: 1.0, 3: 1.5, 4: 2.0, 5: 3.0, 6: 4.0, 7: 6.0};
+        a set sign bit negates the value (-0.0 takes part in the multiply-add as
+        0).
+      - e8m0 block scale: every 32 elements of the last dimension share 1 uint8
+        scale byte s = scales[..., k // 32], decoded as 2^(s - 127).
+      - dequantization:
+        x[..., k] = e2m1(nibble(..., k)) * 2^(scales[..., k // 32] - 127).
 
-    输入输出规格：
-      a_q          (M, K//2)     uint8   激活码字（K 为逻辑特征维）
-      a_scales     (M, K//32)    uint8   激活 e8m0 块 scale
-      b_q          (E, N, K//2)  uint8   专家权重码字（E 个专家）
-      b_scales     (E, N, K//32) uint8   专家权重 e8m0 块 scale
-      topk_weights (M, top_k)    float16/bfloat16/float32  路由权重（>0）
-      topk_ids     (M, top_k)    int64   选中专家编号，取值 ∈ [0, E)
+    Input/output specification:
+      a_q          (M, K//2)     uint8   activation code words (K is the logical
+                                         feature dimension)
+      a_scales     (M, K//32)    uint8   activation e8m0 block scales
+      b_q          (E, N, K//2)  uint8   expert weight code words (E experts)
+      b_scales     (E, N, K//32) uint8   expert weight e8m0 block scales
+      topk_weights (M, top_k)    float16/bfloat16/float32  routing weights (>0)
+      topk_ids     (M, top_k)    int64   selected expert ids, values in [0, E)
       out          (M, top_k, N) bfloat16
-      约束：M >= 1、E >= 1、N >= 1、K % 32 == 0、1 <= top_k <= E。
-      边界行为：同一专家可被多个 token 选中，同一 token 的多个槽位也可选中
-      同一专家；各 (m, j) 槽位独立计算，不做 expert 间的归约/加权合并，
-      也不引入 dispatch 合并语义（那是下游算子的事）。
+      Constraints: M >= 1, E >= 1, N >= 1, K % 32 == 0, 1 <= top_k <= E.
+      Boundary behaviour: one expert may be selected by several tokens, and one
+      token may select the same expert in several of its slots; every (m, j)
+      slot is computed independently, with no reduction or weighted merge across
+      experts and no dispatch-merge semantics (that belongs to a downstream
+      operator).
 
-    实现约束（违规判负）：
-      - 核心计算（nibble 解包、e2m1/e8m0 解码、按 topk_ids 分组的 GEMM、
-        路由权重相乘）必须在提交文件内完成，禁止调用 torch.matmul /
-        torch.bmm / torch.mm / torch.addmm / torch.einsum / F.linear /
-        functional.linear / torch._scaled_mm，禁止使用 torch 内置
-        float4/mxfp4 表示与现成量化转换 API（torch.float4_e2m1fn_x2、
-        torch.quantize_per_tensor 等）。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间累加用 float32；输出 cast 到 bfloat16。
-      - 评测器会把全部输入 cast 成 fp32 后传入 forward（uint8 码字与 scale
-        字节（0..255）、int64 专家编号（小整数）在 fp32 中均精确表示），
-        需在入口无损恢复（.to(torch.uint8) / .to(torch.long)）。
+    Implementation constraints (violations are scored as failures):
+      - Core computation (nibble unpacking, e2m1/e8m0 decoding, the GEMM grouped
+        by topk_ids, the routing weight multiply) must be done inside the
+        submitted file; calling torch.matmul / torch.bmm / torch.mm /
+        torch.addmm / torch.einsum / F.linear / functional.linear /
+        torch._scaled_mm is forbidden, as is using the built-in torch
+        float4/mxfp4 representations and ready-made quantization conversion APIs
+        (torch.float4_e2m1fn_x2, torch.quantize_per_tensor, etc.).
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Use float32 for intermediate accumulation; the output is cast to
+        bfloat16.
+      - The evaluator casts all inputs to fp32 before calling forward (uint8
+        code words and scale bytes (0..255), int64 expert ids (small integers)
+        are all exactly representable in fp32), so they must be restored
+        losslessly at the entry point (.to(torch.uint8) / .to(torch.long)).
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：mxfp4 激活 × mxfp4 权重的 MoE 分组 GEMM + 路由权重乘；
-    token-expert 对齐调度元数据（sorted_token_ids / expert_ids /
-    num_tokens_post_padded）属实现细节，不在输入契约内。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: MoE grouped GEMM of mxfp4 activations x mxfp4 weights plus the
+    routing weight multiply; the token-expert alignment scheduling metadata
+    (sorted_token_ids / expert_ids / num_tokens_post_padded) is an
+    implementation detail and not part of the input contract.
     """
 
     def __init__(self):
         super().__init__()
 
     def forward(self, a_q, a_scales, b_q, b_scales, topk_weights, topk_ids):
-        # 评测器把全部输入 cast 成 fp32：码字/scale 字节与专家编号在 fp32
-        # 中精确表示，此处无损恢复
+        # The evaluator casts all inputs to fp32: code words, scale bytes and
+        # expert ids are exactly representable in fp32, so restore them here
+        # losslessly
         a_q = a_q.to(torch.uint8)
         a_scales = a_scales.to(torch.uint8)
         b_q = b_q.to(torch.uint8)
@@ -179,8 +196,9 @@ class Model(nn.Module):
         a = _dequant_mxfp4(a_q, a_scales)     # (M, K) float32
         b = _dequant_mxfp4(b_q, b_scales)     # (E, N, K) float32
 
-        # 按 expert 分组做 GEMM（数学上等价于先 b[topk_ids] 再
-        # einsum("mek,menk->men")，分组写回可避免物化大中间量）
+        # Do the GEMM grouped by expert (mathematically equivalent to b[topk_ids]
+        # followed by einsum("mek,menk->men"); writing back per group avoids
+        # materializing a large intermediate)
         flat_ids = topk_ids.reshape(-1)                     # (M*top_k,)
         a_rep = a.unsqueeze(1).expand(M, top_k, K).reshape(-1, K)
         c = torch.empty((M * top_k, N), dtype=torch.float32, device=a_q.device)
@@ -193,19 +211,21 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    return []   # 无超参：全部维度由输入张量形状给出
+    return []   # no hyperparameters: all dimensions come from the input tensor shapes
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性。量级与 make_inputs 一致。
+    # Fixed shape family; the random part consumes the global RNG -- the
+    # evaluator calls this function after set_seed, so multiple correctness
+    # trials see diverse inputs. The magnitudes match make_inputs.
     return _gen_case(64, 128, 128, 8, 2, torch.bfloat16, None)
 
 
 def make_inputs(M: int, N: int, K: int, E: int, top_k: int,
                 dtype: str = "bfloat16", seed: int = 0):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到
-    设备）。消费顺序固定：a_raw -> b_raw -> values，全部来自同一
-    torch.Generator(seed)，同 seed 下逐位可复现。"""
+    """Generate inputs from a public/hidden case description. Runs on the
+    evaluation side only (generated on CPU; the evaluator moves them to the
+    device). The consumption order is fixed: a_raw -> b_raw -> values, all from
+    the same torch.Generator(seed); bit-reproducible under the same seed."""
     gen = torch.Generator().manual_seed(seed)
     return _gen_case(M, N, K, E, top_k, getattr(torch, dtype), gen)

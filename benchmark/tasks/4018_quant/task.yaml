@@ -43,19 +43,28 @@ shape:
 tolerance:
   float32:  {atol: 1.0e-6, rtol: 1.0e-6}
   compare: >
-    输出为单个一维 float32 张量（码字段 + scale 段两段打包）：码字段是
-    int8 整数（任何偏差 >= 1）或 e4m3 离散精确值（最小相邻间距 2^-9），
-    偏差必超容差，等效精确匹配；scale 段与 reference 同为确定性 fp32 算术。
+    输出为单个一维 float32 张量（码字段 + scale 段两段打包），**两段各用各的容差**
+    （见下方 tolerance_segments）：码字段允许 ±1 个码字、但失配元素比例必须 <= 1%；
+    scale 段仍为 1e-6。
   note: >
     本题输出 dtype 为 float32（无 fp16/bf16 浮点输出，不适用 2.0e-2 档）。
-    容差收紧为 1e-6 的依据：reference 与合规候选的中间算术同为 fp32
-    （amax 归约精确、scale 为单次 fp32 除法），码字段真实偏差必为语义错误；
-    scale 段 1e-6 覆盖 1-2 ulp 算术变体。官方测试容差（per-tensor/
-    per-token 输出 atol=rtol=1e-1、static 1e-2）是官方 fp16-native torch
-    参考与 Triton kernel 之间的偏差预算；本评测集参考即 fp32 确定性算术，
-    按验收规范收紧。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
-    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，
-    与上表不同——在线结论不能替代终审。
+    scale 段收紧为 1e-6：reference 与合规候选的中间算术同为 fp32（amax 归约精确、
+    scale 为单次 fp32 除法），1e-6 覆盖 1-2 ulp 算术变体。
+    **码字段允许 ±1（2026-10 修正，与 4017 同因）**：int8 路径在饱和点
+    （absmax 元素本应量化为 ±127）会因 absmax/(absmax/127) 的 fp32 舍入 + 向零
+    截断而落到 ±126；PyTorch reference 与 Triton kernel 的除法舍入不同即相差
+    1 个码字。实测（4017，同构算法）失配比例 0.067%、差值恒为 1。
+    若坚持 1e-6，写法正确的 Triton 实现同样会失败，本题不可解。故把码字段放宽到
+    ±1，**且不设失配预算（max_mismatch_frac 缺省 0）**：同构的 4017 实测差值恒为 1、
+    无一超过，无需额外放宽；任何偏差 >= 2 仍直接判失败。
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入与模型
+    统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线结论不能替代终审。
+
+# 输出两段的边界由 reference.output_segments() 给出（码字段在前、scale 段在后；
+# scale 段长随 mode 变化：per-tensor 为 1，per-token 为输入行数）
+tolerance_segments:
+  - {name: codes,  atol: 1.0,     rtol: 1.0e-6}
+  - {name: scales, atol: 1.0e-6,  rtol: 1.0e-6}
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）；标准列表中 attention /
 # GEMM / softmax 类捷径与本纯量化算子无关，按题裁剪，首项为来源库名（溯源

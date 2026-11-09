@@ -1,0 +1,2953 @@
+{
+  "schema": 1,
+  "aiter_root": "C:\\Users\\panyp\\Desktop\\agent4kernel\\dcu-kernel-bench-main\\.dcu_runs\\aiter_pinned",
+  "aiter_remote": "https://developer.sourcefind.cn/codes/OpenDAS/aiter.git",
+  "generated_at": "2026-10-02",
+  "counts": {
+    "admissible": 8,
+    "needs_review": 56,
+    "rejected": 2
+  },
+  "candidates": [
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/add_swiglu.py",
+      "suggested_name": "add_swiglu",
+      "family": "activation",
+      "lines": 109,
+      "bytes": 5093,
+      "device_kernels": [
+        "_backward",
+        "_forward"
+      ],
+      "entry_points": [
+        "add_swiglu"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "admissible",
+      "reasons": [
+        "含 2 个 device kernel，未见闭源库/框架调用"
+      ],
+      "advisories": [],
+      "difficulty_hint": "basic"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/prefill_attention.py",
+      "suggested_name": "prefill_attention",
+      "family": "attention",
+      "lines": 222,
+      "bytes": 6522,
+      "device_kernels": [
+        "_fwd_kernel"
+      ],
+      "entry_points": [
+        "context_attention_fwd",
+        "is_hip"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [
+        "context_attention_fwd"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "admissible",
+      "reasons": [
+        "含 1 个 device kernel，未见闭源库/框架调用"
+      ],
+      "advisories": [
+        "void API（context_attention_fwd）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/pa_decode.py",
+      "suggested_name": "pa_decode",
+      "family": "attention",
+      "lines": 2294,
+      "bytes": 76564,
+      "device_kernels": [
+        "_paged_attn_decode_v1_w_dot_kernel",
+        "_paged_attn_decode_v1_w_dot_kernel_per_token_quant",
+        "_paged_attn_decode_v1_wo_dot_kernel",
+        "_paged_attn_decode_v1_wo_dot_kernel_per_token_quant",
+        "_paged_attn_decode_v2_w_dot_kernel",
+        "_paged_attn_decode_v2_w_dot_kernel_per_token_quant",
+        "_paged_attn_decode_v2_w_dot_reduce_kernel",
+        "_paged_attn_decode_v2_w_dot_reduce_kernel_per_token_quant",
+        "_paged_attn_decode_v2_wo_dot_kernel",
+        "_paged_attn_decode_v2_wo_dot_kernel_per_token_quant",
+        "_paged_attn_decode_v2_wo_dot_reduce_kernel",
+        "_paged_attn_decode_v2_wo_dot_reduce_kernel_per_token_quant"
+      ],
+      "entry_points": [
+        "paged_attention_decode",
+        "paged_attn_decode_v1",
+        "paged_attn_decode_v1_per_token_quant",
+        "paged_attn_decode_v2",
+        "paged_attn_decode_v2_per_token_quant"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [
+        "paged_attention_decode",
+        "paged_attn_decode_v1",
+        "paged_attn_decode_v2",
+        "paged_attn_decode_v1_per_token_quant",
+        "paged_attn_decode_v2_per_token_quant"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "admissible",
+      "reasons": [
+        "含 12 个 device kernel，未见闭源库/框架调用"
+      ],
+      "advisories": [
+        "void API（paged_attention_decode, paged_attn_decode_v1, paged_attn_decode_v2）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "hard"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/softmax.py",
+      "suggested_name": "softmax",
+      "family": "elementwise",
+      "lines": 95,
+      "bytes": 2774,
+      "device_kernels": [
+        "_softmax_kernel_online"
+      ],
+      "entry_points": [
+        "softmax"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "admissible",
+      "reasons": [
+        "含 1 个 device kernel，未见闭源库/框架调用"
+      ],
+      "advisories": [],
+      "difficulty_hint": "basic"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fused_mul_add.py",
+      "suggested_name": "fused_mul_add",
+      "family": "elementwise",
+      "lines": 131,
+      "bytes": 3706,
+      "device_kernels": [
+        "_fused_mul_add_kernel"
+      ],
+      "entry_points": [
+        "fused_mul_add"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "admissible",
+      "reasons": [
+        "含 1 个 device kernel，未见闭源库/框架调用"
+      ],
+      "advisories": [],
+      "difficulty_hint": "basic"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/moe_align_block_size.py",
+      "suggested_name": "moe_align_block_size",
+      "family": "moe",
+      "lines": 141,
+      "bytes": 3914,
+      "device_kernels": [
+        "_moe_align_block_size_stage1_kernel",
+        "_moe_align_block_size_stage2_kernel",
+        "_moe_align_block_size_stage3_kernel",
+        "_moe_align_block_size_stage4_kernel"
+      ],
+      "entry_points": [
+        "ceil_div",
+        "moe_align_block_size_triton"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [
+        "moe_align_block_size_triton"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "admissible",
+      "reasons": [
+        "含 4 个 device kernel，未见闭源库/框架调用"
+      ],
+      "advisories": [
+        "void API（moe_align_block_size_triton）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "basic"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/norm.py",
+      "suggested_name": "norm",
+      "family": "norm",
+      "lines": 1355,
+      "bytes": 46666,
+      "device_kernels": [
+        "_fused_add_layernorm_kernel",
+        "_layernorm_bwd_dwdb_triton",
+        "_layernorm_bwd_dwdb_triton_v2",
+        "_layernorm_bwd_dx_fused_triton",
+        "_layernorm_kernel",
+        "_per_token_quant",
+        "_quant_fused_add_layernorm_kernel",
+        "_quant_layernorm_kernel"
+      ],
+      "entry_points": [
+        "layer_norm",
+        "layernorm2d_fwd_with_add",
+        "layernorm2d_fwd_with_add_dynamicquant",
+        "layernorm2d_fwd_with_add_smoothquant",
+        "layernorm2d_fwd_with_dynamicquant",
+        "layernorm2d_fwd_with_smoothquant"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [
+        "layernorm2d_fwd_with_dynamicquant",
+        "layernorm2d_fwd_with_smoothquant",
+        "layernorm2d_fwd_with_add_dynamicquant",
+        "layernorm2d_fwd_with_add_smoothquant"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "admissible",
+      "reasons": [
+        "含 8 个 device kernel，未见闭源库/框架调用"
+      ],
+      "advisories": [
+        "void API（layernorm2d_fwd_with_dynamicquant, layernorm2d_fwd_with_smoothquant, layernorm2d_fwd_with_add_dynamicquant）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/rmsnorm.py",
+      "suggested_name": "rmsnorm",
+      "family": "norm",
+      "lines": 1512,
+      "bytes": 54609,
+      "device_kernels": [
+        "_fused_add_rmsnorm_kernel",
+        "_per_token_quant",
+        "_quant_fused_add_rmsnorm_kernel",
+        "_quant_rms_norm_kernel",
+        "_rms_norm_kernel",
+        "_rmsnorm_bwd_dg_reduce_triton",
+        "_rmsnorm_bwd_triton"
+      ],
+      "entry_points": [
+        "block_size",
+        "dg_tmp_rows",
+        "num_programs",
+        "rms_norm",
+        "rmsnorm2d_fwd_with_add",
+        "rmsnorm2d_fwd_with_add_dynamicquant",
+        "rmsnorm2d_fwd_with_add_smoothquant",
+        "rmsnorm2d_fwd_with_dynamicquant",
+        "rmsnorm2d_fwd_with_smoothquant",
+        "use_blocked"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "admissible",
+      "reasons": [
+        "含 7 个 device kernel，未见闭源库/框架调用"
+      ],
+      "advisories": [],
+      "difficulty_hint": "hard"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/activation.py",
+      "suggested_name": "activation",
+      "family": "activation",
+      "lines": 287,
+      "bytes": 9362,
+      "device_kernels": [
+        "_act_mul_and_dynamic_mxfp4_quant_kernel",
+        "_gelu",
+        "_gelu_tanh",
+        "_get_activation_from_str",
+        "_silu",
+        "_silu_exp2",
+        "_tanh"
+      ],
+      "entry_points": [
+        "act_mul_and_mxfp4_quant"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "act_mul_and_mxfp4_quant"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（act_mul_and_mxfp4_quant）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/sage_attention_quant_per_block.py",
+      "suggested_name": "sage_attention_quant_per_block",
+      "family": "attention",
+      "lines": 157,
+      "bytes": 5956,
+      "device_kernels": [
+        "quant_per_block_int8_kernel"
+      ],
+      "entry_points": [
+        "per_block_int8",
+        "quant_per_block_int8_kernel"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "per_block_int8"
+      ],
+      "void_publics": [
+        "quant_per_block_int8_kernel"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（per_block_int8）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（quant_per_block_int8_kernel）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "basic"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/sage_attention_qk_int8_per_block_causal.py",
+      "suggested_name": "sage_attention_qk_int8_per_block_causal",
+      "family": "attention",
+      "lines": 229,
+      "bytes": 9296,
+      "device_kernels": [
+        "_attn_causal_fwd",
+        "_attn_fwd_inner"
+      ],
+      "entry_points": [
+        "forward"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "forward"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（forward）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/sage_attention_qk_int8_per_block.py",
+      "suggested_name": "sage_attention_qk_int8_per_block",
+      "family": "attention",
+      "lines": 242,
+      "bytes": 10125,
+      "device_kernels": [
+        "_attn_fwd",
+        "_attn_fwd_inner"
+      ],
+      "entry_points": [
+        "forward"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "forward"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（forward）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/chunked_pa_prefill.py",
+      "suggested_name": "chunked_pa_prefill",
+      "family": "attention",
+      "lines": 503,
+      "bytes": 19075,
+      "device_kernels": [
+        "_kernel_paged_attention_2d",
+        "cdiv_fn"
+      ],
+      "entry_points": [
+        "cdiv_fn",
+        "chunked_prefill_paged_decode",
+        "find_block",
+        "get_paged_attention_2d_config",
+        "get_paged_attention_2d_config_filepath",
+        "paged_attention_2d"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "paged_attention_2d",
+        "chunked_prefill_paged_decode"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [
+        "ast"
+      ],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "依赖白名单外的三方库：ast"
+      ],
+      "advisories": [
+        "void API（paged_attention_2d, chunked_prefill_paged_decode）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/pod_attention.py",
+      "suggested_name": "pod_attention",
+      "family": "attention",
+      "lines": 519,
+      "bytes": 14783,
+      "device_kernels": [
+        "pod_persistent",
+        "read_realtime"
+      ],
+      "entry_points": [
+        "get_num_splits_and_buffer_sizes",
+        "pod_attention",
+        "pod_persistent",
+        "read_realtime"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [
+        "pod_attention",
+        "get_num_splits_and_buffer_sizes"
+      ],
+      "void_publics": [
+        "pod_persistent"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [
+        "importlib",
+        "pathlib"
+      ],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖白名单外的三方库：importlib, pathlib",
+        "公开函数返回多值（pod_attention, get_num_splits_and_buffer_sizes）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（pod_persistent）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/mla_decode_rope.py",
+      "suggested_name": "mla_decode_rope",
+      "family": "attention",
+      "lines": 553,
+      "bytes": 17493,
+      "device_kernels": [
+        "_fwd_grouped_kernel_stage1_rope",
+        "_fwd_kernel_stage2"
+      ],
+      "entry_points": [
+        "decode_attention_fwd_grouped_rope"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "decode_attention_fwd_grouped_rope"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（decode_attention_fwd_grouped_rope）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/triton_decode_attention.py",
+      "suggested_name": "triton_decode_attention",
+      "family": "attention",
+      "lines": 769,
+      "bytes": 23675,
+      "device_kernels": [
+        "_fwd_grouped_kernel_stage1",
+        "_fwd_kernel_stage1",
+        "_fwd_kernel_stage2",
+        "tanh"
+      ],
+      "entry_points": [
+        "decode_attention_fwd",
+        "decode_attention_fwd_grouped",
+        "decode_attention_fwd_normal",
+        "tanh"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "decode_attention_fwd_normal",
+        "decode_attention_fwd_grouped",
+        "decode_attention_fwd"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（decode_attention_fwd_normal, decode_attention_fwd_grouped, decode_attention_fwd）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/grouped_decode_attention.py",
+      "suggested_name": "grouped_decode_attention",
+      "family": "attention",
+      "lines": 844,
+      "bytes": 22923,
+      "device_kernels": [
+        "_fwd_grouped_kernel_stage1",
+        "_fwd_kernel_stage1",
+        "_fwd_kernel_stage2",
+        "tanh"
+      ],
+      "entry_points": [
+        "create_tuple",
+        "decode_attention_fwd",
+        "decode_attention_fwd_grouped",
+        "decode_attention_fwd_normal",
+        "get_stage1_default_config",
+        "get_stage2_default_config",
+        "has_kernel_cache",
+        "load_config",
+        "tanh"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "load_config"
+      ],
+      "void_publics": [
+        "decode_attention_fwd_normal",
+        "decode_attention_fwd_grouped",
+        "decode_attention_fwd"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [
+        "ast"
+      ],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "依赖白名单外的三方库：ast",
+        "公开函数返回多值（load_config）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（decode_attention_fwd_normal, decode_attention_fwd_grouped, decode_attention_fwd）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/pa_prefill.py",
+      "suggested_name": "pa_prefill",
+      "family": "attention",
+      "lines": 860,
+      "bytes": 35183,
+      "device_kernels": [
+        "_fwd_kernel",
+        "_fwd_kernel_alibi"
+      ],
+      "entry_points": [],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": false,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "文件中没有非下划线的公开函数：缺少任务入口，需确认是否有对外 API"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/flash_attention_forward.py",
+      "suggested_name": "flash_attention_forward",
+      "family": "attention",
+      "lines": 1148,
+      "bytes": 40278,
+      "device_kernels": [
+        "_attn_fwd_inner",
+        "attn_fwd",
+        "cdiv_fn",
+        "dropout_mask",
+        "dropout_offsets",
+        "dropout_rng",
+        "load_fn",
+        "max_fn"
+      ],
+      "entry_points": [
+        "attn_fwd",
+        "cdiv_fn",
+        "check_args",
+        "dropout_mask",
+        "dropout_offsets",
+        "dropout_rng",
+        "get_autotune_configs",
+        "get_cdna_autotune_configs",
+        "load_fn",
+        "max_fn",
+        "on_gfx1x",
+        "prune_configs"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "get_cdna_autotune_configs",
+        "get_autotune_configs"
+      ],
+      "void_publics": [
+        "attn_fwd",
+        "check_args"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（get_cdna_autotune_configs, get_autotune_configs）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（attn_fwd, check_args）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/mha_fused_bwd.py",
+      "suggested_name": "mha_fused_bwd",
+      "family": "attention",
+      "lines": 1273,
+      "bytes": 42164,
+      "device_kernels": [
+        "_bwd_dkdvdq_inner",
+        "_bwd_kernel_dkdvdq_causal",
+        "_bwd_kernel_dkdvdq_noncausal",
+        "_bwd_preprocess"
+      ],
+      "entry_points": [
+        "flash_attn_fused_backward"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/hstu_attention.py",
+      "suggested_name": "hstu_attention",
+      "family": "attention",
+      "lines": 1294,
+      "bytes": 42334,
+      "device_kernels": [
+        "_hstu_attn_bwd",
+        "_hstu_attn_bwd_one_block",
+        "_hstu_attn_bwd_one_col_block",
+        "_hstu_attn_fwd",
+        "_hstu_attn_fwd_compute",
+        "_hstu_attn_fwd_one_block"
+      ],
+      "entry_points": [
+        "triton_hstu_attention_bwd",
+        "triton_hstu_attention_fwd"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "triton_hstu_attention_bwd"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（triton_hstu_attention_bwd）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/unified_attention.py",
+      "suggested_name": "unified_attention",
+      "family": "attention",
+      "lines": 1343,
+      "bytes": 49864,
+      "device_kernels": [
+        "apply_softcap",
+        "cdiv_fn",
+        "find_seq_idx",
+        "kernel_unified_attention_2d",
+        "kernel_unified_attention_3d",
+        "reduce_segments"
+      ],
+      "entry_points": [
+        "apply_softcap",
+        "cdiv_fn",
+        "find_seq_idx",
+        "kernel_unified_attention_2d",
+        "kernel_unified_attention_3d",
+        "reduce_segments",
+        "unified_attention"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [
+        "kernel_unified_attention_2d",
+        "kernel_unified_attention_3d",
+        "reduce_segments",
+        "unified_attention"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [
+        "flash_attn"
+      ],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖白名单外的三方库：flash_attn"
+      ],
+      "advisories": [
+        "void API（kernel_unified_attention_2d, kernel_unified_attention_3d, reduce_segments）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/mha_onekernel_bwd.py",
+      "suggested_name": "mha_onekernel_bwd",
+      "family": "attention",
+      "lines": 1807,
+      "bytes": 65371,
+      "device_kernels": [
+        "_bwd_dkdv_inner",
+        "_bwd_dq_inner",
+        "_bwd_preprocess",
+        "bwd_kernel_causal",
+        "bwd_kernel_noncausal"
+      ],
+      "entry_points": [
+        "bwd_kernel_causal",
+        "bwd_kernel_noncausal",
+        "flash_attn_onekernel_backward",
+        "is_contiguous"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "bwd_kernel_causal",
+        "bwd_kernel_noncausal"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（bwd_kernel_causal, bwd_kernel_noncausal）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "hard"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/mha.py",
+      "suggested_name": "mha",
+      "family": "attention",
+      "lines": 2018,
+      "bytes": 70584,
+      "device_kernels": [
+        "_attn_fwd",
+        "_attn_fwd_inner",
+        "_cdiv_fn",
+        "_compute_alibi_block",
+        "_load_fn"
+      ],
+      "entry_points": [
+        "flash_attn_fp8_func",
+        "flash_attn_func",
+        "flash_attn_varlen_fp8_func",
+        "flash_attn_varlen_func",
+        "mha_set_use_fused_bwd_kernel",
+        "mha_set_use_int64_strides"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "mha_set_use_fused_bwd_kernel",
+        "mha_set_use_int64_strides"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（mha_set_use_fused_bwd_kernel, mha_set_use_int64_strides）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "hard"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/extend_attention.py",
+      "suggested_name": "extend_attention",
+      "family": "attention",
+      "lines": 2023,
+      "bytes": 71526,
+      "device_kernels": [
+        "_fwd_kernel",
+        "_fwd_kernel_v2",
+        "_fwd_kernel_v2_decode"
+      ],
+      "entry_points": [
+        "create_tuple",
+        "extend_attention_fwd",
+        "find_closest",
+        "get_gpu_label",
+        "get_v2_decode_final_grid",
+        "has_kernel_cache",
+        "redundant_attention",
+        "to_dtype"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "find_closest",
+        "get_v2_decode_final_grid"
+      ],
+      "void_publics": [
+        "extend_attention_fwd",
+        "redundant_attention"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [
+        "ast",
+        "pathlib"
+      ],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "依赖白名单外的三方库：ast, pathlib",
+        "公开函数返回多值（find_closest, get_v2_decode_final_grid）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（extend_attention_fwd, redundant_attention）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "hard"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/lean_atten_paged.py",
+      "suggested_name": "lean_atten_paged",
+      "family": "cache",
+      "lines": 489,
+      "bytes": 15646,
+      "device_kernels": [
+        "_attn_lean_tile",
+        "find_group",
+        "la_persistent_paged"
+      ],
+      "entry_points": [
+        "find_group",
+        "get_num_splits_and_buffer_sizes",
+        "la_persistent_paged",
+        "persistent_lean_attention_paged"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [
+        "get_num_splits_and_buffer_sizes",
+        "find_group"
+      ],
+      "void_publics": [
+        "la_persistent_paged"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "公开函数返回多值（get_num_splits_and_buffer_sizes, find_group）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（la_persistent_paged）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/routing.py",
+      "suggested_name": "routing",
+      "family": "elementwise",
+      "lines": 267,
+      "bytes": 7844,
+      "device_kernels": [
+        "_routing_sigmoid_top1_kernel"
+      ],
+      "entry_points": [
+        "get_config_heuristic",
+        "routing_sigmoid_top1",
+        "torch_routing_sigmoid_top1"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "routing_sigmoid_top1",
+        "torch_routing_sigmoid_top1"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（routing_sigmoid_top1, torch_routing_sigmoid_top1）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fla/fused_recurrent.py",
+      "suggested_name": "fused_recurrent",
+      "family": "elementwise",
+      "lines": 282,
+      "bytes": 10344,
+      "device_kernels": [
+        "fused_recurrent_gated_delta_rule_packed_decode_kernel"
+      ],
+      "entry_points": [
+        "fused_recurrent_gated_delta_rule_packed_decode",
+        "fused_recurrent_gated_delta_rule_packed_decode_kernel"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "fused_recurrent_gated_delta_rule_packed_decode"
+      ],
+      "void_publics": [
+        "fused_recurrent_gated_delta_rule_packed_decode_kernel"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（fused_recurrent_gated_delta_rule_packed_decode）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（fused_recurrent_gated_delta_rule_packed_decode_kernel）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fla/sglang/chunk_o.py",
+      "suggested_name": "chunk_o",
+      "family": "elementwise",
+      "lines": 302,
+      "bytes": 8717,
+      "device_kernels": [
+        "exp",
+        "exp2",
+        "safe_exp"
+      ],
+      "entry_points": [
+        "chunk_fwd_kernel_o",
+        "chunk_fwd_o",
+        "exp",
+        "exp2",
+        "launch_chunk_fwd_kernel_o",
+        "prepare_chunk_indices",
+        "safe_exp"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "launch_chunk_fwd_kernel_o"
+      ],
+      "void_publics": [
+        "chunk_fwd_kernel_o"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（launch_chunk_fwd_kernel_o）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（chunk_fwd_kernel_o）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fla/vllm/chunk_o.py",
+      "suggested_name": "chunk_o",
+      "family": "elementwise",
+      "lines": 304,
+      "bytes": 8961,
+      "device_kernels": [
+        "exp",
+        "exp2"
+      ],
+      "entry_points": [
+        "chunk_fwd_kernel_o",
+        "chunk_fwd_o",
+        "exp",
+        "exp2",
+        "launch_chunk_fwd_kernel_o",
+        "prepare_chunk_indices"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "launch_chunk_fwd_kernel_o"
+      ],
+      "void_publics": [
+        "chunk_fwd_kernel_o"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（launch_chunk_fwd_kernel_o）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（chunk_fwd_kernel_o）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fused_qk_concat.py",
+      "suggested_name": "fused_qk_concat",
+      "family": "elementwise",
+      "lines": 426,
+      "bytes": 10863,
+      "device_kernels": [
+        "_qk_cat_kernel",
+        "_qk_rope_cat_kernel",
+        "_unit_cat",
+        "_unit_rope_cat"
+      ],
+      "entry_points": [
+        "fused_qk_cat",
+        "fused_qk_rope_cat"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [
+        "fused_qk_cat",
+        "fused_qk_rope_cat"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "公开函数返回多值（fused_qk_cat, fused_qk_rope_cat）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fla/sglang/chunk_delta_h.py",
+      "suggested_name": "chunk_delta_h",
+      "family": "elementwise",
+      "lines": 498,
+      "bytes": 17090,
+      "device_kernels": [
+        "exp",
+        "exp2",
+        "safe_exp"
+      ],
+      "entry_points": [
+        "chunk_gated_delta_rule_fwd_h",
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+        "exp",
+        "exp2",
+        "launch_chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+        "prepare_chunk_indices",
+        "prepare_chunk_offsets",
+        "safe_exp"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "launch_chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+        "chunk_gated_delta_rule_fwd_h"
+      ],
+      "void_publics": [
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（launch_chunk_gated_delta_rule_fwd_kernel_h_blockdim64, chunk_gated_delta_rule_fwd_h）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（chunk_gated_delta_rule_fwd_kernel_h_blockdim64）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fla/vllm/chunk_delta_h.py",
+      "suggested_name": "chunk_delta_h",
+      "family": "elementwise",
+      "lines": 521,
+      "bytes": 20204,
+      "device_kernels": [
+        "exp",
+        "exp2"
+      ],
+      "entry_points": [
+        "chunk_gated_delta_rule_fwd_h",
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+        "exp",
+        "exp2",
+        "launch_chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+        "prepare_chunk_indices",
+        "prepare_chunk_offsets"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "launch_chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+        "chunk_gated_delta_rule_fwd_h"
+      ],
+      "void_publics": [
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（launch_chunk_gated_delta_rule_fwd_kernel_h_blockdim64, chunk_gated_delta_rule_fwd_h）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（chunk_gated_delta_rule_fwd_kernel_h_blockdim64）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fla/sglang/chunk_fwd.py",
+      "suggested_name": "chunk_fwd",
+      "family": "elementwise",
+      "lines": 544,
+      "bytes": 20107,
+      "device_kernels": [
+        "exp",
+        "safe_exp"
+      ],
+      "entry_points": [
+        "chunk_gated_delta_rule_fwd_intra",
+        "chunk_gated_delta_rule_fwd_kkt_solve",
+        "chunk_gated_delta_rule_fwd_kkt_solve_kernel",
+        "exp",
+        "launch_chunk_gated_delta_rule_fwd_kkt_solve_kernel",
+        "prepare_chunk_indices",
+        "safe_exp"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "launch_chunk_gated_delta_rule_fwd_kkt_solve_kernel"
+      ],
+      "void_publics": [
+        "chunk_gated_delta_rule_fwd_kkt_solve_kernel"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（launch_chunk_gated_delta_rule_fwd_kkt_solve_kernel）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（chunk_gated_delta_rule_fwd_kkt_solve_kernel）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/lean_atten.py",
+      "suggested_name": "lean_atten",
+      "family": "elementwise",
+      "lines": 593,
+      "bytes": 21801,
+      "device_kernels": [
+        "find_group",
+        "la_persistent"
+      ],
+      "entry_points": [
+        "find_group",
+        "get_num_splits_and_buffer_sizes",
+        "la_persistent",
+        "persistent_lean_attention"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [
+        "get_num_splits_and_buffer_sizes",
+        "find_group"
+      ],
+      "void_publics": [
+        "la_persistent"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "公开函数返回多值（get_num_splits_and_buffer_sizes, find_group）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（la_persistent）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gluon/pa_mqa_logits.py",
+      "suggested_name": "pa_mqa_logits",
+      "family": "elementwise",
+      "lines": 1905,
+      "bytes": 71366,
+      "device_kernels": [
+        "_sum_combine"
+      ],
+      "entry_points": [],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": false,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "文件中没有非下划线的公开函数：缺少任务入口，需确认是否有对外 API"
+      ],
+      "advisories": [],
+      "difficulty_hint": "hard"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_a16w16.py",
+      "suggested_name": "gemm_a16w16",
+      "family": "gemm",
+      "lines": 191,
+      "bytes": 5994,
+      "device_kernels": [
+        "_gemm_a16_w16_kernel"
+      ],
+      "entry_points": [
+        "gemm_a16w16"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [],
+      "difficulty_hint": "basic"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_a16w16_atomic.py",
+      "suggested_name": "gemm_a16w16_atomic",
+      "family": "gemm",
+      "lines": 238,
+      "bytes": 8222,
+      "device_kernels": [
+        "_gemm_a16_w16_atomic_kernel"
+      ],
+      "entry_points": [
+        "gemm_a16w16_atomic"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_a8w8.py",
+      "suggested_name": "gemm_a8w8",
+      "family": "gemm",
+      "lines": 259,
+      "bytes": 8590,
+      "device_kernels": [
+        "_gemm_a8w8_kernel"
+      ],
+      "entry_points": [
+        "gemm_a8w8"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/batched_gemm_bf16.py",
+      "suggested_name": "batched_gemm_bf16",
+      "family": "gemm",
+      "lines": 263,
+      "bytes": 8490,
+      "device_kernels": [
+        "_batched_gemm_bf16_kernel"
+      ],
+      "entry_points": [
+        "batched_gemm_bf16"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_a8w8_blockscale.py",
+      "suggested_name": "gemm_a8w8_blockscale",
+      "family": "gemm",
+      "lines": 279,
+      "bytes": 9250,
+      "device_kernels": [
+        "_gemm_a8w8_blockscale_kernel"
+      ],
+      "entry_points": [
+        "gemm_a8w8_blockscale"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/batched_gemm_a8w8.py",
+      "suggested_name": "batched_gemm_a8w8",
+      "family": "gemm",
+      "lines": 296,
+      "bytes": 9850,
+      "device_kernels": [
+        "_batched_gemm_a8w8_kernel"
+      ],
+      "entry_points": [
+        "batched_gemm_a8w8"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_afp4wfp4_pre_quant_atomic.py",
+      "suggested_name": "gemm_afp4wfp4_pre_quant_atomic",
+      "family": "gemm",
+      "lines": 321,
+      "bytes": 10877,
+      "device_kernels": [
+        "_gemm_afp4_wfp4_pre_quant_kernel"
+      ],
+      "entry_points": [
+        "gemm_afp4wfp4_pre_quant",
+        "get_splitk"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "get_splitk"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（get_splitk）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_w8a8.py",
+      "suggested_name": "gemm_w8a8",
+      "family": "gemm",
+      "lines": 408,
+      "bytes": 15167,
+      "device_kernels": [
+        "_w8a8_block_int8_matmul"
+      ],
+      "entry_points": [
+        "gemm_w8a8",
+        "get_w8a8_block_int8_configs"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/batched_gemm_afp4wfp4_pre_quant.py",
+      "suggested_name": "batched_gemm_afp4wfp4_pre_quant",
+      "family": "gemm",
+      "lines": 446,
+      "bytes": 15087,
+      "device_kernels": [
+        "_batched_gemm_afp4_wfp4_pre_quant_kernel",
+        "_batched_gemm_afp4_wfp4_pre_quant_reduce_kernel"
+      ],
+      "entry_points": [
+        "batched_gemm_afp4wfp4_pre_quant",
+        "get_splitk",
+        "set_use_gemm_splitk_bf16"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "get_splitk"
+      ],
+      "void_publics": [
+        "set_use_gemm_splitk_bf16"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（get_splitk）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（set_use_gemm_splitk_bf16）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_a8wfp4.py",
+      "suggested_name": "gemm_a8wfp4",
+      "family": "gemm",
+      "lines": 449,
+      "bytes": 14987,
+      "device_kernels": [
+        "_gemm_a8wfp4_kernel",
+        "_gemm_afp4_wfp4_reduce_kernel"
+      ],
+      "entry_points": [
+        "gemm_a8wfp4",
+        "get_splitk",
+        "set_use_gemm_splitk_bf16"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "get_splitk"
+      ],
+      "void_publics": [
+        "set_use_gemm_splitk_bf16",
+        "gemm_a8wfp4"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（get_splitk）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（set_use_gemm_splitk_bf16, gemm_a8wfp4）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/batched_gemm_afp4wfp4.py",
+      "suggested_name": "batched_gemm_afp4wfp4",
+      "family": "gemm",
+      "lines": 488,
+      "bytes": 16606,
+      "device_kernels": [
+        "_batched_gemm_afp4_wfp4_kernel",
+        "_batched_gemm_afp4_wfp4_reduce_kernel"
+      ],
+      "entry_points": [
+        "batched_gemm_afp4wfp4",
+        "get_splitk",
+        "set_use_gemm_splitk_bf16"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "get_splitk"
+      ],
+      "void_publics": [
+        "set_use_gemm_splitk_bf16",
+        "batched_gemm_afp4wfp4"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（get_splitk）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（set_use_gemm_splitk_bf16, batched_gemm_afp4wfp4）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_afp4wfp4.py",
+      "suggested_name": "gemm_afp4wfp4",
+      "family": "gemm",
+      "lines": 731,
+      "bytes": 23991,
+      "device_kernels": [
+        "_gemm_afp4_wfp4_kernel",
+        "_gemm_afp4_wfp4_kernel_preshuffled_scales",
+        "_gemm_afp4_wfp4_reduce_kernel"
+      ],
+      "entry_points": [
+        "gemm_afp4wfp4",
+        "gemm_afp4wfp4_preshuffled_scales",
+        "get_splitk",
+        "set_use_gemm_splitk_bf16"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "get_splitk"
+      ],
+      "void_publics": [
+        "set_use_gemm_splitk_bf16"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（get_splitk）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（set_use_gemm_splitk_bf16）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_a16w4.py",
+      "suggested_name": "gemm_a16w4",
+      "family": "gemm",
+      "lines": 1039,
+      "bytes": 41533,
+      "device_kernels": [
+        "awq_dequantize_kernel",
+        "awq_gemm_kernel",
+        "awq_gemm_kernel_fused",
+        "awq_gemm_kernel_inner",
+        "awq_gemm_kernel_splitk",
+        "awq_gemm_kernel_splitk_fused",
+        "awq_gemm_kernel_streamk"
+      ],
+      "entry_points": [
+        "awq_dequantize_kernel",
+        "awq_dequantize_triton",
+        "awq_gemm_kernel",
+        "awq_gemm_kernel_fused",
+        "awq_gemm_kernel_inner",
+        "awq_gemm_kernel_splitk",
+        "awq_gemm_kernel_splitk_fused",
+        "awq_gemm_kernel_streamk",
+        "awq_gemm_triton_fused_impl",
+        "awq_gemm_triton_impl",
+        "awq_reduce_and_convert_kernel",
+        "awq_reduce_and_convert_triton",
+        "awq_reorder_and_repack",
+        "gemm_a16w4",
+        "get_w4a16_awq_gemm_config_filepath",
+        "get_w4a16_awq_gemm_configs",
+        "prune_configs",
+        "reverse_awq_order",
+        "update_config"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "awq_reorder_and_repack"
+      ],
+      "void_publics": [
+        "awq_dequantize_kernel",
+        "awq_gemm_kernel_inner",
+        "awq_gemm_kernel_streamk",
+        "awq_gemm_kernel_splitk",
+        "awq_gemm_kernel_splitk_fused",
+        "awq_reduce_and_convert_kernel",
+        "awq_reduce_and_convert_triton"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（awq_reorder_and_repack）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（awq_dequantize_kernel, awq_gemm_kernel_inner, awq_gemm_kernel_streamk）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_allreduce_w8a8.py",
+      "suggested_name": "gemm_allreduce_w8a8",
+      "family": "gemm",
+      "lines": 1091,
+      "bytes": 40049,
+      "device_kernels": [
+        "_w8a8_block_matmul_allreduce_oneshot_kernel",
+        "_w8a8_block_matmul_scatter_kernel",
+        "barrier_all_ipc",
+        "putmem_kernel",
+        "scatter_gather_local_kernel",
+        "scatter_reduce_gather_kernel",
+        "scatter_reduce_local_kernel"
+      ],
+      "entry_points": [
+        "barrier_all_ipc",
+        "gemm_allreduce_w8a8",
+        "gemm_allreduce_w8a8_v2",
+        "get_w8a8_block_int8_configs",
+        "putmem_kernel",
+        "scatter_gather_local_kernel",
+        "scatter_reduce_gather_kernel",
+        "scatter_reduce_local_kernel"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "barrier_all_ipc",
+        "scatter_reduce_local_kernel",
+        "scatter_reduce_gather_kernel",
+        "scatter_gather_local_kernel",
+        "putmem_kernel"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（barrier_all_ipc, scatter_reduce_local_kernel, scatter_reduce_gather_kernel）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/gemm_allreduce_a16w4.py",
+      "suggested_name": "gemm_allreduce_a16w4",
+      "family": "gemm",
+      "lines": 1928,
+      "bytes": 74129,
+      "device_kernels": [
+        "_compute_pid",
+        "awq_dequantize_kernel",
+        "awq_gemm_allreduce_kernel_splitk",
+        "awq_gemm_allreduce_oneshot_kernel",
+        "awq_gemm_kernel",
+        "awq_gemm_kernel_fused",
+        "awq_gemm_kernel_inner",
+        "awq_gemm_kernel_splitk",
+        "awq_gemm_kernel_splitk_fused",
+        "awq_gemm_kernel_streamk",
+        "awq_gemm_scatter_kernel",
+        "awq_gemm_scatter_kernel_inner",
+        "awq_gemm_scatter_kernel_splitk",
+        "awq_reduce_and_convert_kernel",
+        "barrier_all_ipc",
+        "extract_submask_and_offset",
+        "local_reduce_kernel",
+        "offset_for_tile",
+        "tile_id_to_index_range"
+      ],
+      "entry_points": [
+        "awq_dequantize_kernel",
+        "awq_dequantize_triton",
+        "awq_gemm_allreduce_kernel_splitk",
+        "awq_gemm_allreduce_oneshot_kernel",
+        "awq_gemm_allreduce_triton_fused_impl",
+        "awq_gemm_allreduce_triton_oneshot_impl",
+        "awq_gemm_kernel",
+        "awq_gemm_kernel_fused",
+        "awq_gemm_kernel_inner",
+        "awq_gemm_kernel_splitk",
+        "awq_gemm_kernel_splitk_fused",
+        "awq_gemm_kernel_streamk",
+        "awq_gemm_scatter_kernel",
+        "awq_gemm_scatter_kernel_inner",
+        "awq_gemm_scatter_kernel_splitk",
+        "awq_gemm_triton_fused_impl",
+        "awq_gemm_triton_impl",
+        "awq_reduce_and_convert_kernel",
+        "awq_reduce_and_convert_triton",
+        "awq_reorder_and_repack",
+        "barrier_all_ipc",
+        "barrier_all_on_stream",
+        "extract_submask_and_offset",
+        "gemm_a16w4",
+        "gemm_allreduce_a16w4",
+        "get_w4a16_awq_gemm_config_filepath",
+        "get_w4a16_awq_gemm_configs",
+        "local_reduce_kernel",
+        "offset_for_tile",
+        "prune_configs",
+        "reverse_awq_order",
+        "tile_id_to_index_range",
+        "update_config"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "awq_reorder_and_repack",
+        "tile_id_to_index_range",
+        "offset_for_tile",
+        "extract_submask_and_offset",
+        "awq_gemm_allreduce_triton_oneshot_impl"
+      ],
+      "void_publics": [
+        "awq_dequantize_kernel",
+        "awq_gemm_kernel_inner",
+        "awq_gemm_scatter_kernel_inner",
+        "awq_gemm_kernel_streamk",
+        "awq_gemm_kernel_splitk",
+        "awq_gemm_kernel_splitk_fused",
+        "awq_gemm_allreduce_kernel_splitk",
+        "awq_gemm_scatter_kernel_splitk",
+        "awq_gemm_allreduce_oneshot_kernel",
+        "barrier_all_ipc",
+        "barrier_all_on_stream",
+        "local_reduce_kernel",
+        "awq_reduce_and_convert_kernel",
+        "awq_reduce_and_convert_triton"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（awq_reorder_and_repack, tile_id_to_index_range, offset_for_tile, extract_submask_and_offset, awq_gemm_allreduce_triton_oneshot_impl）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（awq_dequantize_kernel, awq_gemm_kernel_inner, awq_gemm_scatter_kernel_inner）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "hard"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/moe_routing_sigmoid_top1_fused.py",
+      "suggested_name": "moe_routing_sigmoid_top1_fused",
+      "family": "moe",
+      "lines": 187,
+      "bytes": 5443,
+      "device_kernels": [
+        "_routing_sigmoid_top1_kernel"
+      ],
+      "entry_points": [
+        "routing_sigmoid_top1"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "routing_sigmoid_top1"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（routing_sigmoid_top1）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "basic"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/topk.py",
+      "suggested_name": "topk",
+      "family": "moe",
+      "lines": 417,
+      "bytes": 12912,
+      "device_kernels": [
+        "_bitonic_merge",
+        "_compare_and_swap",
+        "_topk_kernel",
+        "argsort",
+        "topk_stage1_kernel",
+        "topk_stage2_kernel"
+      ],
+      "entry_points": [
+        "argsort",
+        "one_stage_topk",
+        "topk",
+        "topk_stage1_kernel",
+        "topk_stage2_kernel",
+        "two_stage_topk"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [
+        "one_stage_topk",
+        "argsort",
+        "two_stage_topk"
+      ],
+      "void_publics": [
+        "topk_stage1_kernel",
+        "topk_stage2_kernel"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [
+        "__future__"
+      ],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖白名单外的三方库：__future__",
+        "公开函数返回多值（one_stage_topk, argsort, two_stage_topk）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（topk_stage1_kernel, topk_stage2_kernel）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/moe_op_mxfp4.py",
+      "suggested_name": "moe_op_mxfp4",
+      "family": "moe",
+      "lines": 452,
+      "bytes": 16968,
+      "device_kernels": [
+        "_fused_moe_kernel_mxfp4"
+      ],
+      "entry_points": [
+        "fused_moe_mxfp4",
+        "get_scaled_dot_format_string"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "fused_moe_mxfp4"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（fused_moe_mxfp4）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/moe_op_gelu.py",
+      "suggested_name": "moe_op_gelu",
+      "family": "moe",
+      "lines": 616,
+      "bytes": 22953,
+      "device_kernels": [
+        "_fused_moe_kernel",
+        "_fused_moe_persistent_kernel"
+      ],
+      "entry_points": [
+        "fused_moe_gelu",
+        "moe_set_padding_size",
+        "moe_set_quant_func",
+        "moe_set_use_persistent_kernel"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "moe_set_use_persistent_kernel",
+        "moe_set_padding_size",
+        "moe_set_quant_func",
+        "fused_moe_gelu"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（moe_set_use_persistent_kernel, moe_set_padding_size, moe_set_quant_func）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/moe_op_e2e.py",
+      "suggested_name": "moe_op_e2e",
+      "family": "moe",
+      "lines": 766,
+      "bytes": 27245,
+      "device_kernels": [
+        "e2e_moe_kernel",
+        "e2e_moe_persistent_kernel"
+      ],
+      "entry_points": [
+        "e2e_moe",
+        "e2e_moe_kernel",
+        "e2e_moe_persistent_kernel",
+        "moe_set_padding_size",
+        "moe_set_quant_func",
+        "moe_set_use_persistent_kernel"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "moe_set_use_persistent_kernel",
+        "moe_set_padding_size",
+        "moe_set_quant_func",
+        "e2e_moe_kernel",
+        "e2e_moe_persistent_kernel"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（moe_set_use_persistent_kernel, moe_set_padding_size, moe_set_quant_func）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/moe_activation.py",
+      "suggested_name": "moe_activation",
+      "family": "moe",
+      "lines": 809,
+      "bytes": 25885,
+      "device_kernels": [
+        "_gelu_tanh",
+        "_tanh",
+        "activation_and_mul_kernel",
+        "activation_no_mul_1d_kernel",
+        "gelu_tanh_and_mul_kernel",
+        "gelu_tanh_no_mul_1d_kernel",
+        "swiglu_oai_interleaved_1d_kernel",
+        "swiglu_variant_1d_kernel"
+      ],
+      "entry_points": [
+        "activation_and_mul_kernel",
+        "activation_no_mul_1d_kernel",
+        "adjust_N_for_activation",
+        "gelu_tanh_and_mul_kernel",
+        "gelu_tanh_no_mul_1d_kernel",
+        "get_triton_activation_and_mul_config",
+        "get_triton_activation_no_mul_config",
+        "get_triton_gelu_tanh_and_mul_config",
+        "get_triton_gelu_tanh_no_mul_config",
+        "get_triton_swiglu_oai_interleaved_config",
+        "get_triton_swiglu_variant_config",
+        "swiglu_oai_interleaved_1d_kernel",
+        "swiglu_variant_1d_kernel",
+        "triton_gelu_and_mul",
+        "triton_gelu_no_mul",
+        "triton_gelu_tanh_and_mul",
+        "triton_gelu_tanh_no_mul",
+        "triton_relu2",
+        "triton_silu_and_mul",
+        "triton_silu_no_mul",
+        "triton_swiglu_gpt_oss_sigmoid_alpha",
+        "triton_swiglu_oai_and_mul",
+        "triton_swiglu_silu_clamp_mul",
+        "triton_swiglu_step_and_mul"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "activation_and_mul_kernel",
+        "activation_no_mul_1d_kernel",
+        "triton_relu2",
+        "triton_silu_no_mul",
+        "triton_gelu_no_mul",
+        "triton_silu_and_mul",
+        "gelu_tanh_and_mul_kernel",
+        "gelu_tanh_no_mul_1d_kernel",
+        "triton_gelu_tanh_no_mul",
+        "triton_gelu_tanh_and_mul",
+        "triton_gelu_and_mul",
+        "swiglu_variant_1d_kernel",
+        "triton_swiglu_silu_clamp_mul",
+        "triton_swiglu_gpt_oss_sigmoid_alpha",
+        "triton_swiglu_step_and_mul",
+        "swiglu_oai_interleaved_1d_kernel",
+        "triton_swiglu_oai_and_mul"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（activation_and_mul_kernel, activation_no_mul_1d_kernel, triton_relu2）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fused_moe.py",
+      "suggested_name": "fused_moe",
+      "family": "moe",
+      "lines": 1171,
+      "bytes": 50333,
+      "device_kernels": [
+        "moe_align_block_size_stage1",
+        "moe_align_block_size_stage2",
+        "moe_align_block_size_stage3",
+        "moe_align_block_size_stage4",
+        "moe_sum_kernel"
+      ],
+      "entry_points": [
+        "ceil_div",
+        "fused_experts",
+        "fused_experts_impl",
+        "fused_moe_fake",
+        "get_moe_sum_config",
+        "inplace_fused_experts",
+        "moe_align_block_size",
+        "moe_align_block_size_stage1",
+        "moe_align_block_size_stage2",
+        "moe_align_block_size_stage3",
+        "moe_align_block_size_stage4",
+        "moe_align_block_size_triton",
+        "moe_sorting_ck",
+        "moe_sum_kernel",
+        "outplace_fused_experts",
+        "triton_moe_sum"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "moe_align_block_size",
+        "moe_sorting_ck"
+      ],
+      "void_publics": [
+        "moe_sum_kernel",
+        "moe_align_block_size_stage1",
+        "moe_align_block_size_stage2",
+        "moe_align_block_size_stage3",
+        "moe_align_block_size_stage4",
+        "moe_align_block_size_triton",
+        "inplace_fused_experts"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [
+        "boltops",
+        "the"
+      ],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "依赖白名单外的三方库：boltops, the",
+        "公开函数返回多值（moe_align_block_size, moe_sorting_ck）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（moe_sum_kernel, moe_align_block_size_stage1, moe_align_block_size_stage2）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/moe_op_silu_fused.py",
+      "suggested_name": "moe_op_silu_fused",
+      "family": "moe",
+      "lines": 1244,
+      "bytes": 48008,
+      "device_kernels": [
+        "_fused_moe_persistent_silu_kernel",
+        "_fused_moe_persistent_silu_kernel_gptq_awq",
+        "_fused_moe_silu_kernel",
+        "_fused_moe_silu_kernel_gptq_awq"
+      ],
+      "entry_points": [
+        "fused_moe_silu",
+        "moe_set_padding_size",
+        "moe_set_quant_func",
+        "moe_set_use_persistent_kernel"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [
+        "moe_set_use_persistent_kernel",
+        "moe_set_padding_size",
+        "moe_set_quant_func",
+        "fused_moe_silu"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置"
+      ],
+      "advisories": [
+        "void API（moe_set_use_persistent_kernel, moe_set_padding_size, moe_set_quant_func）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/moe_op.py",
+      "suggested_name": "moe_op",
+      "family": "moe",
+      "lines": 3019,
+      "bytes": 128057,
+      "device_kernels": [
+        "pid_grid",
+        "remap_xcd",
+        "write_zeros_to_output"
+      ],
+      "entry_points": [
+        "distinguish_moe_kernel_name",
+        "fused_moe",
+        "fused_moe_kernel",
+        "fused_moe_kernel_gptq_awq",
+        "fused_moe_kernel_gptq_awq_w4a8",
+        "fused_moe_kernel_gptq_awq_w4a8_channelwise",
+        "fused_moe_persistent_kernel",
+        "fused_moe_splitk_kernel",
+        "moe_set_use_persistent_kernel",
+        "pid_grid",
+        "remap_xcd",
+        "support_mls",
+        "write_zeros_to_output"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "pid_grid"
+      ],
+      "void_publics": [
+        "write_zeros_to_output",
+        "fused_moe_kernel_gptq_awq",
+        "fused_moe_kernel_gptq_awq_w4a8",
+        "fused_moe_kernel_gptq_awq_w4a8_channelwise",
+        "fused_moe_kernel",
+        "fused_moe_splitk_kernel",
+        "fused_moe_persistent_kernel",
+        "moe_set_use_persistent_kernel"
+      ],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（pid_grid）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [
+        "void API（write_zeros_to_output, fused_moe_kernel_gptq_awq, fused_moe_kernel_gptq_awq_w4a8）：写预分配缓冲区。可适配——题目侧分配 out → 调用 → 返回 out；但需人工确认输出缓冲区只有 1 个、且全部元素都有定义（多缓冲区或填充区未定义则不适配）"
+      ],
+      "difficulty_hint": "hard"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/group_quant_int8.py",
+      "suggested_name": "group_quant_int8",
+      "family": "quant",
+      "lines": 195,
+      "bytes": 6595,
+      "device_kernels": [
+        "_per_token_group_quant_int8"
+      ],
+      "entry_points": [
+        "get_w8a8_group_quant_config_filepath",
+        "get_w8a8_group_quant_configs",
+        "per_token_group_quant_int8"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "per_token_group_quant_int8"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（per_token_group_quant_int8）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "basic"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/fused_mxfp4_quant.py",
+      "suggested_name": "fused_mxfp4_quant",
+      "family": "quant",
+      "lines": 300,
+      "bytes": 8932,
+      "device_kernels": [
+        "_fused_flatten_mxfp4_quant",
+        "_fused_rms_mxfp4_quant_kernel",
+        "_rmsmorm_op"
+      ],
+      "entry_points": [
+        "fused_flatten_mxfp4_quant",
+        "fused_rms_mxfp4_quant"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [
+        "fused_rms_mxfp4_quant",
+        "fused_flatten_mxfp4_quant"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "公开函数返回多值（fused_rms_mxfp4_quant, fused_flatten_mxfp4_quant）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/quant.py",
+      "suggested_name": "quant",
+      "family": "quant",
+      "lines": 601,
+      "bytes": 18944,
+      "device_kernels": [
+        "_cast_quantized",
+        "_dynamic_mxfp4_quant_kernel",
+        "_dynamic_per_tensor_quant_fp8_i8_kernel",
+        "_dynamic_per_token_quant_fp8_i8_1d_kernel",
+        "_dynamic_per_token_quant_fp8_i8_kernel",
+        "_dynamic_per_token_quant_fp8_i8_n128_kernel",
+        "_mxfp4_quant_op",
+        "_static_per_tensor_quant_fp8_i8_kernel"
+      ],
+      "entry_points": [
+        "dynamic_mxfp4_quant",
+        "dynamic_per_tensor_quant_fp8_i8",
+        "dynamic_per_token_quant_fp8_i8",
+        "static_per_tensor_quant_fp8_i8"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [
+        "dynamic_per_tensor_quant_fp8_i8",
+        "dynamic_per_token_quant_fp8_i8",
+        "dynamic_mxfp4_quant"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "依赖外部 config JSON（@triton.autotune 或 AITER_TRITON_CONFIGS_PATH）：独立复现时若缺该文件会失败或退化到默认配置",
+        "公开函数返回多值（dynamic_per_tensor_quant_fp8_i8, dynamic_per_token_quant_fp8_i8, dynamic_mxfp4_quant）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/rope.py",
+      "suggested_name": "rope",
+      "family": "rope",
+      "lines": 3568,
+      "bytes": 98769,
+      "device_kernels": [
+        "_get_gptj_rotated_x",
+        "_get_gptj_rotated_x_1D",
+        "_get_neox_rotated_x",
+        "_get_neox_rotated_x_1D",
+        "_rope_fwd_2d_kernel_neox",
+        "_rope_kernel_cached_thd_2c_gqa_bwd",
+        "_rope_kernel_cached_thd_2c_gqa_fwd",
+        "_rope_kernel_cached_thd_2c_gqa_onehead_bwd",
+        "_rope_kernel_cached_thd_2c_gqa_onehead_fwd",
+        "_rope_kernel_sbhd_bwd",
+        "_rope_kernel_sbhd_cached_bwd",
+        "_rope_kernel_sbhd_cached_fwd",
+        "_rope_kernel_sbhd_fwd",
+        "_rope_kernel_thd_bwd",
+        "_rope_kernel_thd_cached_2c_bwd",
+        "_rope_kernel_thd_cached_2c_fwd",
+        "_rope_kernel_thd_fwd"
+      ],
+      "entry_points": [
+        "rope_bwd",
+        "rope_cached_bwd",
+        "rope_cached_fwd",
+        "rope_cached_fwd_inplace",
+        "rope_cached_positions_bwd",
+        "rope_cached_positions_fwd",
+        "rope_cached_positions_fwd_inplace",
+        "rope_cached_positions_offsets_bwd",
+        "rope_cached_positions_offsets_fwd",
+        "rope_cached_positions_offsets_fwd_inplace",
+        "rope_cached_thd_positions_2c_bwd",
+        "rope_cached_thd_positions_2c_fwd",
+        "rope_cached_thd_positions_2c_fwd_inplace",
+        "rope_cached_thd_positions_offsets_2c_bwd",
+        "rope_cached_thd_positions_offsets_2c_fwd",
+        "rope_cached_thd_positions_offsets_2c_fwd_inplace",
+        "rope_fwd",
+        "rope_fwd_2d",
+        "rope_fwd_2d_inplace",
+        "rope_fwd_inplace",
+        "rope_thd_bwd",
+        "rope_thd_fwd",
+        "rope_thd_fwd_inplace"
+      ],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [
+        "rope_cached_thd_positions_2c_fwd",
+        "rope_cached_thd_positions_2c_fwd_inplace",
+        "rope_cached_thd_positions_offsets_2c_fwd",
+        "rope_cached_thd_positions_offsets_2c_fwd_inplace",
+        "rope_cached_thd_positions_2c_bwd",
+        "rope_cached_thd_positions_offsets_2c_bwd"
+      ],
+      "void_publics": [],
+      "is_internal_path": false,
+      "has_public_entry": true,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "needs_review",
+      "reasons": [
+        "公开函数返回多值（rope_cached_thd_positions_2c_fwd, rope_cached_thd_positions_2c_fwd_inplace, rope_cached_thd_positions_offsets_2c_fwd, rope_cached_thd_positions_offsets_2c_fwd_inplace, rope_cached_thd_positions_2c_bwd, rope_cached_thd_positions_offsets_2c_bwd）：model_class 契约要求 forward 返回单个张量，需确认主算子是否有单输出入口，否则应剔除"
+      ],
+      "advisories": [],
+      "difficulty_hint": "hard"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/_triton_kernels/attention/pa_mqa_logits.py",
+      "suggested_name": "pa_mqa_logits",
+      "family": "elementwise",
+      "lines": 534,
+      "bytes": 16034,
+      "device_kernels": [
+        "_deepgemm_fp8_paged_mqa_logits",
+        "_deepgemm_fp8_paged_mqa_logits_ragged_k",
+        "_deepgemm_fp8_paged_mqa_logits_stage1",
+        "_deepgemm_fp8_paged_mqa_logits_stage1_ragged_k",
+        "_deepgemm_fp8_paged_mqa_logits_varctx_schedule",
+        "_gluon_deepgemm_fp8_paged_mqa_logits",
+        "_gluon_deepgemm_fp8_paged_mqa_logits_preshuffle",
+        "_gluon_deepgemm_fp8_paged_mqa_logits_preshuffle_varctx",
+        "_sum_combine"
+      ],
+      "entry_points": [],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": false,
+      "needs_external_config": false,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": true,
+      "has_public_entry": false,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "rejected",
+      "reasons": [
+        "路径含下划线开头的段（_triton_kernels/ 等内部实现目录）：属多阶段算法的内部 stage kernel，没有可交付的公开算子契约，不作题目来源"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    },
+    {
+      "impl_lang": "triton",
+      "source_path": "aiter/ops/triton/_triton_kernels/attention/fp8_mqa_logits.py",
+      "suggested_name": "fp8_mqa_logits",
+      "family": "quant",
+      "lines": 318,
+      "bytes": 11170,
+      "device_kernels": [
+        "_fp8_mqa_clear_logits_kernel",
+        "_fp8_mqa_logits_kernel",
+        "_fp8_mqa_logits_kernel_grouped"
+      ],
+      "entry_points": [],
+      "closed_libs": [],
+      "frameworks": [],
+      "internal_includes": [],
+      "core_elsewhere": [],
+      "uses_autotune": true,
+      "needs_external_config": true,
+      "multi_outputs": [],
+      "void_publics": [],
+      "is_internal_path": true,
+      "has_public_entry": false,
+      "unknown_imports": [],
+      "opus_header_include": false,
+      "verdict": "rejected",
+      "reasons": [
+        "路径含下划线开头的段（_triton_kernels/ 等内部实现目录）：属多阶段算法的内部 stage kernel，没有可交付的公开算子契约，不作题目来源"
+      ],
+      "advisories": [],
+      "difficulty_hint": "medium"
+    }
+  ]
+}

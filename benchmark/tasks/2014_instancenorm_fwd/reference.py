@@ -1,53 +1,65 @@
-# 2014_instancenorm_fwd —— InstanceNorm 前向（per-(N,C) 空间统计 + 逐通道
-# 仿射）的 model_class（KernelBench 兼容）题目文件。
+# 2014_instancenorm_fwd -- model_class (KernelBench compatible) task file for the
+# InstanceNorm forward pass (per-(N,C) spatial statistics plus per-channel
+# affine).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=2014, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=2, problem_id=2014, backend=cuda (HIP).
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """InstanceNorm 前向：per-(N,C) 空间统计归一化 + 逐通道仿射（单 variant）。
+    """InstanceNorm forward pass: per-(N,C) spatial-statistics normalization plus
+    per-channel affine (single variant).
 
-    输入 x (N, C, H, W)，NCHW contiguous；scale / bias 为 (1, C, 1, 1) 的
-    逐通道仿射参数，沿通道维广播；eps 缺省 1e-5。对每个 (n, c) 平面在空间
-    维 (H, W) 上求统计（每平面元素数 HW = H*W），在 float32 中：
-        mean_nc    = sum_{h,w} x[n,c,h,w] / HW                  （有偏均值）
-        var_nc     = sum_{h,w} (x[n,c,h,w] - mean_nc)^2 / HW    （有偏方差）
+    The input x (N, C, H, W) is NCHW contiguous; scale / bias are the (1, C, 1, 1)
+    per-channel affine parameters, broadcast along the channel dimension; eps
+    defaults to 1e-5. Statistics are taken over the spatial dimensions (H, W) for
+    every (n, c) plane (HW = H*W elements per plane), in float32:
+        mean_nc    = sum_{h,w} x[n,c,h,w] / HW                  (biased mean)
+        var_nc     = sum_{h,w} (x[n,c,h,w] - mean_nc)^2 / HW    (biased variance)
         inv_std_nc = 1 / sqrt(var_nc + eps)
         y[n,c,h,w] = scale[c] * (x[n,c,h,w] - mean_nc) * inv_std_nc + bias[c]
-    instance norm 无 train / inference 语义差：归一化统计恒取自输入本身。
-    有偏口径（除以 HW 而非 HW-1），eps 在 rsqrt 内部（唯一用途即除零保护，
-    不参与任何无偏修正）。
+    Instance norm has no train / inference semantic difference: the normalization
+    statistics always come from the input itself. The convention is biased (divide
+    by HW rather than HW-1), and eps sits inside the rsqrt (its only purpose is the
+    division-by-zero guard; it takes part in no unbiased correction).
 
-    边界行为：HW == 1（空间单元素）时 var = 0、x - mean = 0，此时
-    inv_std = 1/sqrt(eps)、y = bias（eps 保证不除零）；N/C/H/W 任意（含
-    1、非 2 的幂、非对齐），大 HW 需分块归约，行尾越界元素不得参与统计。
+    Boundary behaviour: when HW == 1 (a single spatial element) var = 0 and
+    x - mean = 0, so inv_std = 1/sqrt(eps) and y = bias (eps guarantees no division
+    by zero); N/C/H/W are arbitrary (including 1, non-powers-of-two, and unaligned
+    sizes); a large HW requires a blocked reduction, and out-of-range elements at
+    the row tail must not participate in the statistics.
 
-    输入输出规格：
-        x     float32 / float16 / bfloat16 (N, C, H, W)，contiguous，
+    Input/output specification:
+        x     float32 / float16 / bfloat16 (N, C, H, W), contiguous,
               N/C/H/W >= 1
-        scale 同 x dtype (1, C, 1, 1)，contiguous
-        bias  同 x dtype (1, C, 1, 1)，contiguous
-        out   单张量 y 本体：(N, C, H, W)、同 x dtype（统计与仿射全程
-              float32 中间计算后 cast 回 x dtype），无打包
-        输入为常规 randn/rand 量级（无 inf/NaN）；评测器会把全部输入
-        cast 成 fp32 传入（fp16/bf16 -> fp32 无损）。
+        scale same dtype as x, (1, C, 1, 1), contiguous
+        bias  same dtype as x, (1, C, 1, 1), contiguous
+        out   a single tensor, y itself: (N, C, H, W) with the same dtype as x
+              (statistics and affine run in float32 intermediates, then cast back
+              to the x dtype); no packing
+        The inputs are ordinary randn/rand magnitude (no inf/NaN); the evaluator
+        casts all inputs to fp32 before calling forward (fp16/bf16 -> fp32 is
+        lossless).
 
-    实现约束（违规判负）：
-        - 核心计算（per-(N,C) 空间归约统计、rsqrt、逐通道仿射）必须在提交
-          文件内以 Triton kernel 完成。
-        - ModelNew 的 __init__ 与 forward 签名不可更改。
-        - 统计、rsqrt 与仿射全程 float32 中间计算；y cast 回 x dtype。
-        - forward 返回单张量 out（评测器按单输出比较 shape/dtype/allclose）。
+    Implementation constraints (violations are scored as failures):
+        - The core computation (the per-(N,C) spatial reduction statistics, rsqrt,
+          and the per-channel affine) must be completed with a HIP kernel inside
+          the submitted file.
+        - The __init__ and forward signatures of ModelNew must not be changed.
+        - The statistics, rsqrt and affine all run in float32 intermediates; y is
+          cast back to the x dtype.
+        - forward returns the single tensor `out` (the evaluator compares
+          shape/dtype/allclose on a single output).
 
-    禁用列表：torch.nn.InstanceNorm1d / torch.nn.InstanceNorm2d /
+    Forbidden list: torch.nn.InstanceNorm1d / torch.nn.InstanceNorm2d /
     torch.nn.InstanceNorm3d / torch.nn.functional.instance_norm /
     F.instance_norm / torch.instance_norm / native_instance_norm /
     torch.nn.GroupNorm / nn.GroupNorm / torch.nn.functional.group_norm /
@@ -55,26 +67,31 @@ class Model(nn.Module):
     torch.nn.BatchNorm1d / torch.nn.BatchNorm2d / torch.nn.BatchNorm3d /
     torch.nn.SyncBatchNorm / torch.nn.functional.batch_norm /
     F.batch_norm / torch.batch_norm / torch.native_batch_norm /
-    miopen / hipdnn。
-    （GroupNorm 取 num_groups=C、BatchNorm 经 (1, N*C, H, W) 重排均能一步
-    完成本题核心计算，故与 instance_norm 族一并禁用。）
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    miopen / hipdnn.
+    (GroupNorm with num_groups=C and BatchNorm via a (1, N*C, H, W) reshape both
+    complete this task's core computation in a single step, so they are forbidden
+    alongside the instance_norm family.)
+    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
+    regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
+    is not available on this machine).
     """
 
     def __init__(self, eps: float = 1e-5):
         super().__init__()
-        assert eps > 0, "eps 需为正"
+        assert eps > 0, "eps must be positive"
         self.eps = float(eps)
 
     def forward(self, x, scale, bias):
-        # per-(N,C) 空间统计：沿 (H, W) 归约，float32 中间计算
-        # （有偏均值 / 有偏方差）
+        # per-(N,C) spatial statistics: reduce over (H, W) with float32
+        # intermediates (biased mean / biased variance)
         xf = x.to(torch.float32)
         mean = xf.mean(dim=(2, 3), keepdim=True)                   # (N,C,1,1)
-        var = ((xf - mean) ** 2).mean(dim=(2, 3), keepdim=True)    # (N,C,1,1) 有偏方差
+        var = ((xf - mean) ** 2).mean(dim=(2, 3), keepdim=True)    # (N,C,1,1) biased variance
         inv_std = torch.rsqrt(var + self.eps)
 
-        # 逐通道仿射：(1,C,1,1) 沿通道广播，float32 计算后 cast 回 x dtype
+        # Per-channel affine: (1,C,1,1) broadcasts along the channel dimension;
+        # computed in float32 and then cast back to the x dtype.
         sf = scale.to(torch.float32)
         bf = bias.to(torch.float32)
         y = (xf - mean) * inv_std * sf + bf
@@ -86,9 +103,10 @@ def get_init_inputs():
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性。生成规则与 make_inputs 一致
-    # （消费顺序 x -> scale -> bias，此处消费全局 RNG）
+    # Fixed shape family; the random part consumes the global RNG -- the evaluator
+    # calls this function after set_seed, so multiple correctness trials therefore
+    # see diverse inputs. The generation rules match make_inputs (consumption order
+    # x -> scale -> bias; here the global RNG is consumed).
     n, c, h, w = 16, 32, 64, 64
     x = torch.randn(n, c, h, w)
     scale = torch.rand(1, c, 1, 1) + 0.5
@@ -98,19 +116,24 @@ def get_inputs():
 
 def make_inputs(n: int, c: int, h: int, w: int,
                 dtype: str = "float32", seed: int = 0, eps: float = 1e-5):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description.
 
-    消费顺序固定：x -> scale -> bias。x/bias 用 torch.randn，scale 用
-    torch.rand + 0.5（正缩放域 [0.5, 1.5)），全部来自同一
-    torch.Generator(seed)，同 seed 下逐位可复现。
-    eps 同时是构造 Model 的 init 超参，此处仅做合法性校验（不参与输入生成）。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    The consumption order is fixed: x -> scale -> bias. x/bias use torch.randn and
+    scale uses torch.rand + 0.5 (a positive scaling range [0.5, 1.5)); everything
+    comes from the same torch.Generator(seed), so the same seed reproduces inputs
+    bit-for-bit.
+    eps is also the init hyper-parameter used to construct the Model and is only
+    validated here (it does not participate in input generation).
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
-    assert min(n, c, h, w) >= 1, "N/C/H/W 均需 >= 1"
-    assert eps > 0, "eps 需为正"
+    assert min(n, c, h, w) >= 1, "N/C/H/W must all be >= 1"
+    assert eps > 0, "eps must be positive"
     assert dt in (torch.float32, torch.float16, torch.bfloat16), \
-        "dtype 需为 float32 / float16 / bfloat16"
+        "dtype must be float32 / float16 / bfloat16"
     x = torch.randn(n, c, h, w, generator=gen).to(dt)
     scale = (torch.rand(1, c, 1, 1, generator=gen) + 0.5).to(dt)
     bias = torch.randn(1, c, 1, 1, generator=gen).to(dt)

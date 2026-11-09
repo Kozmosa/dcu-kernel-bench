@@ -1,0 +1,86 @@
+From d43d20a18530238a9bca4d696c795e9fe2780714 Mon Sep 17 00:00:00 2001
+From: uestcpyp <240867617@qq.com>
+Date: Tue, 27 Oct 2026 14:34:44 +0800
+Subject: [PATCH 6/6] =?UTF-8?q?fix(provider):=20=E5=8F=AA=E6=9C=89?=
+ =?UTF-8?q?=E3=80=8C=E8=BF=9E=E4=B8=8D=E4=B8=8A=E3=80=8D=E6=89=8D=E4=B8=AD?=
+ =?UTF-8?q?=E6=AD=A2=E5=88=86=E7=89=87=EF=BC=8C=E8=AF=BB=E8=B6=85=E6=97=B6?=
+ =?UTF-8?q?=E5=8F=AA=E5=91=8A=E8=AD=A6?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+2026-10-27 双轨跑里，探活把 hejuapi 偶发的 /models 读超时（5s）当成端点死亡，
+连续两次就 `return 3` 中止了整个分片 —— HIP 轨因此少跑 7 道题。而这几道题
+本该照常跑：真正的死端点（隧道断）是立刻 connection refused，不会表现为读超时。
+
+改动：
+- probe_models_endpoint 超时放宽到 (10, 30)，默认 30s；
+- OpenAICompatibleProvider.health_check 固定 30s；
+- cli 的 preflight 把失败分两类：连接类错误（connection/refused/reset/DNS/
+  SSL/proxy/certificate）累计到 2 次才中止；ReadTimeout 之类只打印
+  "slow (continuing)" 并清零计数，继续跑。
+---
+ pyramidkernel/cli.py                       | 12 ++++++++++--
+ pyramidkernel/providers/http_utils.py      |  4 ++--
+ pyramidkernel/providers/openai_provider.py |  2 +-
+ 3 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/pyramidkernel/cli.py b/pyramidkernel/cli.py
+index 5c68c32..5deb457 100644
+--- a/pyramidkernel/cli.py
++++ b/pyramidkernel/cli.py
+@@ -796,9 +796,17 @@ def _run_kernelbench_batch(args: argparse.Namespace) -> int:
+             except Exception as exc:  # noqa: BLE001 - 探测本身不能把批处理打断
+                 healthy, detail = False, f"health_check raised {type(exc).__name__}: {exc}"
+             if not healthy:
+-                preflight_failures += 1
++                # 只有「连不上」（隧道断、DNS 失败、TLS 失败、连接被拒）才算死端点；
++                # 读超时只是端点慢（hejuapi 偶发 5-20s），告警但继续跑，
++                # 否则一次抖动就会把整片剩下的题全毙掉（2026-10-27 实际发生过）。
++                lowered = detail.lower()
++                hard = any(tok in lowered for tok in (
++                    "connection", "refused", "reset", "name or service", "getaddrinfo",
++                    "ssl", "max retries", "proxyerror", "certificate",
++                ))
++                preflight_failures = preflight_failures + 1 if hard else 0
+                 print(
+-                    f"[preflight] provider unreachable before {item.get('alias', item)}: {detail}",
++                    f"[preflight] {item.get('alias', item)}: {'endpoint down' if hard else 'slow (continuing)'} -- {detail}",
+                     file=sys.stderr,
+                     flush=True,
+                 )
+diff --git a/pyramidkernel/providers/http_utils.py b/pyramidkernel/providers/http_utils.py
+index c37a3f2..c5f7473 100644
+--- a/pyramidkernel/providers/http_utils.py
++++ b/pyramidkernel/providers/http_utils.py
+@@ -129,7 +129,7 @@ def probe_models_endpoint(
+     *,
+     base_url: str,
+     api_key: str,
+-    timeout_seconds: int = 20,
++    timeout_seconds: int = 30,
+ ) -> tuple[bool, str]:
+     """GET {base_url}/models 作为端点可达性探测。
+ 
+@@ -142,7 +142,7 @@ def probe_models_endpoint(
+         "User-Agent": "pyramidkernel-healthcheck/1.0",
+     }
+     try:
+-        response = requests.get(url, headers=headers, timeout=(5, max(5, timeout_seconds)))
++        response = requests.get(url, headers=headers, timeout=(10, max(10, timeout_seconds)))
+     except Exception as exc:  # noqa: BLE001 - 探测不能抛，只回报
+         return False, f"{type(exc).__name__}: {str(exc)[:200]}"
+     if response.status_code == 200:
+diff --git a/pyramidkernel/providers/openai_provider.py b/pyramidkernel/providers/openai_provider.py
+index a1be9cc..83a8411 100644
+--- a/pyramidkernel/providers/openai_provider.py
++++ b/pyramidkernel/providers/openai_provider.py
+@@ -57,7 +57,7 @@ class OpenAICompatibleProvider(AgentProvider):
+         return probe_models_endpoint(
+             base_url=self.config.base_url,
+             api_key=self.config.api_key,
+-            timeout_seconds=min(20, int(getattr(self.config, "timeout_seconds", 20) or 20)),
++            timeout_seconds=30,
+         )
+ 
+     def __init__(self, config: OpenAICompatibleConfig) -> None:
