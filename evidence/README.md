@@ -42,16 +42,7 @@ DCU 机器上的部署与运行脚本（已剔除一次性诊断脚本与 189 MB
 | 框架补丁 | `patch_streaming_any.py`（流式传输）、`patch_retry_overloaded.py`（过载可重试）、`patch_memory_pool.py`（共享记忆池）、`migrate_pool.py`、`setup_r3.py`、`test_pool_locking.py` |
 | 运维 | `monitor_once.sh`、`parallel_status.sh`、`pack_run.sh`、`make_flat.sh`、`cleanup_disk.sh`、`RUN_R3.md` |
 
-## 3. 不在本目录的东西（有意为之）
-
-| 内容 | 原因 |
-|---|---|
-| `.dcu_runs/deploy/artifacts/`（189 MB：triton wheel、py311deps、KernelBench tar） | 二进制资产，按 `DEPLOY.md` 可重新下载/构建 |
-| `before_full66/`、`after_full66/`（27 MB） | 早期中文题面 A/B 旧数据，结论已并入 AGENTS.md |
-| `aiter_pinned/`（76 MB） | aiter 源码副本，submodule 可重拉 |
-| 一次性诊断脚本（`diag_*`、`probe_*`、`check_*` 等 200+ 个） | 排查过程记录，无复现价值 |
-
-## 4. 口径提醒
+## 3. 口径提醒
 
 - `run.json` 的 `nodes` 里 `root` 是脚手架直通节点，**指标计算一律排除**；
 - 加速比分母在线为 `torch_eager`，离线为 `aiter`（部分题无基线，见 `metrics.md` 的说明）；
