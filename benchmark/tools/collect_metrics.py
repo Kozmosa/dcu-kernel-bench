@@ -5,7 +5,10 @@
 
 指标定义（accepted_tasks = manifest 里的题数，本题 66）：
 
-  Compile Rate     产出 ≥1 个 compile_ok 候选的题数 / accepted_tasks
+  Compile Rate     产出 ≥1 个 compile_ok（模块能 import）候选的题数 / accepted_tasks
+  Compile Rate (kernel)
+                   产出 ≥1 个「模块能 import 且 device 代码真构建成功」候选的题数 /
+                   accepted_tasks —— 跨 HIP/Triton 轨对比用这一栏
   Correct Rate     产出 ≥1 个 correct 候选的题数 / accepted_tasks
   Success@K        每题 K 次尝试内出现过 correct 候选的题数 / accepted_tasks
   Fast1@K          每题 K 次尝试内出现过 correct 且 speedup > 1 的候选的题数 / accepted_tasks
@@ -22,6 +25,11 @@
   3. 尝试序号：`root` 记 0，`n1..nN`（phase1）按编号递增，`phase2_n1..nN` 接在后面。
      框架不给显式 attempt index，这是唯一稳定的创建顺序（node id 就是按创建分配的）。
   4. 题目目录名形如 `<alias>_l<level>_p<problem_id>`，alias 按 `_l` 切分还原。
+  5. 编译有两层口径：`compile_ok` 只说明**模块能 import**。HIP 走 `load_inline`，
+     import 就调 hipcc，所以两层等价；Triton 懒编译，kernel 到首次 launch 才 JIT，
+     编译错落成 `failure_type=triton.compiler.errors.CompilationError` 而
+     `compile_ok=True`。因此 Compile Rate 报两栏，**跨轨引用一律用 kernel 栏**。
+     编译失败必然 correct=False，两层口径都不改 Correct Rate 的分子分母。
 
 用法：
     python benchmark/tools/collect_metrics.py --run-root .dcu_runs/en66 --out benchmark/tools/metrics.md
@@ -39,6 +47,28 @@ import re
 import statistics
 
 ROOT_NODE_IDS = ("root", "phase2_root")
+
+# GPU 代码层面的编译失败特征：懒编译（Triton JIT）、资源超限（共享内存 > 硬件上限）、
+# 后端 pass 崩（PassManager）都属于「device 代码没构建/没起得来」，不算数值错。
+_COMPILE_FAIL_MARKS = (
+    "CompilationError",
+    "OutOfResources",
+    "PassManager",
+    "PTXASError",
+    "ptxas",
+    "NVVMError",
+    "CompileError",
+    "CompilerError",
+)
+
+
+def gpu_compiled(node: dict) -> bool:
+    """该候选的 device 代码是否真的在目标硬件上构建成功。"""
+    if not node.get("compile_ok"):
+        return False
+    failure = node.get("failure_type") or ""
+    return not any(mark in failure for mark in _COMPILE_FAIL_MARKS)
+
 
 # 最高加速比那种"离谱"数字的成因备注（按题名索引；没有条目就走通用说明）。
 # 写在这里而不是手改 md，是为了重跑脚本时这段话不会丢。
@@ -136,6 +166,7 @@ def task_facts(run: dict, include_root: bool) -> dict:
         "nodes": len(nodes),
         "attempts": counter,
         "compile_ok": bool(compile_ok),
+        "compile_kernel": any(gpu_compiled(n) for n in produced),
         "correct": bool(correct),
         "first_correct_idx": first_idx,
         "first_fast_idx": fast_idx,
@@ -211,7 +242,8 @@ def main() -> int:
     w("")
     w("| 指标 | 定义 |")
     w("|---|---|")
-    w("| Compile Rate | 题目级：至少产出 1 个 `compile_ok` 候选的题目数 / accepted_tasks |")
+    w("| Compile Rate | 题目级：至少产出 1 个 `compile_ok` 候选的题目数 / accepted_tasks（只表示模块能 import） |")
+    w("| Compile Rate (kernel) | 题目级：至少产出 1 个「模块能 import **且** device 代码构建成功」候选的题目数 / accepted_tasks。Triton 的懒编译失败、共享内存超限、后端 pass 崩都在此列扣分；**跨轨对比用这一栏** |")
     w("| Correct Rate | 题目级：至少产出 1 个 `correct` 候选的题目数 / accepted_tasks |")
     w("| Success@K | 每题 K 次尝试内至少出现 1 个 correct 候选的题目比例 |")
     w("| Fast1@K | 每题 K 次尝试内至少出现 1 个 correct 且快于参考 baseline（speedup > 1）的候选的题目比例 |")
@@ -229,6 +261,7 @@ def main() -> int:
     w("| 指标 | 值 |")
     w("|---|---|")
     w(f"| Compile Rate | **{pct(sum(1 for r in rows if r['compile_ok']), n)}** |")
+    w(f"| Compile Rate (kernel) | **{pct(sum(1 for r in rows if r['compile_kernel']), n)}** |")
     w(f"| Correct Rate | **{pct(sum(1 for r in rows if r['correct']), n)}** |")
     for k in ks:
         hit = sum(1 for r in rows if r["first_correct_idx"] is not None and r["first_correct_idx"] <= k)
@@ -290,8 +323,12 @@ def main() -> int:
     # 简要描述（放在「指标定义」之前，自动生成以免和上面的数字脱节）
     miss = [r["alias"] for r in rows if not r["correct"]]
     slow = [r["alias"] for r in rows if r["correct"] and r["first_fast_idx"] is None]
-    desc = [f"- **能编译**：{sum(1 for r in rows if r['compile_ok'])}/{n} 道题至少产出一个可编译候选，"
-            f"脚手架不是瓶颈。"]
+    n_ok = sum(1 for r in rows if r["compile_ok"])
+    n_kernel = sum(1 for r in rows if r["compile_kernel"])
+    desc = [f"- **能编译**：{n_ok}/{n} 道题至少产出一个可编译候选，"
+            f"脚手架不是瓶颈。" + ("" if n_kernel == n_ok
+                                 else f"其中只有 **{n_kernel}/{n}** 的 device 代码真的构建成功"
+                                      f"（其余是懒编译/资源超限/后端 pass 崩），跨轨比较看这一栏。")]
     desc.append(f"- **能写对**：Correct Rate {sum(1 for r in rows if r['correct'])}/{n}"
                 f"（{sum(1 for r in rows if r['correct'])/n*100:.1f}%）"
                 f"{('；' + str(len(miss)) + ' 道始终没写出正确实现：' + '、'.join(f'`{a}`' for a in miss)) if miss else ''}。")
@@ -373,6 +410,8 @@ def main() -> int:
         L.append("|---|---|---|")
         L.append(f"| Compile Rate | {sum(1 for r in rows if r['compile_ok'])}/{n} | "
                  f"{sum(1 for r in rows if r['compile_ok'])}/{n}（离线不另设门槛） |")
+        L.append(f"| Compile Rate (kernel) | {sum(1 for r in rows if r['compile_kernel'])}/{n} | "
+                 f"{sum(1 for r in rows if r['compile_kernel'])}/{n}（离线不另设门槛） |")
         L.append(f"| Correct Rate | {len(has_cand)}/{n} | **{len(gated)}/{n}** |")
         if sp_on and sp_gate:
             L.append(f"| Geomean Speedup | {geomean(sp_on):.2f}x | **{geomean(sp_gate):.2f}x** |")
@@ -455,6 +494,7 @@ def main() -> int:
     # 控制台摘要
     print()
     print(f"accepted={n}  compile_ok={sum(1 for r in rows if r['compile_ok'])}  "
+          f"compile_kernel={sum(1 for r in rows if r['compile_kernel'])}  "
           f"correct={sum(1 for r in rows if r['correct'])}  "
           f"fast1@all={hit_all}")
     if sp:

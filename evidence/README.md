@@ -54,6 +54,11 @@ python3 benchmark/tools/collect_metrics.py --run-root /tmp/r3/pure_norm/triton -
 
 > 真解（在线正确 ∩ 离线通过）需要把 `run.json` 的 `nodes[].correct` 与
 > `offline_audit.json` 的 `correctness_passed` 逐题相交，`collect_metrics.py` 不做这一步。
+>
+> **Compile Rate 有两栏**：模块级（`compile_ok`，能 import 即算）与 kernel 级（device 代码真构建成功）。
+> 两者在 HIP 上等价，但在 Triton 上差很多（懒编译：`import` 不触发 JIT）——纯 API Triton 是
+> 66/66（模块级）vs **52/66**（kernel 级）。**跨轨比较一律用 kernel 级**；`collect_metrics.py`
+> 会把两栏都打出来，控制台摘要里是 `compile_ok=` 与 `compile_kernel=`。
 
 ## 3. `deploy_scripts.tar.gz`（60 KB，56 个脚本）
 
