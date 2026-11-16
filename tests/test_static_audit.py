@@ -123,3 +123,32 @@ def test_dynamic_dispatch_conservatively_checks_helpers(tmp_path):
                    '    def bad(self, x):\n        return torch.matmul(x, x)\n'
                    '    def forward(self, x):\n        return getattr(self, "bad")(x)\n')
     assert run_audit('1002_paged_attention', [src]).returncode == 1
+
+
+def test_task_forbidden_parser_keeps_inline_commented_rule():
+    sys.path.insert(0, str(AUDIT.parent))
+    from static_audit import load_task_forbidden
+    assert 'torch.autograd' in load_task_forbidden(REPO / 'benchmark/tasks/1019_mha_onekernel_bwd')
+
+
+def test_defaults_of_dead_helpers_still_execute(tmp_path):
+    src = tmp_path / 'candidate.py'
+    src.write_text('import torch\ndef unused(x=torch.matmul(a, b)): return x\n'
+                   'class ModelNew:\n    def forward(self, x): return x\n')
+    assert run_audit('1002_paged_attention', [src]).returncode == 1
+
+
+def test_pattern_spellings_and_triton_primitives(tmp_path):
+    sys.path.insert(0, str(AUDIT.parent))
+    from static_audit import _symbol_matches
+    assert _symbol_matches('torch.nn.functional.linear', 'F.linear')
+    assert _symbol_matches('x.backward', '.backward()')
+    assert _symbol_matches('torch.ops.aten._softmax', 'torch.ops.aten._softmax(')
+    assert not _symbol_matches('triton.language.sort', '.sort(')
+
+
+def test_hip_syntax_in_rule_docstrings_is_not_embedded_source(tmp_path):
+    src = tmp_path / 'candidate.py'
+    src.write_text('class ModelNew:\n    """Use __global__ kernels, never hipcub or rocblas."""\n'
+                   '    def forward(self, x): return x\n')
+    assert run_audit('1002_paged_attention', [src]).returncode == 0

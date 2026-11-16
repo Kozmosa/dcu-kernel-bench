@@ -41,7 +41,7 @@ def load_task_forbidden(task_dir: Path) -> list[str]:
             in_block = True
             continue
         if in_block:
-            m = re.match(r"^\s*-\s+(\S+)\s*$", line)
+            m = re.match(r"^\s*-\s+(\S+?)(?:\s+#.*)?\s*$", line)
             if m:
                 forbidden.append(m.group(1))
             elif line.strip() and not line.startswith(" "):
@@ -49,42 +49,18 @@ def load_task_forbidden(task_dir: Path) -> list[str]:
     return forbidden
 
 
-def _strip_python_docstrings(text: str) -> str:
-    """用 ast 定位并整行清空 docstring（module/class/function 首个字符串常量）。
-
-    model_class 任务的题面 docstring 会逐字列出 forbidden 禁用项，属于规则
-    声明而非调用；不清空会导致所有框架生成候选被误杀。清空保留行号。
-    """
-    import ast
-
-    try:
-        tree = ast.parse(text)
-    except SyntaxError:
-        return text
-    spans: list[tuple[int, int]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        body = node.body
-        if (
-            body
-            and isinstance(body[0], ast.Expr)
-            and isinstance(body[0].value, ast.Constant)
-            and isinstance(body[0].value.value, str)
-        ):
-            spans.append((body[0].lineno, body[0].end_lineno))
-    lines = text.splitlines(keepends=True)
-    for lo, hi in spans:
-        for i in range(lo - 1, min(hi, len(lines))):
-            lines[i] = "\n" if lines[i].endswith("\n") else ""
-    return "".join(lines)
-
-
 def _symbol_matches(name: str, pattern: str) -> bool:
     """Match identifiers/namespaces, never substrings of user kernel names."""
-    name, pattern = name.lower(), pattern.lower()
+    name, pattern = name.lower(), pattern.lower().rstrip("()")
     if pattern.startswith("."):
-        return name.rsplit(".", 1)[-1] == pattern.lstrip(".").rstrip("(")
+        # These entries describe PyTorch tensor methods, not Triton language
+        # primitives inside a handwritten kernel (e.g. tl.sort / tl.cat).
+        return not name.startswith("triton.") and name.rsplit(".", 1)[-1] == pattern.lstrip(".")
+    aliases = {"f": "torch.nn.functional", "functional": "torch.nn.functional",
+               "nn": "torch.nn", "aten": "torch.ops.aten", "autograd": "torch.autograd"}
+    first, sep, rest = pattern.partition(".")
+    if sep and first in aliases:
+        pattern = aliases[first] + "." + rest
     return name == pattern or name.startswith(pattern + ".") or (
         "." not in pattern and name.rsplit(".", 1)[-1] == pattern
     )
@@ -98,6 +74,12 @@ def _python_hits(path: Path, text: str, patterns: list[str]) -> list[dict]:
     except SyntaxError as exc:
         return [{"file": str(path), "line": exc.lineno, "symbol": "syntax_error"}]
 
+    docstrings = set()
+    for owner in ast.walk(tree):
+        if isinstance(owner, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = owner.body
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str):
+                docstrings.add(id(body[0].value))
     aliases = {}
     definitions = {}
     for node in ast.walk(tree):
@@ -131,6 +113,22 @@ def _python_hits(path: Path, text: str, patterns: list[str]) -> list[dict]:
         # Callable submissions without a ModelNew keep conservative whole-file
         # checking: their entry point is task-specific.
         pending.extend(definitions.values())
+    # Defaults/decorators execute at definition time even when a helper body
+    # is dead. Ignoring those would turn a false-positive fix into a bypass.
+    def definition_setup(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return node.decorator_list + node.args.defaults + [n for n in node.args.kw_defaults if n is not None]
+        if isinstance(node, ast.ClassDef):
+            nodes = node.bases + node.decorator_list + [k.value for k in node.keywords]
+            for child in node.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    nodes += definition_setup(child)
+                else:
+                    nodes.append(child)
+            return nodes
+        return []
+    for definition in tree.body:
+        pending.extend(definition_setup(definition))
     visited = set()
     hits = set()
     while pending:
@@ -163,7 +161,7 @@ def _python_hits(path: Path, text: str, patterns: list[str]) -> list[dict]:
                         hits.add((node.lineno, pattern))
             # Embedded HIP/C++ source strings still need a native-symbol audit.
             # Docstrings and ordinary messages are not executable source.
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and id(node) not in docstrings:
                 if re.search(r"#include|__global__|PYBIND11_MODULE|\b(?:hipcub|rocprim)::", node.value):
                     for hit in _native_hits(path, node.value, patterns):
                         hits.add((node.lineno + hit["line"] - 1, hit["symbol"]))

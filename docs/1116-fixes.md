@@ -59,3 +59,16 @@ python benchmark/evaluator/audit_model_class.py --task 1002_paged_attention \
 ## 失败分母与缓存
 
 批量终审拒绝 `root/phase2_root` 和没有在线合法候选的 run；清单里的缺文件任务也计失败分母。缓存绑定候选代码、run.json 的选优、审计实现、任务定义、参考、隐藏/性能 case 与基线（含继承源），旧缓存不会在规则变化后继续冒充新结果。缓存失败仍返回失败退出码。
+
+## 本轮验证记录
+
+环境：Linux x86_64、Python 3.12、PyTorch 2.15.0+cpu、pytest 9.2.0；无 CUDA/HIP/DCU 设备。
+
+- DCUKB：`PYTHONPATH=../verify-pyramidkernel python -m pytest -q -k 'not test_every_case_builds_inputs_and_runs_reference'`：326 passed，1 deselected。
+- 被排除项遍历全量隐藏/性能 shape 并执行参考计算；首次完整 CPU 运行在此项被系统终止（exit 137），因此不能声称全套通过。首次运行还因未配置 PyramidKernel 导入路径出现两项导入失败；补好 PYTHONPATH 后这两项已通过。
+- 从 `c11ab7f` 干净检出应用两个 KernelWeaver 补丁后：整个框架 `tests/` 23 passed。
+- 从 `8352750` 干净检出应用两个 PyramidKernel 补丁后：oracle 边界、两阶段工作流、阶段转换、feedback、direct baseline、CLI、持久化/loader 共 31 passed。
+- 两个干净框架的实际 loader 都能注入公开契约；实际 evaluator 在无 GPU 条件下也先拦下禁用调用，没有退回上游 fp32 评测。
+- `git diff --check`、Python 编译检查通过。
+
+未验证：DCU 真机编译/运行、HIP/Triton 数值与计时、真实模型生成、历史候选全量重测。原先发布的评测数字未重新计算。下一步在 DCU 上按部署节应用对应补丁、设置 DCUKB_ROOT，先用固定候选执行公开输入交叉复核，再跑隐藏 case 与新基线；确认后再启动新的生成实验。
