@@ -221,9 +221,9 @@ class Model(nn.Module):
 
         # Single-tensor packing: out_indices segment -> indice_pairs segment ->
         # indice_num_per_loc segment
-        seg1 = torch.tensor(out_flat, dtype=torch.int32)
-        seg2 = torch.tensor(pair_flat, dtype=torch.int32).reshape(2, kv, n)
-        seg3 = torch.tensor(num, dtype=torch.int32)
+        seg1 = torch.tensor(out_flat, dtype=torch.int32, device=indices.device)
+        seg2 = torch.tensor(pair_flat, dtype=torch.int32, device=indices.device).reshape(2, kv, n)
+        seg3 = torch.tensor(num, dtype=torch.int32, device=indices.device)
         return torch.cat([seg1.reshape(-1), seg2.reshape(-1), seg3])
 
 
