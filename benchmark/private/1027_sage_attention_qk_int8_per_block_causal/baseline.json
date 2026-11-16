@@ -1,1 +1,43 @@
-{"task_id": "1027_sage_attention_qk_int8_per_block_causal", "status": "placeholder", "baselines": []}
+{
+  "task_id": "1027_sage_attention_qk_int8_per_block_causal",
+  "status": "measured",
+  "baselines": [
+    {
+      "case": "perf_b8_h32kv8_l4096_d128_f16_gqa",
+      "us": 148697.418,
+      "mean_us": 148714.043,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    },
+    {
+      "case": "perf_b2_h24_l4352_d128_f16_mha",
+      "us": 33019.436,
+      "mean_us": 33029.896,
+      "impl": "torch_eager",
+      "timing": {
+        "warmup_iters": 10,
+        "repeat_iters": 30,
+        "reduction": "median",
+        "method": "cuda_event"
+      },
+      "max_diff_vs_reference": 0.0,
+      "compare_mode": "global"
+    }
+  ],
+  "impls": [
+    "torch_eager"
+  ],
+  "environment": {
+    "device": "BW",
+    "gcn_arch": "gfx936:sramecc+:xnack-",
+    "torch": "2.9.0",
+    "triton": "3.3.0"
+  }
+}

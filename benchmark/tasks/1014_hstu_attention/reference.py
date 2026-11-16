@@ -1,11 +1,13 @@
-# 1014_hstu_attention — HSTU 注意力前向（jagged 变长、无 softmax，KernelBench 兼容题目文件）。
+# 1014_hstu_attention -- HSTU attention forward (jagged variable-length, no
+# softmax, KernelBench compatible task file).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=1014, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=1014, backend=triton.
 
 import math
 
@@ -14,54 +16,67 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
-    """HSTU attention 前向（生成式推荐 HSTU 单元的注意力，无 softmax / 无归一化）：
-    稠密 Q/K/V 按 seq_offsets 分段为 batch 条变长序列，每条序列独立计算
-    out = (valid ∘ SiLU(alpha·Q·K^T) / N) · V，其中 N = max_seq_len。
+    """HSTU attention forward (the attention of the generative-recommendation HSTU unit, no softmax / no normalization):
+    dense Q/K/V are split by seq_offsets into batch variable-length sequences,
+    and each sequence computes independently
+    out = (valid * SiLU(alpha*Q*K^T) / N) * V, where N = max_seq_len.
 
-    数学定义（第 b 条序列：s = seq_offsets[b]，L = seq_offsets[b+1] - seq_offsets[b]，
-    g = num_targets[b]，c = contextual_seq_len，A = max_attn_len；c = 0 时 M = L、
-    r[i] = i，c > 0 时 M = L - c + 1、r[i] = max(i - c + 1, 0)）：
-      位置重编号 m[i] = min(r[i], M - g)
-      d[i,j] = m[i] - m[j]；causal = False 时 d[i,j] = |d[i,j]|
-      valid[i,j] = (i == j) 或 d[i,j] > 0
-      A > 0 时 valid[i,j] 额外要求 d[i,j] <= A
-      c > 0 时 valid[i,j] 额外放宽为真当 m[i] == 0 且 m[j] < M - g
-      out[s+i, h, :] = Σ_j valid[i,j] · SiLU(alpha·<q[s+i,h,:], k[s+j,h,:]>) / N
-                       · v[s+j,h,:]
-    其中 SiLU(x) = x·sigmoid(x)。causal = True 时 valid 为下三角（含对角）；
-    权重不做 softmax、不求和归一化，被掩码位置的贡献恰为 0。
-    边界行为：序列末尾 g 个 token 为 target，经重编号截断从 key 侧排除，
-    g = 0 等价于无 target 排除；c > 0 时前 c 个 token（重编号 m = 0）额外
-    可见全部非 target key（含彼此）；空序列（L = 0）合法，不产生输出行；
-    各序列长度可小于 N，缩放分母恒为 N（不是各序列自身长度）。
+    Mathematical definition (sequence b: s = seq_offsets[b],
+    L = seq_offsets[b+1] - seq_offsets[b], g = num_targets[b],
+    c = contextual_seq_len, A = max_attn_len; when c = 0, M = L and r[i] = i;
+    when c > 0, M = L - c + 1 and r[i] = max(i - c + 1, 0)):
+      position renumbering m[i] = min(r[i], M - g)
+      d[i,j] = m[i] - m[j]; when causal = False, d[i,j] = abs(d[i,j])
+      valid[i,j] = (i == j) or d[i,j] > 0
+      when A > 0, valid[i,j] additionally requires d[i,j] <= A
+      when c > 0, valid[i,j] is additionally relaxed to true when m[i] == 0 and
+      m[j] < M - g
+      out[s+i, h, :] = sum_j valid[i,j] * SiLU(alpha*<q[s+i,h,:], k[s+j,h,:]>) / N
+                       * v[s+j,h,:]
+    where SiLU(x) = x*sigmoid(x). When causal = True, valid is lower triangular
+    (including the diagonal); the weights get no softmax and no sum
+    normalization, and masked positions contribute exactly 0.
+    Boundary behaviour: the last g tokens of a sequence are targets and are
+    excluded from the key side by the renumbering truncation; g = 0 is equivalent
+    to no target exclusion; when c > 0 the first c tokens (renumbered m = 0)
+    additionally see all non-target keys (including each other); an empty
+    sequence (L = 0) is legal and produces no output rows; a sequence may be
+    shorter than N, and the scaling denominator is always N (not that sequence's
+    own length).
 
-    输入输出规格：
+    Input/output specification:
       q            [total, num_heads, qk_dim]   float16 / bfloat16
-      k            [total, num_heads, qk_dim]   与 q 同 dtype
-      v            [total, num_heads, v_dim]    与 q 同 dtype，v_dim 可不等于 qk_dim
-      seq_offsets  [batch + 1] int64，单调非降、首元素 0、尾元素 total
-      num_targets  [batch] int32，0 <= num_targets[b] 且 c + num_targets[b] <= L_b
-      out          [total, num_heads, v_dim]，与 v 同 dtype
-    全域约束：0 <= L_b <= max_seq_len；qk_dim / v_dim 为 2 的幂（64~256 量级）。
+      k            [total, num_heads, qk_dim]   same dtype as q
+      v            [total, num_heads, v_dim]    same dtype as q; v_dim may differ from qk_dim
+      seq_offsets  [batch + 1] int64, monotonically non-decreasing, first element 0, last element total
+      num_targets  [batch] int32, 0 <= num_targets[b] and c + num_targets[b] <= L_b
+      out          [total, num_heads, v_dim], same dtype as v
+    Global-domain constraints: 0 <= L_b <= max_seq_len; qk_dim / v_dim are powers
+    of 2 (of order 64..256).
 
-    超参（__init__）：max_seq_len（缩放分母与长度上界 N）；alpha（logits 缩放，
-    缺省 1/sqrt(qk_dim)）；causal（缺省 True）；max_attn_len（缺省 0 =
-    不限距离）；contextual_seq_len（缺省 0 = 关闭）。
+    Hyper-parameters (__init__): max_seq_len (scaling denominator and upper bound
+    on length, N); alpha (logits scale, defaults to 1/sqrt(qk_dim)); causal
+    (defaults to True); max_attn_len (defaults to 0 = distance not limited);
+    contextual_seq_len (defaults to 0 = disabled).
 
-    实现约束（违规判负）：
-      - 核心计算（QK^T / SiLU / 掩码 / PV）必须在提交文件内完成，禁止调用
-        scaled_dot_product_attention / sdpa / flash_attn / torch.matmul /
-        torch.bmm / torch.einsum / torch.softmax / torch.nn.functional.silu
-        及其别名形式（F.silu / F.softmax / torch.mm / @ 矩阵乘算子；SiLU 以
-        x·sigmoid(x) 自实现）。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间累加用 float32；输出 cast 回 v 的 dtype。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (QK^T / SiLU / mask / PV) must be done inside the
+        submitted file; calling scaled_dot_product_attention / sdpa / flash_attn
+        / torch.matmul / torch.bmm / torch.einsum / torch.softmax /
+        torch.nn.functional.silu and their alias forms (F.silu / F.softmax /
+        torch.mm / the @ matrix-multiply operator) is forbidden (implement SiLU
+        yourself as x*sigmoid(x)).
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Use float32 for intermediate accumulation; cast the output back to v's
+        dtype.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：前向、非量化输入、无 dropout、无反向传播。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: forward only, non-quantized inputs, no dropout, no
+    backpropagation.
     """
 
-    # 注意：__init__/forward 签名必须单行（框架 loader 按首行提取签名）
+    # Note: the __init__/forward signatures must stay single-line (the framework
+    # loader extracts the signature from the first line)
     def __init__(self, max_seq_len: int, alpha=None, causal=True, max_attn_len=0, contextual_seq_len=0):
         super().__init__()
         self.max_seq_len = int(max_seq_len)
@@ -71,8 +86,10 @@ class Model(nn.Module):
         self.contextual_seq_len = int(contextual_seq_len)
 
     def forward(self, q, k, v, seq_offsets, num_targets):
-        # KernelBench 评测器会把全部输入张量 cast 成评测 precision（triton 后端
-        # 为 fp32）；偏移表与 target 计数都是小整数，fp32 可精确表示，此处无损恢复
+        # The KernelBench evaluator casts every input tensor to the evaluation
+        # precision (fp32 for the triton backend); the offset table and the target
+        # counts are small integers that fp32 represents exactly, so they are
+        # recovered losslessly here
         seq_offsets = seq_offsets.to(torch.long)
         num_targets = num_targets.to(torch.int32)
 
@@ -86,9 +103,9 @@ class Model(nn.Module):
             s, e = int(seq_offsets[b]), int(seq_offsets[b + 1])
             L = e - s
             g = int(num_targets[b])
-            assert 0 <= g and c + g <= L, "题面约束：0 <= g 且 contextual_seq_len + g <= L"
+            assert 0 <= g and c + g <= L, "task constraint: 0 <= g and contextual_seq_len + g <= L"
 
-            # float32 中间计算；[H, L, *] 视图便于按头批量 matmul
+            # float32 intermediate computation; the [H, L, *] view makes per-head batched matmul easy
             q_b = q[s:e].transpose(0, 1).to(torch.float32)            # [H, L, D_qk]
             k_b = k[s:e].transpose(0, 1).to(torch.float32)
             v_b = v[s:e].transpose(0, 1).to(torch.float32)            # [H, L, D_v]
@@ -96,7 +113,7 @@ class Model(nn.Module):
             logits = torch.matmul(q_b, k_b.transpose(-2, -1)) * alpha  # [H, L, L]
             w = logits * torch.sigmoid(logits) / N                     # SiLU(logits)/N
 
-            # 有效掩码：按重编号后的相对距离构造
+            # valid mask: built from the renumbered relative distance
             ids = torch.arange(L, device=q.device)
             M = L if c == 0 else L - c + 1
             if c > 0:
@@ -117,13 +134,14 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    return [256]  # max_seq_len；alpha 缺省 1/sqrt(qk_dim)，causal=True，
-    # max_attn_len=0，contextual_seq_len=0
+    return [256]  # max_seq_len; alpha defaults to 1/sqrt(qk_dim), causal=True,
+    # max_attn_len=0, contextual_seq_len=0
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family; the random part consumes the global RNG -- the evaluator
+    # calls this function after set_seed, so multiple correctness trials therefore
+    # see diverse inputs
     num_seqs = 8
     num_heads = 4
     qk_dim = 128
@@ -151,15 +169,19 @@ def make_inputs(batch_size: int, max_seq_len: int, num_heads: int,
                 lengths=None, sparsity=None, num_targets=None,
                 target_size: int = 20, causal: bool = True, max_attn_len: int = 0,
                 contextual_seq_len: int = 0, alpha=None):
-    """按公开/隐藏/性能案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden/perf case description.
 
-    返回 (q, k, v, seq_offsets, num_targets)。causal / max_attn_len /
-    contextual_seq_len / alpha 不参与张量生成，仅描述对应的 Model 超参
-    （评测端据此构造 Model），其中 contextual_seq_len 参与长度与 target 的
-    合法性约束。lengths / num_targets 可显式指定（单值广播到整个 batch），
-    缺省时 lengths ~ U[1, max_seq_len]、num_targets ~ U[1, target_size] 截断到
-    合法域；sparsity 给出稀疏度采样（官方口径）：0 -> 全 0 长度，
-    1 -> 全 max_seq_len，>= 0.5 -> U[(2s-1)·N, N)，< 0.5 -> U[0, 2s·N)。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device). Returns (q, k, v, seq_offsets, num_targets). causal /
+    max_attn_len / contextual_seq_len / alpha do not take part in tensor
+    generation, they only describe the corresponding Model hyper-parameters (the
+    evaluation side builds the Model from them), of which contextual_seq_len
+    enters the legality constraints on the lengths and the targets. lengths /
+    num_targets may be given explicitly (a single value broadcasts to the whole
+    batch); by default lengths ~ U[1, max_seq_len] and
+    num_targets ~ U[1, target_size] truncated to the legal domain; sparsity gives
+    the sparsity sampling (official convention): 0 -> all lengths 0,
+    1 -> all max_seq_len, >= 0.5 -> U[(2s-1)*N, N), < 0.5 -> U[0, 2s*N).
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
@@ -180,13 +202,13 @@ def make_inputs(batch_size: int, max_seq_len: int, num_heads: int,
             hi = max(hi, lo + 1)
         lengths = torch.randint(lo, hi, (batch_size,), generator=gen, dtype=torch.int64)
     else:
-        if len(lengths) == 1 and batch_size > 1:      # 单值广播到整个 batch
+        if len(lengths) == 1 and batch_size > 1:      # a single value broadcasts to the whole batch
             lengths = lengths * batch_size
         lengths = torch.tensor(lengths, dtype=torch.int64)
     assert lengths.numel() == batch_size
     assert bool((lengths >= 0).all()) and int(lengths.max()) <= max_seq_len
     if contextual_seq_len > 0:
-        assert bool((lengths >= contextual_seq_len).all()), "题面约束：c + g <= L"
+        assert bool((lengths >= contextual_seq_len).all()), "task constraint: c + g <= L"
 
     cap = torch.clamp(lengths - contextual_seq_len, min=0)
     if num_targets is None:
@@ -197,7 +219,7 @@ def make_inputs(batch_size: int, max_seq_len: int, num_heads: int,
             num_targets = num_targets * batch_size
         nt = torch.tensor(num_targets, dtype=torch.int64)
     assert nt.numel() == batch_size
-    assert bool((nt >= 0).all()) and bool((nt <= cap).all()), "题面约束：0 <= g <= L - c"
+    assert bool((nt >= 0).all()) and bool((nt <= cap).all()), "task constraint: 0 <= g <= L - c"
 
     seq_offsets = torch.zeros(batch_size + 1, dtype=torch.int64)
     for i in range(batch_size):

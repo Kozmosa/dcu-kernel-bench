@@ -1,11 +1,13 @@
-# 1016_lean_atten_paged — 分页 KV Cache 的 ragged batch decode attention（KernelBench 兼容题目文件）。
+# 1016_lean_atten_paged -- ragged-batch decode attention over a paged KV cache
+# (KernelBench compatible task file).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=1016, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=1016, backend=triton.
 
 import math
 
@@ -14,55 +16,64 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
-    """分页 KV Cache 的批量 decode attention：ragged batch，每请求 16 个 query，
-    每个 head 一张独立的物理块表，物理块池中未被引用的块是垃圾数据。
+    """Batched decode attention over a paged KV cache: ragged batch, 16 queries per
+    request, one independent physical block table per head, and blocks of the
+    physical pool that nothing references are garbage data.
 
-    KV Cache 按固定 page_size 分页：k / v 的第 h 个 head 切片（形状
-    [total_kv_len, head_size]）被划分成 total_kv_len / page_size 个物理块；
-    第 h 个 head 的块表 kv_block_tables[h] 依次列出各请求引用的物理块编号，
-    其中请求 b 引用的块为
+    The KV cache is paged with a fixed page_size: the h-th head slice of k / v
+    (shape [total_kv_len, head_size]) is split into total_kv_len / page_size
+    physical blocks; the block table of head h, kv_block_tables[h], lists in order
+    the physical block ids referenced by each request, where the blocks
+    referenced by request b are
       kv_block_tables[h, batch_num_block_n[b-1] : batch_num_block_n[b]]
-    （b=0 时从 0 开始；batch_num_block_n 是每请求块数的累积和，末元素即
-    全部已用块数 total_used_blocks）。未被任何表项引用的物理块为垃圾数据，
-    不得参与计算。
+    (starting at 0 for b=0; batch_num_block_n is the cumulative sum of the
+    per-request block counts, and its last element is the total number of used
+    blocks total_used_blocks). Physical blocks that no table entry references are
+    garbage data and must not take part in the computation.
 
-    数学定义：记请求 b 的起始块偏移 s_b（b=0 为 0，否则 s_b =
-    batch_num_block_n[b-1]），其逻辑 KV 长度 L_b = 块数 * page_size，
-    第 j 个逻辑位置映射到物理行 row(j) = kv_block_tables[h, s_b + j //
-    page_size] * page_size + j % page_size。对每个 head h 与请求 b
-    （query 行区间 [b*n_ctx_q, (b+1)*n_ctx_q)）：
+    Mathematical definition: let s_b be the starting block offset of request b
+    (0 for b=0, otherwise s_b = batch_num_block_n[b-1]); its logical KV length is
+    L_b = block count * page_size, and logical position j maps to physical row
+    row(j) = kv_block_tables[h, s_b + j // page_size] * page_size + j % page_size.
+    For every head h and request b (query row range [b*n_ctx_q, (b+1)*n_ctx_q)):
       scores[i, j] = sm_scale * <q[h, b*n_ctx_q+i, :], k[h, row(j), :]>
       p[i, :] = softmax_j(scores[i, :])
       out[h, b*n_ctx_q+i, :] = sum_j p[i, j] * v[h, row(j), :]
-    softmax 采用数值稳定（在线）实现，中间累加为 float32，输出 cast 回输入
-    dtype。边界行为：每条请求的 KV 长度是 page_size 的正整数倍（尾部不满的
-    半块不在题面内），softmax 分母恒正；请求之间、head 之间互不影响。
+    softmax uses a numerically stable (online) implementation, intermediate
+    accumulation is in float32, and the output is cast back to the input dtype.
+    Boundary behaviour: every request's KV length is a positive integer multiple
+    of page_size (a partially filled tail block is outside the task scope), so the
+    softmax denominator is always positive; requests and heads do not affect each
+    other.
 
-    输入输出规格：
+    Input/output specification:
       q                 [num_heads, n_ctx_q * batch, head_size] float16/bfloat16
-      k, v              [num_heads, total_kv_len, head_size] 与 q 同 dtype（物理块池）
-      kv_block_tables   [num_heads, total_used_blocks] int32（0-based 物理块编号，
-                        值 < total_kv_len / page_size）
-      batch_num_block_n [batch] int32，每请求块数的累积和，单调递增
-      out               [num_heads, n_ctx_q * batch, head_size] 与 q 同 dtype
-    全域约束：head_size ∈ {16, 32, 64, 128, 256}；page_size 固定为 64；
-    n_ctx_q = 16（decode 形态固定）；每请求 KV 长度为 page_size 的正整数倍
-    且 >= page_size；num_kv_heads == num_q_heads（MHA，无 GQA）。
+      k, v              [num_heads, total_kv_len, head_size] same dtype as q (physical block pool)
+      kv_block_tables   [num_heads, total_used_blocks] int32 (0-based physical block ids,
+                        values < total_kv_len / page_size)
+      batch_num_block_n [batch] int32, cumulative sum of the per-request block counts, monotonically increasing
+      out               [num_heads, n_ctx_q * batch, head_size] same dtype as q
+    Global-domain constraints: head_size in {16, 32, 64, 128, 256}; page_size is
+    fixed at 64; n_ctx_q = 16 (the decode form is fixed); each request's KV length
+    is a positive integer multiple of page_size and >= page_size;
+    num_kv_heads == num_q_heads (MHA, no GQA).
 
-    实现约束（违规判负）：
-      - 核心计算（分页 KV 收集 / QK^T / softmax / PV）必须在提交文件内完成，
-        禁止调用 scaled_dot_product_attention / sdpa / flash_attn 等外部
-        attention 算子库，以及 torch.matmul / torch.bmm / torch.mm /
-        torch.baddbmm / torch.einsum / torch.softmax（含 F.softmax、
-        Tensor.matmul 等 ATen 等价捷径与 @ 运算符）。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间累加用 float32；输出 cast 回输入 dtype。
-      - 调度策略（persistent 单 kernel 或常规 grid）自由选择，只考核语义
-        正确性与性能。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (paged KV gathering / QK^T / softmax / PV) must be
+        done inside the submitted file; calling external attention operator
+        libraries such as scaled_dot_product_attention / sdpa / flash_attn, and
+        torch.matmul / torch.bmm / torch.mm / torch.baddbmm / torch.einsum /
+        torch.softmax (including ATen-equivalent shortcuts such as F.softmax,
+        Tensor.matmul and the @ operator) is forbidden.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Use float32 for intermediate accumulation; cast the output back to the
+        input dtype.
+      - The scheduling strategy (persistent single kernel or a regular grid) is
+        free to choose; only semantic correctness and performance are assessed.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：ragged batch decode、非量化 fp16/bf16、无因果掩码、无
-    ALiBi/滑窗、无 GQA。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: ragged-batch decode, non-quantized fp16/bf16, no causal mask, no
+    ALiBi/sliding window, no GQA.
     """
 
     def __init__(self, head_size: int, page_size: int = 64, sm_scale=0.5):
@@ -72,8 +83,10 @@ class Model(nn.Module):
         self.sm_scale = float(sm_scale)
 
     def forward(self, q, k, v, kv_block_tables, batch_num_block_n):
-        # KernelBench 评测器会把全部输入张量 cast 成评测 precision（triton 后端
-        # 为 fp32）；块编号与累积块数都是小整数，fp32 可精确表示，此处无损恢复
+        # The KernelBench evaluator casts every input tensor to the evaluation
+        # precision (fp32 for the triton backend); the block ids and the cumulative
+        # block counts are small integers that fp32 represents exactly, so they are
+        # recovered losslessly here
         kv_block_tables = kv_block_tables.to(torch.long)
         batch_num_block_n = batch_num_block_n.to(torch.int32)
 
@@ -81,8 +94,8 @@ class Model(nn.Module):
         batch = int(batch_num_block_n.numel())
         n_ctx_q = m_total // batch
         page = self.page_size
-        assert num_heads == k.shape[0] == v.shape[0], "q/k/v 的 head 数必须一致"
-        assert k.shape[1] == v.shape[1], "k/v 的 KV 池长度必须一致"
+        assert num_heads == k.shape[0] == v.shape[0], "the head counts of q/k/v must match"
+        assert k.shape[1] == v.shape[1], "the KV pool lengths of k/v must match"
 
         offs_in_block = torch.arange(page, device=q.device)
         out = torch.empty_like(q)
@@ -91,7 +104,7 @@ class Model(nn.Module):
                 s0 = 0 if b == 0 else int(batch_num_block_n[b - 1])
                 s1 = int(batch_num_block_n[b])
                 blocks = kv_block_tables[h, s0:s1]                     # [num_blocks_b]
-                # 逻辑位置 j -> 物理行：row(j) = table[s0 + j//page]*page + j%page
+                # logical position j -> physical row: row(j) = table[s0 + j//page]*page + j%page
                 rows = (blocks[:, None] * page + offs_in_block[None, :]).reshape(-1)
                 kb = k[h].index_select(0, rows).to(torch.float32)      # [L_b, D]
                 vb = v[h].index_select(0, rows).to(torch.float32)      # [L_b, D]
@@ -103,24 +116,25 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    return [64, 64, 0.5]   # head_size, page_size（题面固定 64）, sm_scale（官方恒 0.5）
+    return [64, 64, 0.5]   # head_size, page_size (fixed at 64 by the task), sm_scale (always 0.5 officially)
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family; the random part consumes the global RNG -- the evaluator
+    # calls this function after set_seed, so multiple correctness trials therefore
+    # see diverse inputs
     num_heads = 32
     batch = 4
     n_ctx_q = 16
     head_size = 64
-    page_size = 64         # 题面固定
-    extra_blocks = 4       # 物理块池大于实际用量：未引用槽位是垃圾数据
+    page_size = 64         # fixed by the task
+    extra_blocks = 4       # the physical block pool exceeds the actual usage: unreferenced slots are garbage data
 
-    ctx_lens = (torch.randint(1, 17, (batch,)) * page_size)   # 每请求 1..16 块
+    ctx_lens = (torch.randint(1, 17, (batch,)) * page_size)   # 1..16 blocks per request
     blocks_per = ctx_lens // page_size
     used_blocks = int(blocks_per.sum())
     pool_blocks = used_blocks + extra_blocks
-    # 每个 head 一张独立块表：取 pool 的随机排列前 used_blocks 个
+    # one independent block table per head: the first used_blocks entries of a random permutation of the pool
     kv_block_tables = torch.stack(
         [torch.randperm(pool_blocks)[:used_blocks] for _ in range(num_heads)]
     ).to(torch.int32)
@@ -136,12 +150,15 @@ def get_inputs():
 def make_inputs(num_heads: int, batch: int, n_ctx_q: int, head_size: int,
                 ctx_lens=None, dtype: str = "float16", extra_blocks: int = 0,
                 page_size: int = 64, seed: int = 0, seq_lens=None):
-    """按公开/隐藏/性能案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden/perf case description.
 
-    ctx_lens（或其别名 seq_lens——离线终审 harness 的惯例形参，二者等价）可
-    显式指定（每请求 KV 长度，须为 page_size 的正整数倍）；两者均缺省时每
-    请求随机取 1..16 个块。extra_blocks > 0 时物理块池追加等量垃圾块。
-    题面固定 page_size=64。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device). ctx_lens (or its alias seq_lens -- the conventional parameter
+    name of the offline final-audit harness, the two are equivalent) may be given
+    explicitly (each request's KV length, which must be a positive integer
+    multiple of page_size); when both are absent, each request takes 1..16 random
+    blocks. When extra_blocks > 0 the physical block pool gets that many extra
+    garbage blocks appended. The task fixes page_size=64.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
@@ -150,9 +167,9 @@ def make_inputs(num_heads: int, batch: int, n_ctx_q: int, head_size: int,
         ctx_lens = seq_lens
     if ctx_lens is None:
         ctx_lens = (torch.randint(1, 17, (batch,), generator=gen) * page_size).tolist()
-    assert len(ctx_lens) == batch, "ctx_lens 长度必须等于 batch"
+    assert len(ctx_lens) == batch, "ctx_lens length must equal batch"
     for s in ctx_lens:
-        assert s > 0 and s % page_size == 0, "每请求 KV 长度必须是 page_size 的正整数倍"
+        assert s > 0 and s % page_size == 0, "each request's KV length must be a positive integer multiple of page_size"
 
     blocks_per = torch.tensor([s // page_size for s in ctx_lens], dtype=torch.int64)
     used_blocks = int(blocks_per.sum())

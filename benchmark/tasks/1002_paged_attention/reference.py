@@ -1,12 +1,14 @@
-# 1002_paged_attention — 1001 的 model_class（KernelBench 兼容）变体。
+# 1002_paged_attention -- the model_class (KernelBench compatible) variant of 1001.
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。计算逻辑与 1001 的 reference.py
-# 逐行一致（tests/test_1002_model_class.py 校验两者输出相等）。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here. The computation is
+# line-by-line identical to 1001's reference.py (tests/test_1002_model_class.py
+# checks that the two produce equal outputs).
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=3, problem_id=1002, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=3, problem_id=1002, backend=triton.
 
 import math
 
@@ -15,28 +17,33 @@ import torch.nn as nn
 
 
 class Model(nn.Module):
-    """Decode 阶段（单 token query）的 paged attention，支持 MHA 与 GQA。
+    """Paged attention in the decode phase (single-token query), supporting both
+    MHA and GQA.
 
-    KV Cache 以固定 block_size 分页存放于物理块池 key_cache / value_cache，
-    每个序列通过 block_tables 中的物理块编号间接寻址；每个序列实际参与
-    attention 的 KV 长度由 seq_lens[s] 给出，物理块池中其余槽位为垃圾数据，
-    不得参与计算。对每个序列 s 的第 h 个 query head（其 KV head 为
-    h // query_group_size）：
+    The KV cache is stored page-wise with a fixed block_size in the physical block
+    pools key_cache / value_cache, and each sequence addresses them indirectly
+    through the physical block ids in block_tables; the KV length that actually
+    participates in attention for each sequence is given by seq_lens[s], while the
+    remaining slots in the pool hold garbage data and must not participate in the
+    computation. For query head h of sequence s (whose KV head is
+    h // query_group_size):
       logits[l] = scale * <query[s,h,:], key_cache[bt[s,l//bs], h_kv, l%bs, :]>
       p = softmax(logits[0:seq_lens[s]])
       out[s,h,:] = sum_l p[l] * value_cache[bt[s,l//bs], h_kv, l%bs, :]
-    softmax 采用在线（数值稳定）实现，中间累加为 float32，输出 cast 回输入
-    dtype。
+    The softmax uses an online (numerically stable) formulation; intermediates are
+    accumulated in float32 and the output is cast back to the input dtype.
 
-    实现约束（违规判负）：
-      - 核心计算（QK^T / softmax / PV）必须在提交文件内完成，禁止调用
-        scaled_dot_product_attention / sdpa / flash_attn / aiter /
-        torch.matmul / torch.bmm / torch.einsum / torch.softmax。
-      - ModelNew 的 __init__ 与 forward 签名不可更改。
-      - 中间累加用 float32；输出 cast 回输入 dtype。
+    Implementation constraints (violations are scored as failures):
+      - The core computation (QK^T / softmax / PV) must be completed inside the
+        submitted file; calling scaled_dot_product_attention / sdpa / flash_attn /
+        aiter / torch.matmul / torch.bmm / torch.einsum / torch.softmax is
+        forbidden.
+      - The __init__ and forward signatures of ModelNew must not be changed.
+      - Accumulate intermediates in float32; cast the output back to the input
+        dtype.
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
-    本题范围：单 token decode、非量化 KV、无 ALiBi、无滑窗。
+    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Task scope: single-token decode, non-quantized KV, no ALiBi, no sliding window.
     """
 
     def __init__(self, head_size: int, scale=None):
@@ -44,8 +51,10 @@ class Model(nn.Module):
         self.scale = float(scale) if scale is not None else 1.0 / math.sqrt(head_size)
 
     def forward(self, query, key_cache, value_cache, block_tables, seq_lens):
-        # KernelBench 评测器会把全部输入张量 cast 成评测 precision（triton 后端
-        # 为 fp32）；块编号与序列长度都是小整数，fp32 可精确表示，此处无损恢复
+        # The KernelBench evaluator casts every input tensor to the evaluation
+        # precision (fp32 for the triton backend); block ids and sequence lengths
+        # are small integers exactly representable in fp32, restored losslessly
+        # here.
         block_tables = block_tables.to(torch.long)
         seq_lens = seq_lens.to(torch.int32)
 
@@ -53,7 +62,7 @@ class Model(nn.Module):
         H_KV = key_cache.shape[1]
         bs = key_cache.shape[2]
         group = H_Q // H_KV
-        assert H_Q == H_KV * group, "num_q_heads 必须是 num_kv_heads 的整数倍"
+        assert H_Q == H_KV * group, "num_q_heads must be an integer multiple of num_kv_heads"
 
         out = torch.empty_like(query)
         for s in range(B):
@@ -61,11 +70,12 @@ class Model(nn.Module):
             num_blocks = (seq_len + bs - 1) // bs
             physical = block_tables[s, :num_blocks]
 
-            # 按块表收集本序列的 K/V：[num_blocks, H_KV, bs, D] -> [H_KV, seq_len, D]
+            # Gather this sequence's K/V according to the block table:
+            # [num_blocks, H_KV, bs, D] -> [H_KV, seq_len, D]
             k = key_cache[physical].permute(1, 0, 2, 3).reshape(H_KV, num_blocks * bs, D)[:, :seq_len].to(torch.float32)
             v = value_cache[physical].permute(1, 0, 2, 3).reshape(H_KV, num_blocks * bs, D)[:, :seq_len].to(torch.float32)
 
-            # GQA：同一 KV head 的 K/V 复制给 group 内的每个 query head
+            # GQA: the K/V of one KV head is replicated to every query head in the group
             if group > 1:
                 k = k.repeat_interleave(group, dim=0)   # [H_Q, seq_len, D]
                 v = v.repeat_interleave(group, dim=0)
@@ -78,12 +88,13 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    return [64]  # head_size；scale 缺省 1/sqrt(head_size)
+    return [64]  # head_size; scale defaults to 1/sqrt(head_size)
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性
+    # Fixed shape family; the random part consumes the global RNG -- the
+    # evaluator calls this function after set_seed, so multiple correctness
+    # trials therefore see diverse inputs.
     num_seqs = 8
     num_kv_heads = 8
     query_group_size = 4      # num_q_heads = 32
@@ -93,7 +104,8 @@ def get_inputs():
 
     num_q_heads = num_kv_heads * query_group_size
     max_blocks_per_seq = (max_seq_len + block_size - 1) // block_size
-    # 物理块池大于实际用量：未引用槽位是垃圾数据，用于检验掩码正确性
+    # The physical block pool is larger than what is actually used: unreferenced
+    # slots hold garbage data, which exercises the masking.
     num_blocks = num_seqs * max_blocks_per_seq + 8
 
     seq_lens = torch.randint(1, max_seq_len + 1, (num_seqs,), dtype=torch.int32)

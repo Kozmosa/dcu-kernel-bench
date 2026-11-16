@@ -1,73 +1,93 @@
-# 8003_scatter_nd —— ScatterND（索引写入家族）的 model_class
-# （KernelBench 兼容）题目文件。
+# 8003_scatter_nd -- model_class (KernelBench compatible) task file for
+# ScatterND (the index-write family).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=8003, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=2, problem_id=8003, backend=cuda (HIP).
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """ScatterND：按整型索引元组将 updates 覆盖写入 data 的索引写入家族。
+    """ScatterND: the index-write family that overwrites positions of `data`
+    with `updates` according to integer index tuples.
 
-    语义定义：data 形状 (S_0, ..., S_{r-1})，r = data 的维数；indices 为
-    int64 张量，形状 (K, r)——每一行是一个完整坐标元组，一次唯一指定
-    data 中一个元素的位置；updates 形状 (K,)，与 data 同 dtype。输出
-    out 与 data 同形状、同 dtype：
+    Semantics: data has shape (S_0, ..., S_{r-1}) where r is its rank; indices is
+    an int64 tensor of shape (K, r) -- each row is a full coordinate tuple that
+    picks exactly one position in data; updates has shape (K,) and the same dtype
+    as data. The output out has the same shape and dtype as data:
         out[indices[k,0], ..., indices[k,r-1]] = updates[k]
-            （命中位置：覆盖写，原值被丢弃并由 updates 对应元素替代）
-        其余位置 out[i_0, ..., i_{r-1}] = data[i_0, ..., i_{r-1}]
-            （未命中：原值逐位保留）
-    写入语义为覆盖写、非累加；K 个坐标元组两两互异（生成端无放回抽样
-    保证），每个 data 元素至多被写一次。重复坐标元组下哪个写入生效是
-    未定义行为（主流框架对重复索引的写入顺序均不做定义），重复元组不在
-    本题输入域内——实现无需为其定义行为，也不得因去重 / 排序等预处理
-    改变互异元组的覆盖结果。
+            (hit positions: overwritten, the original value is discarded and
+             replaced by the corresponding element of updates)
+        all other positions out[i_0, ..., i_{r-1}] = data[i_0, ..., i_{r-1}]
+            (misses: the original value is preserved bit-for-bit)
+    The write semantics is overwrite, not accumulate; the K coordinate tuples are
+    pairwise distinct (the generator samples without replacement), so every data
+    element is written at most once. Which write wins for duplicate coordinate
+    tuples is undefined behaviour (mainstream frameworks leave the write order
+    for duplicate indices undefined either way), and duplicate tuples are outside
+    this task's input domain -- the implementation need not define behaviour for
+    them, and must not let deduplication / sorting or any other preprocessing
+    change the overwrite result for distinct tuples.
 
-    输入输出规格：
-        data    float32 / float16 / bfloat16，contiguous，ndim ∈ [1, 6]，
-                各维 >= 1，元素总数 <= 2^23；值域为常规 randn 量级（无
-                inf/NaN）
-        indices int64 (K, r)，r = data 维数，1 <= K <= data 元素总数；
-                全部索引值 ∈ [0, S_d)，K 个坐标元组两两互异
-        updates 同 data dtype (K,)，contiguous
-        out     单张量，与 data 同形状、同 dtype、contiguous——本算子
-                天然单输出，无需多输出打包。forward 必须返回单个张量
-                （评测器按单输出的 .shape / allclose 比较）。
-        在线评测器会把全部输入 cast 成 fp32 传入（索引为 < 2^24 的小
-        非负整数、fp32 可精确表示，无损恢复；fp16/bf16 -> fp32 亦无损）；
-        离线终审按声明 dtype 原生传入——实现须对两种传入都正确。
+    Input/output specification:
+        data    float32 / float16 / bfloat16, contiguous, ndim in [1, 6],
+                every dimension >= 1, total element count <= 2^23; values are
+                ordinary randn magnitude (no inf/NaN)
+        indices int64 (K, r) with r = data rank, 1 <= K <= the total element
+                count of data; every index value lies in [0, S_d) and the K
+                coordinate tuples are pairwise distinct
+        updates same dtype as data, shape (K,), contiguous
+        out     a single tensor, same shape / dtype as data, contiguous -- this
+                operator is naturally single-output, so no multi-output packing is
+                needed. forward must return a single tensor (the evaluator
+                compares .shape / allclose on a single output).
+        The online evaluator casts all inputs to fp32 before calling forward
+        (indices are small non-negative integers < 2^24 and exactly
+        representable in fp32, so they are recovered losslessly; fp16/bf16 ->
+        fp32 is also lossless). The offline final audit passes inputs natively in
+        their declared dtype -- the implementation must be correct for both.
 
-    边界行为：K=1、K = data 元素总数（全量打散，data 每个元素都被写）、
-    ndim=1（indices 形状 (K, 1)）、非 2 的幂 / 素数长度 / 轴长 1 的形状
-    都必须正确处理；输出须是新张量，不得原地修改 data / indices / updates。
+    Boundary behaviour: K=1, K equal to the total element count of data (a full
+    permutation, every element written), ndim=1 (indices shaped (K, 1)), and
+    shapes with non-power-of-two / prime lengths or axes of length 1 must all be
+    handled correctly; the output must be a fresh tensor and must not modify
+    data / indices / updates in place.
 
-    实现约束（违规判负）：
-        - 核心计算（r 维坐标 -> 线性偏移的地址计算、updates 的读入与
-          未命中位置原值的搬运写出）必须在提交文件内以 Triton kernel
-          完成。
-        - ModelNew 的 __init__ 与 forward 签名不可更改。
-        - 纯搬移契约：未命中位置与 data、命中位置与 updates 均逐位一致
-          （位模式不变），不得引入任何数值变换。
-        - forward 返回单张量 out（评测器按单输出比较）。
+    Implementation constraints (violations are scored as failures):
+        - The core computation (r-dimensional coordinate -> linear offset address
+          computation, reading updates, and moving the original values out for
+          miss positions) must be completed with a HIP kernel inside the
+          submitted file.
+        - The __init__ and forward signatures of ModelNew must not be changed.
+        - Pure-movement contract: miss positions match data bit-for-bit and hit
+          positions match updates bit-for-bit (bit patterns preserved); no
+          numeric transformation may be introduced.
+        - forward returns the single tensor `out` (the evaluator compares a
+          single output).
 
-    禁用列表（静态审计剥除 docstring 与注释后按字面子串匹配）：
+    Forbidden (static audit strips docstrings and comments, then does literal
+    substring matching):
     torch.scatter / .scatter( / .scatter_( / scatter_add / scatter_reduce /
-    index_put / torch.put( / .put_( / index_copy / torch_scatter / hipdnn。
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    index_put / torch.put( / .put_( / index_copy / torch_scatter / hipdnn.
+    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
+    regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
+    is not available on this machine).
     """
 
     def __init__(self):
         super().__init__()
 
     def forward(self, data, indices, updates):
-        # 在线评测器会把全部输入（含整数索引）cast 成 fp32；索引是小非负
-        # 整数，fp32 可精确表示，此处无损恢复为 int64
+        # The online evaluator casts every input (integer indices included) to
+        # fp32; the indices are small non-negative integers exactly representable
+        # in fp32, restored losslessly to int64 here.
         idx = indices.to(torch.long)
         out = data.clone()
         out[tuple(idx.unbind(dim=-1))] = updates.to(out.dtype)
@@ -75,41 +95,47 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    return []   # 无构造超参：写入语义固定为覆盖写
+    return []   # no construction hyper-parameters: the write semantics is fixed to overwrite
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性
-    data = torch.randn(4, 4)                          # float32 主 dtype
-    flat = torch.randperm(16)[:2]                     # 无放回抽 2 个线性位置
+    # Fixed shape family; the random part consumes the global RNG -- the
+    # evaluator calls this function after set_seed, so multiple correctness
+    # trials therefore see diverse inputs.
+    data = torch.randn(4, 4)                          # float32 as the primary dtype
+    flat = torch.randperm(16)[:2]                     # draw 2 linear positions without replacement
     indices = torch.stack((flat // 4, flat % 4), dim=1)   # int64 (2, 2)
     updates = torch.randn(2)
     return [data, indices, updates]
 
 
 def make_inputs(data_shape, num_updates, dtype="float32", seed=0):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description.
 
-    消费顺序固定：data（torch.randn 后 cast 到 dtype）-> indices
-    （torch.randperm(data 元素总数) 取前 K 个线性下标、按行主序逐维解
-    坐标——无放回抽样保证 K 个坐标元组两两互异）-> updates（torch.randn
-    后 cast 到 dtype），全部来自同一 torch.Generator(seed)，同 seed 下
-    逐位可复现。
+    Runs on the evaluation side only (generated on CPU; the evaluator moves them
+    to the device).
+
+    The consumption order is fixed: data (torch.randn, then cast to dtype) ->
+    indices (torch.randperm over the total element count of data, take the first
+    K linear indices, decode them to coordinates per dimension in row-major
+    order -- sampling without replacement guarantees the K tuples are pairwise
+    distinct) -> updates (torch.randn, then cast to dtype). Everything comes from
+    the same torch.Generator(seed), so the same seed reproduces inputs
+    bit-for-bit.
     """
     gen = torch.Generator().manual_seed(seed)
-    assert dtype in ("float32", "float16", "bfloat16"), "dtype 需为 float32/float16/bfloat16"
+    assert dtype in ("float32", "float16", "bfloat16"), "dtype must be float32/float16/bfloat16"
     dt = getattr(torch, dtype)
     shape = tuple(int(s) for s in data_shape)
     ndim = len(shape)
-    assert 1 <= ndim <= 6, "需 1 <= data ndim <= 6"
-    assert all(s >= 1 for s in shape), "data 各维长度需 >= 1"
+    assert 1 <= ndim <= 6, "requires 1 <= data ndim <= 6"
+    assert all(s >= 1 for s in shape), "every data dimension must be >= 1"
     numel = 1
     for s in shape:
         numel *= s
-    assert numel <= 2 ** 23, "data 元素总数需 <= 2^23"
+    assert numel <= 2 ** 23, "total data elements must be <= 2^23"
     k = int(num_updates)
-    assert 1 <= k <= numel, "需 1 <= K <= data 元素总数（坐标互异的上界）"
+    assert 1 <= k <= numel, "requires 1 <= K <= total data elements (upper bound for distinct coordinates)"
     data = torch.randn(*shape, generator=gen).to(dt)
     flat = torch.randperm(numel, generator=gen)[:k]
     coords = []

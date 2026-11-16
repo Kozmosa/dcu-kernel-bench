@@ -1,0 +1,19 @@
+--- a/src/kernelbench/timing.py
++++ b/src/kernelbench/timing.py
+@@ -39,7 +39,15 @@
+     )
+ 
+     try:
+-        with torch.no_grad():
++        # 这里不能用 torch.no_grad()：本函数测的是**参考实现** Model 的运行时间，
++        # 而若干「反向」题（1032_deform_attention_bwd / 5002_conv2d_bwd /
++        # 5004_deform_conv2d_bwd / 5006_spconv_bwd）的参考实现本身就是用
++        # torch.autograd.grad 反传求梯度的，包进 no_grad 会让它抛
++        # "element 0 of tensors does not require grad"，参考时间记成 None，
++        # 于是这 4 道题的 speedup 恒为 None、无法计分（真机 fix9 重跑实测）。
++        # 改 enable_grad 与 eval.py 的正确性路径一致：对无 requires_grad 张量的
++        # 前向题零开销（PyTorch 不会建图）。
++        with torch.enable_grad():
+             if isinstance(device, str):
+                 device = torch.device(device)
+             elif isinstance(device, int):

@@ -1,85 +1,99 @@
-# 2005_moe_activation —— MoE FFN 激活变体族（门控 SwiGLU 变体 × chunked /
-# interleaved 布局 × 非 gated 逐元素激活）的 model_class（KernelBench 兼容）
-# 题目文件。
+# 2005_moe_activation -- model_class (KernelBench compatible) task file for the MoE
+# FFN activation variant family (gated SwiGLU variants x chunked / interleaved
+# layouts x non-gated element-wise activations).
 #
-# 本文件必须自包含：KernelBench 评测器以 exec(source) 加载题目，禁止本地模块
-# 导入，reference 实现与输入生成全部内联。
+# This file must be self-contained: the KernelBench evaluator loads the task via
+# exec(source), so local module imports are forbidden -- the reference
+# implementation and input generation are all inlined here.
 #
-# 运行方式（PyramidKernel 原生 model_class 路径）：
-#   kernelbench_root 指向 benchmark/kernelbench_compat/，
-#   level=2, problem_id=2005, backend=triton。
+# How to run (PyramidKernel native model_class path):
+#   kernelbench_root points at benchmark/kernelbench_compat/,
+#   level=2, problem_id=2005, backend=triton.
 
 import torch
 import torch.nn as nn
 
 
 class Model(nn.Module):
-    """MoE FFN 激活变体族：gated 门控激活（SwiGLU 家族变体）与非 gated
-    逐元素激活，由 __init__ 的 activation / alpha / limit 三参数分派。
+    """MoE FFN activation variant family: gated activations (SwiGLU family
+    variants) and non-gated element-wise activations, dispatched by the __init__
+    parameters activation / alpha / limit.
 
-    全部计算在 float32 中进行，输出 cast 回输入 dtype。记
+    All computation runs in float32 and the output is cast back to the input dtype.
+    Define
         SiLU(u)      = u * sigmoid(u)
         GELU(u)      = 0.5 * u * (1 + erf(u * 0.7071067811865476))
         GELU_tanh(u) = 0.5 * u * (1 + tanh(0.7978845608028654
                                            * (u + 0.044715 * u^3)))
         ReLU2(u)     = max(u, 0)^2
-    sigmoid / erf / tanh 均按 float32 数学函数求值。
+    sigmoid / erf / tanh are all evaluated as float32 math functions.
 
-    【gated 变体】输入 x 形状 (M, 2N)，输出 (M, N)。两种取数布局：
-        chunked（默认）   : gate = x[:, :N]，up = x[:, N:]
-        interleaved       : gate = x[:, 0::2]（偶数列），up = x[:, 1::2]（奇数列）
-    记钳位量 gate' = min(gate, limit)（仅上限钳位）、
-    up' = clamp(up, -limit, limit)（对称钳位），各变体输出为：
-        activation="silu"，alpha=None、limit=None：
-            out = SiLU(gate) * up                        （标准 SwiGLU）
-        activation="silu"，alpha=None、limit=L：
-            out = SiLU(gate') * up'                       （钳位 SwiGLU）
-        activation="silu"，alpha=A、limit=L（A 与 L 必须同时给出）：
-            out = gate' * sigmoid(A * gate') * (up' + 1)  （缩放钳位门控）
-        activation="gelu"（不接受 alpha / limit）：
+    [gated variants] The input x has shape (M, 2N) and the output (M, N). Two data
+    layouts:
+        chunked (default) : gate = x[:, :N], up = x[:, N:]
+        interleaved       : gate = x[:, 0::2] (even columns), up = x[:, 1::2] (odd
+                            columns)
+    Write the clamped quantities as gate' = min(gate, limit) (upper bound only) and
+    up' = clamp(up, -limit, limit) (symmetric clamping); the output of each variant
+    is:
+        activation="silu", alpha=None, limit=None:
+            out = SiLU(gate) * up                        (standard SwiGLU)
+        activation="silu", alpha=None, limit=L:
+            out = SiLU(gate') * up'                       (clamped SwiGLU)
+        activation="silu", alpha=A, limit=L (A and L must be given together):
+            out = gate' * sigmoid(A * gate') * (up' + 1)  (scaled clamped gate)
+        activation="gelu" (does not accept alpha / limit):
             out = GELU(gate) * up
-        activation="gelu_tanh"（不接受 alpha / limit）：
+        activation="gelu_tanh" (does not accept alpha / limit):
             out = GELU_tanh(gate) * up
-        activation="swiglustep"（limit 缺省 7.0，不接受 alpha）：
-            out = clamp(SiLU(gate), max=limit) * up'      （先 SiLU 后上限钳位）
-        activation="swiglu_interleaved"（interleaved 布局；alpha 缺省 1.702、
-        limit 缺省 7.0）：
+        activation="swiglustep" (limit defaults to 7.0, does not accept alpha):
+            out = clamp(SiLU(gate), max=limit) * up'      (SiLU first, then the
+                                                           upper clamp)
+        activation="swiglu_interleaved" (interleaved layout; alpha defaults to
+        1.702, limit defaults to 7.0):
             out = gate' * sigmoid(alpha * gate') * (up' + 1)
 
-    【非 gated 变体】输入 x 形状 (M, N)，输出 (M, N)，逐元素激活，忽略
-    alpha / limit：
+    [non-gated variants] The input x has shape (M, N) and the output (M, N);
+    element-wise activation, alpha / limit are ignored:
         activation="silu_no_mul"      : out = SiLU(x)
         activation="gelu_no_mul"      : out = GELU(x)
         activation="gelu_tanh_no_mul" : out = GELU_tanh(x)
         activation="relu2"            : out = ReLU2(x)
 
-    边界行为：gate 的钳位只设上限（负向不钳），up 的钳位对称；钳位在
-    激活之前施加，唯独 swiglustep 是先算 SiLU 再对结果上限钳位。非法参数
-    组合（未知变体名；gelu / gelu_tanh 带 alpha 或 limit；swiglustep 带
-    alpha；silu 给 alpha 不给 limit）在构造期直接拒绝。
+    Boundary behaviour: clamping of gate is upper-bound only (nothing is clamped on
+    the negative side) while clamping of up is symmetric; the clamping is applied
+    before the activation, except for swiglustep, which computes SiLU first and then
+    clamps the result on the upper side. Illegal parameter combinations (an unknown
+    variant name; gelu / gelu_tanh with alpha or limit; swiglustep with alpha; silu
+    given alpha but not limit) are rejected at construction time.
 
-    输入输出规格：
-        x    float16 / bfloat16 (M, n)，contiguous，M >= 1；gated 变体要求
-             n 为偶数（N = n/2 无对齐约束，允许非 2 次幂、小于常见块大小）；
-             非 gated 变体 n >= 1 任意。评测器会把输入 cast 成 fp32 传入，
-             fp16/bf16 -> fp32 无损。
-        out  与 x 同 dtype；gated 变体形状 (M, n/2)，非 gated 变体 (M, n)。
-        输入值域为常规 randn 量级（无 inf/NaN）。
+    Input/output specification:
+        x    float16 / bfloat16 (M, n), contiguous, M >= 1; the gated variants
+             require n to be even (N = n/2 has no alignment constraint: non-powers
+             of two and sizes below the common block size are allowed); the
+             non-gated variants accept any n >= 1. The evaluator casts the input to
+             fp32 before passing it in; fp16/bf16 -> fp32 is lossless.
+        out  same dtype as x; shape (M, n/2) for the gated variants and (M, n) for
+             the non-gated ones.
+        The input value range is the usual randn magnitude (no inf/NaN).
 
-    实现约束（违规判负）：
-        - 核心计算（chunked / interleaved 取数、钳位、激活、门控乘）必须在
-          提交文件内以 Triton kernel 完成；中间计算一律 float32。
-        - ModelNew 的 __init__ 与 forward 签名不可更改。
-        - 中间累加用 float32；输出 cast 回输入 dtype。
+    Implementation constraints (violations are scored as failures):
+        - The core computation (chunked / interleaved data selection, clamping,
+          activation, gated multiply) must be completed with a Triton kernel inside
+          the submitted file; intermediates are always float32.
+        - The __init__ and forward signatures of ModelNew must not be changed.
+        - Use float32 for intermediate accumulation; cast the output back to the
+          input dtype.
 
-    ④ 禁用列表与目标硬件：
-    - 禁止调用 torch.nn.functional.silu / torch.nn.functional.gelu /
-      torch.nn.SiLU / torch.nn.GELU / torch.sigmoid / torch.erf /
-      torch.tanh / torch.relu / torch.clamp 等 ATen 捷径直接完成本题
-      计算；禁用清单以 task.yaml forbidden 列表为准（含来源算子库与
-      其它闭源加速库，终审静态审计对 docstring / 注释之外的代码做子串
-      匹配）；
-    - 目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    (4) Forbidden list and target hardware:
+    - Calling ATen shortcuts such as torch.nn.functional.silu /
+      torch.nn.functional.gelu / torch.nn.SiLU / torch.nn.GELU / torch.sigmoid /
+      torch.erf / torch.tanh / torch.relu / torch.clamp to complete this task's
+      computation directly is forbidden; the authoritative forbidden list is the
+      task.yaml forbidden list (it covers the source operator library and other
+      closed-source acceleration libraries; the final static audit does substring
+      matching on the code outside docstrings / comments);
+    - Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
     """
 
     def __init__(self, activation: str = "silu", alpha=None, limit=None):
@@ -88,15 +102,16 @@ class Model(nn.Module):
         nomul = ("silu_no_mul", "gelu_no_mul", "gelu_tanh_no_mul", "relu2")
         name = str(activation).lower()
         assert name in gated or name in nomul, (
-            "activation 必须是 " + "/".join(gated + nomul) + " 之一")
-        # 参数组合合法性（与变体定义一致，非法组合构造期拒绝）
+            "activation must be one of " + "/".join(gated + nomul) + " variants")
+        # parameter-combination legality (consistent with the variant definitions;
+        # illegal combinations are rejected at construction time)
         if name in ("gelu", "gelu_tanh"):
-            assert alpha is None and limit is None, "gelu / gelu_tanh 不接受 alpha / limit"
+            assert alpha is None and limit is None, "gelu / gelu_tanh do not accept alpha / limit"
         if name == "swiglustep":
-            assert alpha is None, "swiglustep 不接受 alpha"
+            assert alpha is None, "swiglustep does not accept alpha"
         if name == "silu" and alpha is not None:
-            assert limit is not None, "silu 设置 alpha 时必须同时设置 limit"
-        # 缺省值填充（仅以下两个变体带缺省）
+            assert limit is not None, "silu must set limit as well when alpha is set"
+        # default filling (only the following two variants carry defaults)
         if name == "swiglustep" and limit is None:
             limit = 7.0
         if name == "swiglu_interleaved":
@@ -108,11 +123,13 @@ class Model(nn.Module):
         self.limit = None if limit is None else float(limit)
 
     def forward(self, x):
-        # 评测器把全部输入 cast 成 fp32；统一在 float32 中计算，输出 cast 回输入 dtype
+        # The evaluator casts all inputs to fp32; compute uniformly in float32 and
+        # cast the output back to the input dtype
         xf = x.to(torch.float32)
-        assert xf.dim() == 2, "输入必须是 (M, n) 的 2D 张量"
+        assert xf.dim() == 2, "the input must be a 2D (M, n) tensor"
         if not self.is_gated:
-            # 非 gated：逐元素激活，形状不变（忽略 alpha / limit）
+            # non-gated: element-wise activation, shape unchanged (alpha / limit are
+            # ignored)
             if self.activation == "silu_no_mul":
                 out = xf * torch.sigmoid(xf)
             elif self.activation == "gelu_no_mul":
@@ -125,27 +142,27 @@ class Model(nn.Module):
                 out = act * act
             return out.to(x.dtype)
 
-        assert xf.shape[-1] % 2 == 0, "gated 变体要求最后一维 n 为偶数"
+        assert xf.shape[-1] % 2 == 0, "the gated variants require the last dimension n to be even"
         half = xf.shape[-1] // 2
         interleaved = self.activation == "swiglu_interleaved"
-        gate = xf[:, 0::2] if interleaved else xf[:, :half]   # interleaved / chunked 布局
+        gate = xf[:, 0::2] if interleaved else xf[:, :half]   # interleaved / chunked layout
         up = xf[:, 1::2] if interleaved else xf[:, half:]
         if self.activation == "swiglustep":
-            # 先 SiLU 后上限钳位：clamp(SiLU(gate), max=limit) * up'
+            # SiLU first, then the upper clamp: clamp(SiLU(gate), max=limit) * up'
             silu_g = gate * torch.sigmoid(gate)
             out = silu_g.clamp(max=self.limit) * up.clamp(min=-self.limit, max=self.limit)
         if self.activation == "silu" and self.alpha is not None:
-            # 缩放钳位门控：gate' * sigmoid(alpha*gate') * (up' + 1)
+            # scaled clamped gate: gate' * sigmoid(alpha*gate') * (up' + 1)
             gate_p = gate.clamp(max=self.limit)
             up_p = up.clamp(min=-self.limit, max=self.limit)
             out = gate_p * torch.sigmoid(self.alpha * gate_p) * (up_p + 1.0)
         if self.activation == "silu" and self.alpha is None and self.limit is not None:
-            # 钳位 SwiGLU：SiLU(gate') * up'
+            # clamped SwiGLU: SiLU(gate') * up'
             gate_p = gate.clamp(max=self.limit)
             up_p = up.clamp(min=-self.limit, max=self.limit)
             out = gate_p * torch.sigmoid(gate_p) * up_p
         if self.activation == "silu" and self.alpha is None and self.limit is None:
-            out = gate * torch.sigmoid(gate) * up             # 标准 SwiGLU
+            out = gate * torch.sigmoid(gate) * up             # standard SwiGLU
         if self.activation == "gelu":
             out = 0.5 * gate * (1.0 + torch.erf(gate * 0.7071067811865476)) * up
         if self.activation == "gelu_tanh":
@@ -160,12 +177,13 @@ class Model(nn.Module):
 
 
 def get_init_inputs():
-    return ["silu", 1.702, 7.0]   # activation / alpha / limit -> 缩放钳位门控变体
+    return ["silu", 1.702, 7.0]   # activation / alpha / limit -> the scaled clamped gate variant
 
 
 def get_inputs():
-    # 固定 shape 族；随机部分消费全局 RNG——评测器在 set_seed 后调用本函数，
-    # 多轮 correctness trial 因此获得输入多样性（M=128，2N=4096 即 N=2048）
+    # Fixed shape family; the random part consumes the global RNG -- the evaluator
+    # calls this function after set_seed, so multiple correctness trials therefore
+    # see diverse inputs (M=128, 2N=4096, i.e. N=2048)
     m, n = 128, 4096
     x = torch.randn(m, n).to(torch.bfloat16)
     return [x]
@@ -173,15 +191,19 @@ def get_inputs():
 
 def make_inputs(m: int, n: int, activation: str, alpha=None, limit=None,
                 dtype: str = "float16", seed: int = 0, scale: float = 1.0):
-    """按公开/隐藏案例描述生成输入。仅在评测端运行（CPU 生成，评测器搬运到设备）。
+    """Generate inputs from a public/hidden case description. Runs on the
+    evaluation side only (generated on CPU; the evaluator moves them to the
+    device).
 
-    消费顺序固定：x = torch.randn(m, n) * scale 后 cast 到 dtype，全部来自同一
-    torch.Generator(seed)，同 seed 下逐位可复现；activation / alpha / limit 与
-    case 字段一一对应，原样传给 Model 构造。scale 仅控制输入幅度以覆盖钳位
-    边界，不参与算子语义。
+    The consumption order is fixed: x = torch.randn(m, n) * scale, then cast to
+    dtype; everything comes from the same torch.Generator(seed), so the same seed
+    reproduces inputs bit-for-bit; activation / alpha / limit map one-to-one onto
+    the case fields and are passed through to the Model constructor. scale only
+    controls the input magnitude so that the clamping boundaries are covered; it
+    takes no part in the operator semantics.
     """
     gen = torch.Generator().manual_seed(seed)
     dt = getattr(torch, dtype)
-    assert m >= 1 and n >= 1, "需 M >= 1 且 n >= 1"
+    assert m >= 1 and n >= 1, "requires M >= 1 and n >= 1"
     x = (torch.randn(m, n, generator=gen) * float(scale)).to(dt)
     return (x,)

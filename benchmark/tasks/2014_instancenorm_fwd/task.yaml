@@ -1,7 +1,7 @@
 id: "2014_instancenorm_fwd"
 name: instancenorm_fwd
 family: norm
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: medium          # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -20,8 +20,7 @@ description: >
   benchmark/kernelbench_compat/level2/），可直接走 PyramidKernel 的原生
   model_class 路径（--kernelbench-root benchmark/kernelbench_compat
   --level 2 --problem-id 2014），无需任何框架改动。starter 由框架 loader
-  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
-  forward_stmt_N），本任务包不单独提供 starter。
+  从 Model 自动生成 ModelNew scaffold（锚点：user_helpers / cuda_cpp / cuda_cu / init_body / forward_stmt_N），本任务包不单独提供 starter。
 
 io:
   inputs:
@@ -53,7 +52,7 @@ tolerance:
     以上为本评测集的验收容差，用于离线终审。fp32 档 1e-3 相对 float32
     InstanceNorm 实现间偏差（不同归约树序，量级 1e-6~1e-5）有约两个数量
     级裕量；fp16/bf16 档沿用 norm 家族（2006/2007/2010/2012）的 2e-2。
-    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：triton 后端输入
+    在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：cuda 后端输入
     与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与上表不同——在线
     结论不能替代终审。
 

@@ -1,7 +1,7 @@
 id: "5005_spconv_fprop"
 name: spconv_fprop
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -24,8 +24,7 @@ description: >
   benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 原生
   model_class 路径（--kernelbench-root benchmark/kernelbench_compat
   --level 3 --problem-id 5005），无需任何框架改动。starter 由框架 loader
-  从 Model 自动生成 ModelNew scaffold（锚点：helpers / init_body /
-  forward_stmt_N），本任务包不单独提供 starter。
+  从 Model 自动生成 ModelNew scaffold（锚点：user_helpers / cuda_cpp / cuda_cu / init_body / forward_stmt_N），本任务包不单独提供 starter。
 
 io:
   inputs:
@@ -69,7 +68,7 @@ tolerance:
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）
 # gather / index_select 类纯数据搬运未列入禁用（允许作为非核心整理）；
-# scatter 累加与矩阵乘必须进 Triton kernel
+# scatter 累加与矩阵乘必须进 HIP kernel
 forbidden:
   - aiter
   - torch.sparse

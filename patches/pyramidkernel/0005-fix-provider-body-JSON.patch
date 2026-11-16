@@ -1,0 +1,201 @@
+From 64977a79bb16a133513bc8209c962a9cdce05dc7 Mon Sep 17 00:00:00 2001
+From: uestcpyp <240867617@qq.com>
+Date: Mon, 26 Oct 2026 15:30:22 +0800
+Subject: [PATCH 5/6] =?UTF-8?q?fix(provider):=20=E7=A9=BA=20body/JSON=20?=
+ =?UTF-8?q?=E8=A7=A3=E6=9E=90=E5=A4=B1=E8=B4=A5=E7=AE=97=E5=8F=AF=E9=87=8D?=
+ =?UTF-8?q?=E8=AF=95=EF=BC=9B=E6=89=B9=E9=87=8F=E8=B7=91=E5=9C=A8=E5=BC=80?=
+ =?UTF-8?q?=E9=A2=98=E5=89=8D=E6=8E=A2=E6=B4=BB=EF=BC=8C=E7=AB=AF=E7=82=B9?=
+ =?UTF-8?q?=E4=B8=8D=E5=8F=AF=E8=BE=BE=E5=B0=B1=E4=B8=AD=E6=AD=A2=E5=88=86?=
+ =?UTF-8?q?=E7=89=87?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+两个坑都是实测吃过的：
+
+1) retryable 判定漏了「200 + 空 body」。
+   provider 偶发返回空内容，客户端抛
+   `Unable to parse JSON object: line 1 column 1 (char 0)`。这类消息不在
+   TRANSIENT_ERROR_TOKENS 里，于是被当成不可重试错误，整道题直接报废——
+   2026-10-20 那轮 66 题因此丢了 5 道（1015/2001/3004/3009/4007）。
+   现在把 `unable to parse json object` / `expecting value` / `jsondecodeerror`
+   / `json decode error` 收进可重试集合。
+
+2) 死端点会让整轮静默白跑。
+   反向隧道断掉时 batch 不报错：每题把 provider 瞬时错误预算烧光，然后落在
+   未改动的 root 节点上，写出一份 attempt_count=0 但格式完全合法的 run.json。
+   2026-10-20 那轮第一次启动就这样「跑完」了 66 题，全部 0 尝试。
+   现在：
+   - AgentProvider 增加 health_check() 默认实现；OpenAICompatibleProvider
+     用 GET {base_url}/models 探测（http_utils.probe_models_endpoint）；
+     RoleRoutedProvider 聚合各角色 provider；
+   - run-kernelbench-batch 每开一题之前探一次，连续两次不可达就打印原因并
+     返回 3，让分片非零退出而不是继续产出假结果。
+---
+ pyramidkernel/cli.py                       | 24 +++++++++++++++++++++
+ pyramidkernel/providers/base_provider.py   | 10 +++++++++
+ pyramidkernel/providers/errors.py          |  6 ++++++
+ pyramidkernel/providers/http_utils.py      | 25 ++++++++++++++++++++++
+ pyramidkernel/providers/openai_provider.py | 10 ++++++++-
+ pyramidkernel/providers/role_router.py     | 12 +++++++++++
+ 6 files changed, 86 insertions(+), 1 deletion(-)
+
+diff --git a/pyramidkernel/cli.py b/pyramidkernel/cli.py
+index 1ad29e0..5c68c32 100644
+--- a/pyramidkernel/cli.py
++++ b/pyramidkernel/cli.py
+@@ -784,8 +784,32 @@ def _run_kernelbench_batch(args: argparse.Namespace) -> int:
+     deliberation_runner = _build_deliberation_runner(args, run_name, batch_config)
+     provider = _build_provider(args, run_name)
+     rows: list[dict[str, Any]] = []
++    # 2026-10-20: 死端点不会让 batch 报错。每题会把 provider 瞬时错误预算烧光，
++    # 然后落在未改动的 root 节点上，写出一份 attempt_count=0 但格式合法的
++    # run.json —— 整轮 66 题可能就此白跑（实际发生过）。所以每开一题之前先探活，
++    # 探不到就直接中止分片并返回非零，让外层的看门狗能看到。
++    preflight_failures = 0
+     try:
+         for item in manifest["tasks"]:
++            try:
++                healthy, detail = provider.health_check()
++            except Exception as exc:  # noqa: BLE001 - 探测本身不能把批处理打断
++                healthy, detail = False, f"health_check raised {type(exc).__name__}: {exc}"
++            if not healthy:
++                preflight_failures += 1
++                print(
++                    f"[preflight] provider unreachable before {item.get('alias', item)}: {detail}",
++                    file=sys.stderr,
++                    flush=True,
++                )
++                if preflight_failures >= 2:
++                    print(
++                        "[preflight] aborting batch: endpoint is down, remaining tasks would "
++                        "only burn their transient-error budget and produce root-only results.",
++                        file=sys.stderr,
++                        flush=True,
++                    )
++                    return 3
+             level = int(item["level"])
+             problem_id = int(item["problem_id"])
+             alias = str(item.get("alias") or f"L{level}_P{problem_id}")
+diff --git a/pyramidkernel/providers/base_provider.py b/pyramidkernel/providers/base_provider.py
+index 75ec1d2..e96e46e 100644
+--- a/pyramidkernel/providers/base_provider.py
++++ b/pyramidkernel/providers/base_provider.py
+@@ -13,6 +13,16 @@ class AgentProvider(ABC):
+ 
+     name = "provider"
+ 
++    def health_check(self) -> tuple[bool, str]:
++        """廉价可达性探测，供批量跑在**开题之前**判活。
++
++        死端点（隧道断了、余额耗尽、鉴权失效）不会让 batch 失败：每题会把
++        provider 瞬时错误预算烧光，然后落在未改动的 root 节点上，写出一份
++        attempt_count=0 但格式完全合法的 run.json —— 整轮可能就此白跑。
++        返回 (False, detail) 让批处理直接中止分片，而不是继续产出假结果。
++        """
++        return True, ""
++
+     @abstractmethod
+     def propose_plan(self, task: TaskSpec, node: SearchNode, context: AgentContext) -> PlanProposal:
+         raise NotImplementedError
+diff --git a/pyramidkernel/providers/errors.py b/pyramidkernel/providers/errors.py
+index d049d63..17a5ac5 100644
+--- a/pyramidkernel/providers/errors.py
++++ b/pyramidkernel/providers/errors.py
+@@ -55,6 +55,12 @@ TRANSIENT_ERROR_TOKENS = (
+     "ssl",
+     "response is not valid json",
+     "invalid json",
++    # 2026-10-20: provider 偶发返回 200 + 空 body，客户端抛 json 解析错。
++    # 之前这类错误被当成不可重试，整道题直接报废（一轮 66 题丢了 5 道）。
++    "unable to parse json object",
++    "expecting value",
++    "jsondecodeerror",
++    "json decode error",
+     "stream returned no json events",
+     "response content is empty",
+     "empty reply from server",
+diff --git a/pyramidkernel/providers/http_utils.py b/pyramidkernel/providers/http_utils.py
+index 8c6e353..c37a3f2 100644
+--- a/pyramidkernel/providers/http_utils.py
++++ b/pyramidkernel/providers/http_utils.py
+@@ -123,3 +123,28 @@ def _normalize_stream_line(raw_line: Any) -> str:
+ 
+ def _connect_timeout_seconds(timeout_seconds: int) -> float:
+     return min(20.0, max(1.0, float(timeout_seconds)))
++
++
++def probe_models_endpoint(
++    *,
++    base_url: str,
++    api_key: str,
++    timeout_seconds: int = 20,
++) -> tuple[bool, str]:
++    """GET {base_url}/models 作为端点可达性探测。
++
++    刻意做得比一次真实补全便宜得多：隧道断了会立刻 connection refused，
++    鉴权/余额问题会立刻 401/402/429，而正常情况只是一次几十字节的响应。
++    """
++    url = base_url.rstrip("/") + "/models"
++    headers = {
++        "Authorization": f"Bearer {api_key}",
++        "User-Agent": "pyramidkernel-healthcheck/1.0",
++    }
++    try:
++        response = requests.get(url, headers=headers, timeout=(5, max(5, timeout_seconds)))
++    except Exception as exc:  # noqa: BLE001 - 探测不能抛，只回报
++        return False, f"{type(exc).__name__}: {str(exc)[:200]}"
++    if response.status_code == 200:
++        return True, ""
++    return False, f"HTTP {response.status_code}: {str(response.text)[:200]}"
+diff --git a/pyramidkernel/providers/openai_provider.py b/pyramidkernel/providers/openai_provider.py
+index a5d8abc..a1be9cc 100644
+--- a/pyramidkernel/providers/openai_provider.py
++++ b/pyramidkernel/providers/openai_provider.py
+@@ -20,7 +20,7 @@ from ..semantics import semantic_profile_to_prompt_dict
+ from ..utils import extract_anchor_names
+ from .base_provider import AgentProvider
+ from .errors import is_transient_provider_error
+-from .http_utils import post_json_request, stream_json_events_request
++from .http_utils import post_json_request, probe_models_endpoint, stream_json_events_request
+ 
+ 
+ @dataclass
+@@ -52,6 +52,14 @@ class OpenAICompatibleProvider(AgentProvider):
+ 
+     name = "openai-compatible"
+ 
++    def health_check(self) -> tuple[bool, str]:
++        """探一次 /models；batch 每开一题之前都会调用（见 cli 的 preflight）。"""
++        return probe_models_endpoint(
++            base_url=self.config.base_url,
++            api_key=self.config.api_key,
++            timeout_seconds=min(20, int(getattr(self.config, "timeout_seconds", 20) or 20)),
++        )
++
+     def __init__(self, config: OpenAICompatibleConfig) -> None:
+         self.config = self._normalize_config(config)
+ 
+diff --git a/pyramidkernel/providers/role_router.py b/pyramidkernel/providers/role_router.py
+index 300ddef..c9e5df5 100644
+--- a/pyramidkernel/providers/role_router.py
++++ b/pyramidkernel/providers/role_router.py
+@@ -23,6 +23,18 @@ class RoleRoutedProvider(AgentProvider):
+         self.debug_provider = debug_provider
+         self.search_provider = search_provider or code_provider
+ 
++    def health_check(self) -> tuple[bool, str]:
++        """任一角色 provider 不可达就判负，避免部分角色静默空转。"""
++        seen, failures = set(), []
++        for provider in (self.plan_provider, self.code_provider, self.debug_provider, self.search_provider):
++            if id(provider) in seen:
++                continue
++            seen.add(id(provider))
++            ok, detail = provider.health_check()
++            if not ok:
++                failures.append(f"{getattr(provider, 'name', 'provider')}: {detail}")
++        return (not failures), "; ".join(failures)
++
+     def propose_plan(self, task: TaskSpec, node: SearchNode, context: AgentContext) -> PlanProposal:
+         return self.plan_provider.propose_plan(task, node, context)
+ 

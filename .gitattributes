@@ -1,0 +1,3 @@
+# 补丁文件必须保持 LF：本机 core.autocrlf=true 会在 checkout 时把 \n 翻成 \r\n，
+# 补丁的上下文行带上 \r 后 git apply 就匹配不上了（曾实测失败）。
+*.patch -text

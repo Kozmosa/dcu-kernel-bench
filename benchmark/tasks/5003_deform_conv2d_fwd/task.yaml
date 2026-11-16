@@ -1,7 +1,7 @@
 id: "5003_deform_conv2d_fwd"
 name: deform_conv2d_fwd
 family: conv
-impl_lang: triton
+impl_lang: hip
 entry: model_class          # KernelBench 兼容形态：Model/ModelNew + get_inputs/get_init_inputs
 difficulty: hard            # catalog level 映射：basic=1 / medium=2 / hard=3
 
@@ -21,7 +21,7 @@ description: >
   benchmark/kernelbench_compat/level3/），可直接走 PyramidKernel 的原生
   model_class 路径（--kernelbench-root benchmark/kernelbench_compat --level 3
   --problem-id 5003），无需任何框架改动。starter 由框架 loader 从 Model 自动
-  生成 ModelNew scaffold（锚点：helpers / init_body / forward_stmt_N），本任务
+  生成 ModelNew scaffold（锚点：user_helpers / cuda_cpp / cuda_cu / init_body / forward_stmt_N），本任务
   包不单独提供 starter。
 
 io:
@@ -64,7 +64,7 @@ tolerance:
     case 实测，见 sources yaml 记录），float32 档容差据此放宽到
     atol=rtol=1e-3；fp16/bf16 档输出值域达 O(10)，低精度 ulp 主导，取
     atol=rtol=2e-2。在线（搜索循环内）由 KernelBenchPaperEvaluator 判定：
-    triton 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与
+    cuda 后端输入与模型统一 cast 为 fp32、allclose(atol=rtol=1e-4)，与
     上表不同——在线结论不能替代终审。
 
 # 终审静态审计沿用（在线仅靠 Model docstring 软约束）
