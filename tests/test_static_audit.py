@@ -61,3 +61,65 @@ def test_real_call_inside_docstringed_file_still_flagged(tmp_path: Path):
     r = run_audit("1002_paged_attention", [src])
     assert r.returncode == 1
     assert "torch.matmul" in r.stdout
+
+
+def test_user_kernel_name_is_not_a_library_call(tmp_path):
+    src = tmp_path / 'adamw.py'
+    src.write_text('def _fused_adamw_kernel(x):\n    return x\n'
+                   'class ModelNew:\n    def forward(self, x):\n        return _fused_adamw_kernel(x)\n')
+    assert run_audit('6001_fused_adamw', [src]).returncode == 0
+
+
+def test_dead_reference_helpers_are_not_candidates(tmp_path):
+    src = tmp_path / 'candidate.py'
+    src.write_text('import torch\n'
+                   'def reference(x):\n    return torch.softmax(x, -1)\n'
+                   'class ModelNew:\n    def unused(self, x):\n        return reference(x)\n'
+                   '    def forward(self, x):\n        return x\n')
+    assert run_audit('1002_paged_attention', [src]).returncode == 0
+
+
+def test_reachable_helpers_and_import_aliases_are_rejected(tmp_path):
+    src = tmp_path / 'candidate.py'
+    src.write_text('from torch import matmul as mm\n'
+                   'def helper(x):\n    return mm(x, x)\n'
+                   'class ModelNew:\n    def work(self, x):\n        return helper(x)\n'
+                   '    def forward(self, x):\n        return self.work(x)\n')
+    r = run_audit('1002_paged_attention', [src])
+    assert r.returncode == 1 and 'torch.matmul' in r.stdout
+
+
+def test_method_forbidden_pattern_and_alias(tmp_path):
+    src = tmp_path / 'candidate.py'
+    src.write_text('import torch as th\nclass ModelNew:\n'
+                   '    def forward(self, x):\n        return th.cat([x, x])\n')
+    assert run_audit('2004_fused_qk_concat', [src]).returncode == 1
+
+
+def test_embedded_hip_library_call_is_rejected(tmp_path):
+    src = tmp_path / 'candidate.py'
+    src.write_text('SRC = """#include <hipcub/hipcub.hpp>\n'
+                   'void f() { hipcub::DeviceScan::InclusiveSum(); }\n"""\n'
+                   'class ModelNew:\n    def forward(self, x):\n        return x\n')
+    assert run_audit('8001_cumsum', [src]).returncode == 1
+
+
+def test_native_library_prefix_still_rejected(tmp_path):
+    src = tmp_path / 'candidate.cpp'
+    src.write_text('void f() { rocblas_sgemm(handle); }\n')
+    assert run_audit('1002_paged_attention', [src]).returncode == 1
+
+
+def test_invalid_python_fails_closed(tmp_path):
+    src = tmp_path / 'candidate.py'
+    src.write_text('def broken(\n')
+    r = run_audit('1002_paged_attention', [src])
+    assert r.returncode == 1 and 'syntax_error' in r.stdout
+
+
+def test_dynamic_dispatch_conservatively_checks_helpers(tmp_path):
+    src = tmp_path / 'candidate.py'
+    src.write_text('import torch\nclass ModelNew:\n'
+                   '    def bad(self, x):\n        return torch.matmul(x, x)\n'
+                   '    def forward(self, x):\n        return getattr(self, "bad")(x)\n')
+    assert run_audit('1002_paged_attention', [src]).returncode == 1

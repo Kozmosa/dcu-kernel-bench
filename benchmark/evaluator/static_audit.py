@@ -80,21 +80,119 @@ def _strip_python_docstrings(text: str) -> str:
     return "".join(lines)
 
 
+def _symbol_matches(name: str, pattern: str) -> bool:
+    """Match identifiers/namespaces, never substrings of user kernel names."""
+    name, pattern = name.lower(), pattern.lower()
+    if pattern.startswith("."):
+        return name.rsplit(".", 1)[-1] == pattern.lstrip(".").rstrip("(")
+    return name == pattern or name.startswith(pattern + ".") or (
+        "." not in pattern and name.rsplit(".", 1)[-1] == pattern
+    )
+
+
+def _python_hits(path: Path, text: str, patterns: list[str]) -> list[dict]:
+    import ast
+
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        return [{"file": str(path), "line": exc.lineno, "symbol": "syntax_error"}]
+
+    aliases = {}
+    definitions = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for item in node.names:
+                aliases[item.asname or item.name.split(".")[0]] = item.name if item.asname else item.name.split(".")[0]
+        elif isinstance(node, ast.ImportFrom):
+            for item in node.names:
+                aliases[item.asname or item.name] = (node.module or "") + "." + item.name
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            definitions[node.name] = node
+
+    def dotted(node):
+        if isinstance(node, ast.Name):
+            return aliases.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            base = dotted(node.value)
+            return base + "." + node.attr if base else node.attr
+        if isinstance(node, ast.Subscript):  # Triton kernel[grid](...)
+            return dotted(node.value)
+        return ""
+
+    # Module-level code is executable. Function bodies are inspected only when
+    # referenced from it or from ModelNew.__init__/forward (including aliases,
+    # inherited classes and helpers passed as values, not just direct calls).
+    pending = [n for n in tree.body if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+    if "ModelNew" in definitions:
+        pending.append(definitions["ModelNew"])
+    else:
+        # Callable submissions without a ModelNew keep conservative whole-file
+        # checking: their entry point is task-specific.
+        pending.extend(definitions.values())
+    visited = set()
+    hits = set()
+    while pending:
+        root = pending.pop()
+        if id(root) in visited:
+            continue
+        visited.add(id(root))
+        if isinstance(root, ast.ClassDef):
+            methods = {n.name: n for n in root.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            for name, method in methods.items():
+                definitions[root.name + "." + name] = method
+                # self/cls method references are resolved conservatively across
+                # classes, so inherited helpers cannot silently escape the scan.
+                definitions.setdefault("self." + name, method)
+                definitions.setdefault("cls." + name, method)
+            pending.extend(n for n in root.body if n not in methods.values())
+            pending.extend(methods[n] for n in ("__init__", "forward", "__call__") if n in methods)
+            pending.extend(root.bases + root.decorator_list)
+            continue
+        for node in ast.walk(root):
+            if isinstance(node, (ast.Name, ast.Attribute, ast.Subscript)):
+                name = dotted(node)
+                raw = ast.unparse(node) if isinstance(node, (ast.Name, ast.Attribute)) else ""
+                if raw in definitions:
+                    pending.append(definitions[raw])
+                if name in definitions:
+                    pending.append(definitions[name])
+                for pattern in patterns:
+                    if _symbol_matches(name, pattern):
+                        hits.add((node.lineno, pattern))
+            # Embedded HIP/C++ source strings still need a native-symbol audit.
+            # Docstrings and ordinary messages are not executable source.
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if re.search(r"#include|__global__|PYBIND11_MODULE|\b(?:hipcub|rocprim)::", node.value):
+                    for hit in _native_hits(path, node.value, patterns):
+                        hits.add((node.lineno + hit["line"] - 1, hit["symbol"]))
+            if isinstance(node, ast.Call) and dotted(node.func) in {"getattr", "eval", "exec"}:
+                # Dynamic dispatch cannot be proved dead; inspect all definitions
+                # instead of exempting potentially reachable forbidden code.
+                pending.extend(definitions.values())
+    return [{"file": str(path), "line": line, "symbol": symbol} for line, symbol in sorted(hits)]
+
+
+def _native_hits(path: Path, text: str, patterns: list[str]) -> list[dict]:
+    # Keep line numbers when deleting multiline comments.
+    text = re.sub(r"/\*.*?\*/", lambda m: "\n" * m.group().count("\n"), text, flags=re.S)
+    text = re.sub(r"//[^\n]*", "", text)
+    hits = []
+    for pattern in patterns:
+        # Library APIs often use a prefix (rocblas_sgemm, hipblasGemmEx).
+        suffix = r"[A-Za-z0-9_]*" if pattern.lower() in GLOBAL_FORBIDDEN else r"(?![A-Za-z0-9_])"
+        regex = r"(?<![A-Za-z0-9_])" + re.escape(pattern) + suffix
+        for match in re.finditer(regex, text, flags=re.I):
+            hits.append({"file": str(path), "line": text.count("\n", 0, match.start()) + 1, "symbol": pattern})
+    return hits
+
+
 def audit_file(path: Path, patterns: list[str]) -> list[dict]:
     text = path.read_text(encoding="utf-8", errors="replace")
-    # 去掉注释与 docstring，减少文档性内容提到库名造成的误报
     if path.suffix == ".py":
-        text = _strip_python_docstrings(text)
-        text = re.sub(r"#[^\n]*", "", text)
-    else:
-        text = re.sub(r"//[^\n]*", "", text)
-        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-    hits = []
-    for pat in patterns:
-        for m in re.finditer(re.escape(pat), text, flags=re.I):
-            line_no = text.count("\n", 0, m.start()) + 1
-            hits.append({"file": str(path), "line": line_no, "symbol": pat})
-    return hits
+        return _python_hits(path, text, patterns)
+    return _native_hits(path, text, patterns)
 
 
 def main() -> int:
