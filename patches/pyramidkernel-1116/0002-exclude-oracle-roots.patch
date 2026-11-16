@@ -1,0 +1,510 @@
+diff --git a/pyramidkernel/cli.py b/pyramidkernel/cli.py
+index e02ecdf..e2e1776 100644
+--- a/pyramidkernel/cli.py
++++ b/pyramidkernel/cli.py
+@@ -835,12 +835,12 @@ def _run_kernelbench_batch(args: argparse.Namespace) -> int:
+                     initial_state=initial_state,
+                 )
+                 run_path = save_run(result, task_output_dir)
+-                best = result.nodes[result.best_node_id]
++                best = result.report_best()
+                 validation = {}
+                 stats = candidate_attempt_stats(result)
+                 row.update(
+                     {
+-                        "status": "ok",
++                        "status": "ok" if result.best_node_id is not None else "no_valid_candidate",
+                         "workflow": result.workflow,
+                         "run_profile": result.run_profile,
+                         "search_profile": result.search_profile,
+@@ -1144,7 +1144,7 @@ def _report_paper(args: argparse.Namespace) -> int:
+ 
+ def _save_and_print(result, output_dir: str) -> int:
+     run_path = save_run(result, output_dir)
+-    best = result.nodes[result.best_node_id]
++    best = result.report_best()
+     print(f"saved={run_path}")
+     print(f"workflow={result.workflow} task={result.task_name} best_node={result.best_node_id} status={best.status}")
+     print(
+@@ -1157,12 +1157,12 @@ def _save_and_print(result, output_dir: str) -> int:
+     print(
+         f"best_runtime={shorten_runtime(best.runtime)} reference_runtime={shorten_runtime(best.reference_runtime)} speedup={format_speedup(best.speedup)}"
+     )
+-    return 0
++    return 0 if result.best_node_id is not None else 1
+ 
+ 
+ def _show_run(args: argparse.Namespace) -> int:
+     result = load_run(args.path)
+-    best = result.nodes[result.best_node_id]
++    best = result.report_best()
+     print(f"task={result.task_name} workflow={result.workflow} best_node={result.best_node_id} status={best.status}")
+     print(
+         f"run_profile={result.run_profile} search={result.search_profile} evaluator={result.evaluator_profile} measurement={result.measurement_profile}"
+@@ -1183,7 +1183,7 @@ def _show_run(args: argparse.Namespace) -> int:
+ def _summarize_runs(args: argparse.Namespace) -> int:
+     for raw_path in args.paths:
+         result = load_run(raw_path)
+-        best = result.nodes[result.best_node_id]
++        best = result.report_best()
+         print(
+             f"{raw_path}: task={result.task_name} workflow={result.workflow} "
+             f"run_profile={result.run_profile} best={result.best_node_id} "
+diff --git a/pyramidkernel/core/context.py b/pyramidkernel/core/context.py
+index 2994231..a24a934 100644
+--- a/pyramidkernel/core/context.py
++++ b/pyramidkernel/core/context.py
+@@ -119,7 +119,7 @@ def _best_node_id(tree: TreeMemory, node_id: str) -> str | None:
+     candidates = [leader_id for leader_id in tree.leaderboard if leader_id != node_id]
+     if candidates:
+         return candidates[0]
+-    return tree.root_id if tree.root_id != node_id else None
++    return None
+ 
+ 
+ def _extract_region_excerpt(source_code: str, region: str, max_chars: int = 1200) -> str | None:
+diff --git a/pyramidkernel/core/tree.py b/pyramidkernel/core/tree.py
+index 2132264..4a0dbac 100644
+--- a/pyramidkernel/core/tree.py
++++ b/pyramidkernel/core/tree.py
+@@ -94,7 +94,8 @@ class TreeMemory:
+ 
+     def update_leaderboard(self, node_id: str, config: PyramidKernelConfig) -> None:
+         node = self.nodes[node_id]
+-        if node.compile_ok and node.correct:
++        if (node.is_submission_candidate and node.code != self.nodes[self.root_id].code
++                and node.compile_ok and node.correct and math.isfinite(node.score)):
+             if node_id not in self.leaderboard:
+                 self.leaderboard.append(node_id)
+             self.leaderboard.sort(
+diff --git a/pyramidkernel/core/workflow.py b/pyramidkernel/core/workflow.py
+index 6202621..7f3f955 100644
+--- a/pyramidkernel/core/workflow.py
++++ b/pyramidkernel/core/workflow.py
+@@ -62,6 +62,15 @@ def _evaluation_to_root_node(code: str, evaluation: EvaluationResult) -> SearchN
+     )
+ 
+ 
++def _evaluate_generated(task, candidate_code, config, evaluator):
++    if candidate_code.strip() == task.source_code.strip():
++        return EvaluationResult(compile_ok=False, correct=False, runtime=None,
++                                score=float("inf"), failure_stage="compile",
++                                failure_type="oracle_not_candidate",
++                                logs=["Unchanged oracle scaffolds are not generated candidates."])
++    return evaluator.evaluate(task, candidate_code, config)
++
++
+ def _has_valid_anchor_edits(code: str, anchor_edits: list[AnchorEdit]) -> bool:
+     available_anchors = set(extract_anchor_names(code))
+     if not anchor_edits or not available_anchors:
+@@ -439,7 +448,7 @@ def _evaluate_plan_code(
+             _evaluate_marker_drift(task, config, evaluator, selected_node.code, candidate_code),
+             candidate_logs,
+         )
+-    return candidate_code, _attach_logs(evaluator.evaluate(task, candidate_code, config), candidate_logs)
++    return candidate_code, _attach_logs(_evaluate_generated(task, candidate_code, config, evaluator), candidate_logs)
+ 
+ 
+ def _evaluate_debug(
+@@ -470,7 +479,7 @@ def _evaluate_debug(
+                 candidate_logs,
+             ),
+         )
+-    return proposal, candidate_code, _attach_logs(evaluator.evaluate(task, candidate_code, config), candidate_logs)
++    return proposal, candidate_code, _attach_logs(_evaluate_generated(task, candidate_code, config, evaluator), candidate_logs)
+ 
+ 
+ def _node_to_evaluation(node: SearchNode) -> EvaluationResult:
+@@ -665,12 +674,13 @@ def _feedback_state_for_nodes(
+     )
+ 
+ 
+-def _best_node_id_from_nodes(nodes: dict[str, SearchNode], fallback_root_id: str = "root") -> str:
+-    correct_nodes = [node for node in nodes.values() if node.compile_ok and node.correct]
+-    if not correct_nodes:
+-        return fallback_root_id
+-    correct_nodes.sort(key=lambda node: (node.score, node.depth, node.node_id))
+-    return correct_nodes[0].node_id
++def _best_node_id_from_nodes(nodes: dict[str, SearchNode], fallback_root_id: str = "root") -> str | None:
++    import math
++    oracle = nodes.get(fallback_root_id)
++    candidates = [node for node in nodes.values()
++                  if node.is_submission_candidate and node.compile_ok and node.correct
++                  and math.isfinite(node.score) and (oracle is None or node.code != oracle.code)]
++    return min(candidates, key=lambda n: (n.score, n.depth, n.node_id)).node_id if candidates else None
+ 
+ 
+ def _combine_count_maps(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
+@@ -763,8 +773,9 @@ def _build_run_result(
+     workflow: str,
+ ) -> RunResult:
+     best_node_id = _best_node_id_from_nodes(nodes)
+-    best_node = nodes[best_node_id]
++    best_node = nodes.get(best_node_id)
+     stats = dict(stats)
++    stats["search_status"] = "ok" if best_node_id is not None else "no_valid_candidate"
+     stats["pruned_count"] = len(pruned_nodes)
+     feedback_state = _feedback_state_for_nodes(config, nodes, leaderboard, pruned_nodes)
+     return RunResult(
+@@ -797,9 +808,9 @@ def _build_run_result(
+         strategy_portfolio=task.strategy_portfolio,
+         phase_transition=task.phase_transition,
+         feedback_state=feedback_state,
+-        reference_runtimes=dict(best_node.reference_runtimes),
+-        speedups=dict(best_node.speedups),
+-        primary_reference=best_node.primary_reference,
++        reference_runtimes=dict(best_node.reference_runtimes) if best_node else {},
++        speedups=dict(best_node.speedups) if best_node else {},
++        primary_reference=best_node.primary_reference if best_node else None,
+     )
+ 
+ 
+@@ -847,7 +858,7 @@ def _finalize_two_phase_run(
+     combined_leaderboard = [
+         node_id
+         for node_id in sorted(
+-            [node.node_id for node in combined_nodes.values() if node.compile_ok and node.correct],
++            [node.node_id for node in combined_nodes.values() if node.is_submission_candidate and node.compile_ok and node.correct and node.code != combined_nodes["root"].code],
+             key=lambda current_id: (
+                 combined_nodes[current_id].score,
+                 combined_nodes[current_id].depth,
+diff --git a/pyramidkernel/direct_baseline/reporting.py b/pyramidkernel/direct_baseline/reporting.py
+index 16a9302..6ae81f9 100644
+--- a/pyramidkernel/direct_baseline/reporting.py
++++ b/pyramidkernel/direct_baseline/reporting.py
+@@ -18,7 +18,7 @@ def direct_result_row(
+     run_path: str | Path | None,
+     error: str | None = None,
+ ) -> dict[str, Any]:
+-    best = result.nodes[result.best_node_id]
++    best = result.report_best()
+     stats = candidate_attempt_stats(result)
+     return {
+         "alias": alias,
+@@ -30,7 +30,7 @@ def direct_result_row(
+         "search_profile": result.search_profile,
+         "evaluator_profile": result.evaluator_profile,
+         "measurement_profile": result.measurement_profile,
+-        "status": "ok" if error is None else "error",
++        "status": "error" if error is not None else ("ok" if result.best_node_id else "no_valid_candidate"),
+         "task_name": result.task_name,
+         "best_node_id": result.best_node_id,
+         "best_status": best.status,
+diff --git a/pyramidkernel/direct_baseline/runner.py b/pyramidkernel/direct_baseline/runner.py
+index 97d4c89..56e6a20 100644
+--- a/pyramidkernel/direct_baseline/runner.py
++++ b/pyramidkernel/direct_baseline/runner.py
+@@ -138,7 +138,7 @@ def _build_direct_run_result(
+     return RunResult(
+         task_name=task.name,
+         config=config,
+-        best_node_id=candidate_node.node_id,
++        best_node_id=candidate_node.node_id if leaderboard else None,
+         leaderboard=leaderboard,
+         nodes=nodes,
+         selection_history=["root"],
+diff --git a/pyramidkernel/evaluation/validation.py b/pyramidkernel/evaluation/validation.py
+index 13cdde5..5ccc393 100644
+--- a/pyramidkernel/evaluation/validation.py
++++ b/pyramidkernel/evaluation/validation.py
+@@ -24,7 +24,9 @@ def verify_kernelbench_run(
+     resolved_root = str(kernelbench_root or result.source_root or "")
+     if not resolved_root:
+         raise ValueError("KernelBench verification requires kernelbench_root or a recorded source_root.")
+-    best = result.nodes[result.best_node_id]
++    best = result.report_best()
++    if best.node_id == "no_valid_candidate":
++        raise ValueError("No valid generated candidate to verify; oracle roots are not submissions.")
+     best_code_path = run_file.parent / "best_code.py"
+     if not best_code_path.exists():
+         raise FileNotFoundError(f"Missing best_code.py next to run.json: {best_code_path}")
+diff --git a/pyramidkernel/feedback/collector.py b/pyramidkernel/feedback/collector.py
+index 6718749..d9b224c 100644
+--- a/pyramidkernel/feedback/collector.py
++++ b/pyramidkernel/feedback/collector.py
+@@ -28,7 +28,7 @@ def _lineage(tree: TreeMemory, node_id: str | None) -> list[str]:
+ 
+ 
+ def _attempt_from_node(tree: TreeMemory, node: SearchNode) -> AttemptRecord | None:
+-    if node.node_id == tree.root_id:
++    if not node.is_submission_candidate:
+         return None
+     parent = tree.get_node(node.parent_id) if node.parent_id is not None else None
+     return AttemptRecord(
+@@ -56,11 +56,11 @@ def collect_feedback_state(
+     compile_success = sum(1 for item in attempts if item.compile_ok)
+     correct_success = sum(1 for item in attempts if item.correct)
+     best_node = max(
+-        (node for node in tree.nodes.values() if node.correct and node.speedup is not None),
++        (node for node in tree.nodes.values() if node.is_submission_candidate and node.code != tree.nodes[tree.root_id].code and node.correct and node.speedup is not None),
+         key=lambda node: node.speedup or float("-inf"),
+-        default=tree.get_node(tree.root_id),
++        default=None,
+     )
+-    best_speedup = best_node.speedup
++    best_speedup = (best_node.speedup if best_node is not None else None)
+     deltas = [
+         (item.speedup or 0.0) - (item.parent_speedup or 0.0)
+         for item in attempts
+@@ -69,7 +69,7 @@ def collect_feedback_state(
+     positive = [delta for delta in deltas if delta > 0]
+     negative = [delta for delta in deltas if delta <= 0]
+     recent_lineage_attempts = [
+-        item for item in attempts if item.correct and item.parent_id in _lineage(tree, best_node.node_id)
++        item for item in attempts if item.correct and item.parent_id in _lineage(tree, (best_node.node_id if best_node is not None else None))
+     ][-plateau_window:]
+     recent_positive_mutations = []
+     recent_negative_mutations = []
+@@ -108,11 +108,11 @@ def collect_feedback_state(
+         else:
+             last_outcome = "regressed_or_flat"
+     champion = ChampionState(
+-        node_id=best_node.node_id,
+-        speedup=best_node.speedup,
+-        strategy_name=best_node.plan_strategy_name,
+-        mutation_family=best_node.mutation_family,
+-        lineage=_lineage(tree, best_node.node_id),
++        node_id=(best_node.node_id if best_node is not None else None),
++        speedup=(best_node.speedup if best_node is not None else None),
++        strategy_name=(best_node.plan_strategy_name if best_node is not None else None),
++        mutation_family=(best_node.mutation_family if best_node is not None else None),
++        lineage=_lineage(tree, (best_node.node_id if best_node is not None else None)),
+         recent_positive_mutations=recent_positive_mutations[-4:],
+         recent_negative_mutations=recent_negative_mutations[-4:],
+         plateau_detected=plateau_detected,
+@@ -124,9 +124,9 @@ def collect_feedback_state(
+         compile_rate=(compile_success / total_attempts) if total_attempts else 0.0,
+         correct_rate=(correct_success / total_attempts) if total_attempts else 0.0,
+         best_speedup=best_speedup,
+-        best_strategy_name=best_node.plan_strategy_name,
++        best_strategy_name=(best_node.plan_strategy_name if best_node is not None else None),
+         phase=phase,
+-        current_champion_id=best_node.node_id,
++        current_champion_id=(best_node.node_id if best_node is not None else None),
+         current_champion_speedup=best_speedup,
+         plateau_detected=plateau_detected,
+         recent_improvement_deltas=positive[-5:],
+diff --git a/pyramidkernel/io.py b/pyramidkernel/io.py
+index 8618d87..23ffd65 100644
+--- a/pyramidkernel/io.py
++++ b/pyramidkernel/io.py
+@@ -62,6 +62,10 @@ def save_run(run: RunResult, output_dir: str | Path) -> Path:
+     """Persist one run to `run.json` and write the current best code beside it."""
+     target_dir = Path(output_dir)
+     target_dir.mkdir(parents=True, exist_ok=True)
++    if run.report_best().node_id == "no_valid_candidate":
++        run.best_node_id = None
++        run.stats["search_status"] = "no_valid_candidate"
++        run.speedups = {}
+     payload = {
+         "task_name": run.task_name,
+         "config": asdict(run.config),
+@@ -150,7 +154,13 @@ def save_run(run: RunResult, output_dir: str | Path) -> Path:
+     }
+     run_path = target_dir / "run.json"
+     run_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+-    (target_dir / "best_code.py").write_text(run.nodes[run.best_node_id].code, encoding="utf-8")
++    best = run.report_best()
++    artifact = target_dir / "best_code.py"
++    if best.node_id != "no_valid_candidate":
++        artifact.write_text(best.code, encoding="utf-8")
++    else:
++        # Reusing an output directory must not retain a previous successful file.
++        artifact.unlink(missing_ok=True)
+     return run_path
+ 
+ 
+diff --git a/pyramidkernel/models.py b/pyramidkernel/models.py
+index 06f5dad..a3f0160 100644
+--- a/pyramidkernel/models.py
++++ b/pyramidkernel/models.py
+@@ -155,6 +155,12 @@ class SearchNode:
+     mutation_family: str | None = None
+     target_metric: str | None = None
+ 
++    @property
++    def is_submission_candidate(self) -> bool:
++        return (self.parent_id is not None
++                and self.node_id not in {"root", "phase2_root"}
++                and self.origin not in {"root", "phase2_root", "official_reference_not_evaluated"})
++
+     @property
+     def is_failure(self) -> bool:
+         return self.node_status in {"compile_fail", "runtime_fail", "correctness_fail"}
+@@ -279,7 +285,7 @@ class PyramidKernelConfig:
+ class RunResult:
+     task_name: str
+     config: PyramidKernelConfig
+-    best_node_id: str
++    best_node_id: str | None
+     leaderboard: list[str]
+     nodes: dict[str, SearchNode]
+     selection_history: list[str]
+@@ -309,3 +315,15 @@ class RunResult:
+     strategy_portfolio: StrategyPortfolio | None = None
+     phase_transition: PhaseTransitionSummary | None = None
+     feedback_state: FeedbackState | None = None
++
++    def report_best(self) -> SearchNode:
++        """A display-only failure snapshot; never a search/export candidate."""
++        best = self.nodes.get(self.best_node_id)
++        import math
++        oracle = self.nodes.get("root")
++        if (best is not None and best.is_submission_candidate and best.compile_ok and best.correct
++                and math.isfinite(best.score) and (oracle is None or best.code != oracle.code)):
++            return best
++        return SearchNode(node_id="no_valid_candidate", parent_id=None, depth=0,
++                          code="", origin="report_only", node_status="no_valid_candidate",
++                          failure_type="no_valid_candidate", latest_failure_stage="search")
+diff --git a/tests/test_kernelbench_flow.py b/tests/test_kernelbench_flow.py
+index c8196da..cd274cb 100644
+--- a/tests/test_kernelbench_flow.py
++++ b/tests/test_kernelbench_flow.py
+@@ -59,7 +59,11 @@ class KernelbenchFlowTests(unittest.TestCase):
+             if tmpdir.exists():
+                 shutil.rmtree(tmpdir)
+         self.assertEqual(reloaded.task_name, task.name)
+-        self.assertIn(reloaded.best_node_id, reloaded.nodes)
++        if reloaded.best_node_id is None:
++            self.assertEqual(reloaded.stats["search_status"], "no_valid_candidate")
++        else:
++            self.assertIn(reloaded.best_node_id, reloaded.nodes)
++            self.assertNotIn(reloaded.best_node_id, {"root", "phase2_root"})
+         self.assertIsNotNone(result.feedback_state)
+         self.assertIsNotNone(reloaded.feedback_state)
+         self.assertEqual(reloaded.feedback_state.total_attempts, result.feedback_state.total_attempts)
+@@ -99,8 +103,11 @@ class ContextRefinementTests(unittest.TestCase):
+         )
+         result = run_pyramidkernel(task, config, MockProvider(), DemoEvaluator())
+         self.assertIsNotNone(result.feedback_state)
+-        self.assertIsNotNone(result.feedback_state.current_champion_id)
+-        self.assertIn(result.feedback_state.current_champion_id, result.nodes)
++        # This callable demo is rejected by the ModelNew guard. A valid oracle
++        # must not manufacture a successful candidate or a champion.
++        self.assertIsNone(result.best_node_id)
++        self.assertIsNone(result.feedback_state.current_champion_id)
++        self.assertFalse(result.leaderboard)
+         self.assertIn("attempt_mode_counts", result.stats)
+ 
+     def test_build_context_exposes_best_and_champion_fields(self):
+@@ -121,17 +128,17 @@ class ContextRefinementTests(unittest.TestCase):
+         tree.nodes = result.nodes
+         tree.leaderboard = result.leaderboard
+         plan_context = build_plan_context(
+-            tree, task, result.best_node_id, config, result.feedback_state, "mutate_champion"
++            tree, task, result.best_node_id or tree.root_id, config, result.feedback_state, "explore"
+         )
+         code_context = build_code_context(
+-            tree, task, result.best_node_id, config, result.feedback_state, "mutate_champion"
++            tree, task, result.best_node_id or tree.root_id, config, result.feedback_state, "explore"
+         )
+-        self.assertIsNotNone(plan_context.champion_summary)
+-        self.assertIsNotNone(code_context.champion_summary)
++        self.assertIsNone(plan_context.champion_summary)
++        self.assertIsNone(code_context.champion_summary)
+         self.assertTrue(hasattr(plan_context, "best_kernel_summary"))
+         self.assertTrue(hasattr(code_context, "best_kernel_summary"))
+-        self.assertEqual(plan_context.attempt_mode, "mutate_champion")
+-        self.assertEqual(code_context.attempt_mode, "mutate_champion")
++        self.assertEqual(plan_context.attempt_mode, "explore")
++        self.assertEqual(code_context.attempt_mode, "explore")
+ 
+ 
+ class KernelbenchLoaderTests(unittest.TestCase):
+diff --git a/tests/test_oracle_boundary.py b/tests/test_oracle_boundary.py
+new file mode 100644
+index 0000000..e112514
+--- /dev/null
++++ b/tests/test_oracle_boundary.py
+@@ -0,0 +1,91 @@
++"""Oracle roots are baselines, never submitted search results."""
++import tempfile
++import unittest
++from pathlib import Path
++
++from pyramidkernel.core.tree import TreeMemory
++from pyramidkernel.core.workflow import _evaluate_generated, _evaluation_to_root_node, _build_run_result
++from pyramidkernel.models import EvaluationResult, PlanProposal, PyramidKernelConfig
++from pyramidkernel.io import save_run, load_run
++from pyramidkernel.demo import build_demo_tasks
++
++
++class OracleBoundaryTests(unittest.TestCase):
++    def setup_tree(self):
++        self.config = PyramidKernelConfig(max_attempts=2)
++        self.task = build_demo_tasks()[0]
++        root = _evaluation_to_root_node(self.task.source_code, EvaluationResult(True, True, 1.0, 1.0))
++        tree = TreeMemory(root, self.config)
++        tree.update_leaderboard('root', self.config)
++        return tree
++
++    def add(self, tree, correct=True, score=12.6, code='generated'):
++        proposal = PlanProposal('test', 'test', [], 'test')
++        ev = EvaluationResult(True, correct, score if correct else None, score,
++                              failure_stage='none' if correct else 'correctness')
++        node = tree.add_child('root', code, proposal, ev, 'plan_code')
++        tree.update_leaderboard(node.node_id, self.config)
++        return node
++
++    def finish(self, tree):
++        return _build_run_result(self.task, self.config, tree.clone_nodes(), tree.leaderboard, [], [], [], [], {}, {}, {}, "pyramidkernel")
++
++    def test_slower_generated_solution_beats_oracle_for_submission(self):
++        tree = self.setup_tree()
++        child = self.add(tree)
++        self.assertEqual(tree.leaderboard, [child.node_id])
++        self.assertEqual(self.finish(tree).best_node_id, child.node_id)
++
++    def test_no_valid_candidate_is_explicit_and_never_exports_root(self):
++        tree = self.setup_tree()
++        self.add(tree, correct=False, score=float('inf'))
++        result = self.finish(tree)
++        self.assertIsNone(result.best_node_id)
++        self.assertEqual(result.stats['search_status'], 'no_valid_candidate')
++        with tempfile.TemporaryDirectory() as tmp:
++            stale = Path(tmp) / 'best_code.py'
++            stale.write_text('old success')
++            run_path = save_run(result, tmp)
++            self.assertFalse(stale.exists())
++            loaded = load_run(run_path)
++            self.assertIsNone(loaded.best_node_id)
++            self.assertIn('root', loaded.nodes)
++            self.assertIn('n1', loaded.nodes)
++
++    def test_fastest_real_candidate_wins(self):
++        tree = self.setup_tree()
++        self.add(tree, score=5, code='slow')
++        fast = self.add(tree, score=2, code='fast')
++        self.assertEqual(self.finish(tree).best_node_id, fast.node_id)
++
++    def test_phase_two_root_and_unchanged_scaffold_are_excluded(self):
++        tree = self.setup_tree()
++        node = self.add(tree, score=0.1, code=tree.nodes['root'].code)
++        self.assertEqual(tree.leaderboard, [])
++        node.code = 'phase-two baseline'
++        node.origin = 'phase2_root'
++        tree.update_leaderboard(node.node_id, self.config)
++        self.assertEqual(tree.leaderboard, [])
++        self.assertIsNone(self.finish(tree).best_node_id)
++
++    def test_unchanged_root_is_failed_before_evaluation(self):
++        tree = self.setup_tree()
++        class MustNotRun:
++            def evaluate(self, *args):
++                raise AssertionError("oracle entered candidate evaluator")
++        result = _evaluate_generated(self.task, self.task.source_code, self.config, MustNotRun())
++        self.assertFalse(result.correct)
++        self.assertEqual(result.failure_type, "oracle_not_candidate")
++
++    def test_export_rejects_manually_selected_root(self):
++        tree = self.setup_tree()
++        result = self.finish(tree)
++        result.best_node_id = 'root'
++        with tempfile.TemporaryDirectory() as tmp:
++            path = save_run(result, tmp)
++            self.assertIsNone(load_run(path).best_node_id)
++            self.assertFalse((Path(tmp) / 'best_code.py').exists())
++
++
++if __name__ == '__main__':
++    unittest.main()

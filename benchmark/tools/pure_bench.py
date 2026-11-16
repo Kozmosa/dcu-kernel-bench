@@ -164,7 +164,8 @@ def run_one(item: dict, args, kernelbench_root: Path, pure_root: Path) -> dict:
     text, usage = call_llm(task, lang, args.timeout, args.temperature, extra)
     (out_dir / "response.md").write_text(text, encoding="utf-8")
     code = extract_code(text)
-    (out_dir / "best_code.py").write_text(code, encoding="utf-8")
+    (out_dir / "candidate_code.py").write_text(code, encoding="utf-8")
+    (out_dir / "best_code.py").unlink(missing_ok=True)
 
     cfg, measurement, evaluator_cfg = args._cfg
     ev = KernelBenchPaperEvaluator()
@@ -182,7 +183,10 @@ def run_one(item: dict, args, kernelbench_root: Path, pure_root: Path) -> dict:
         "debug_attempts": 0, "llm_usage": usage,
     }
     result["nodes"] = {"n1": node}
-    result["best_node_id"] = "n1" if evaluation.correct else "root"
+    result["best_node_id"] = "n1" if evaluation.compile_ok and evaluation.correct else None
+    result["stats"] = {"search_status": "ok" if result["best_node_id"] else "no_valid_candidate"}
+    if result["best_node_id"]:
+        (out_dir / "best_code.py").write_text(code, encoding="utf-8")
     result["config"] = {"max_attempts": 1, "benchmark_loops": measurement["benchmark_loops"],
                         "warmup_loops": measurement["warmup_loops"]}
     result["measurement"] = measurement

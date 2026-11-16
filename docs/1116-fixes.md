@@ -47,3 +47,11 @@ python benchmark/evaluator/audit_model_class.py --task 1002_paged_attention \
   --submission /path/to/best_code.py --public --seed 0 --trials 3 --skip-perf
 # 随后按原命令跑隐藏 case 终审，不向生成侧开放隐藏样本。
 ```
+
+## root 不作为候选交付
+
+第二个框架补丁同时处理排行榜、最终选优、两阶段合并、导出、CLI、重放显示和 shadow validation；PyramidKernel 的 feedback/champion 也排除参考根节点。root 仍保留为 oracle/展开起点，`phase2_root` 仍保留为第二阶段的种子快照，二者都不能作为提交获胜。原样返回 oracle scaffold 的“生成”在候选评测前判失败。
+
+合法候选只与生成候选比较，所以速度即使比 root 慢 12.6 倍也不会被参考答案覆盖。没有合法候选时 `best_node_id=null`、`stats.search_status=no_valid_candidate`，所有节点/日志仍保存在 `run.json`，不导出 `best_code.py`；复用输出目录时会删除旧成功文件。CLI 的单题运行返回非零，批量摘要记录失败而不冒充成功。
+
+单次生成脚本保留失败的 `candidate_code.py` 与 `run.json`，不再用 root 作为失败占位。失败候选不会写成 `best_code.py`。旧实验归档保持原样。
