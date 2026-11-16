@@ -125,6 +125,32 @@ def output_segments(ref_mod, init_kwargs: dict, numel: int, inputs=None) -> list
     return [(str(n), int(s), int(e)) for n, s, e in segs]
 
 
+def clone_inputs(values, device=None):
+    """Independent nested inputs preserve native dtype and in-place semantics."""
+    import copy
+    if isinstance(values, torch.Tensor):
+        value = values.detach().clone()
+        return value.to(device) if device is not None else value
+    if isinstance(values, list):
+        return [clone_inputs(v, device) for v in values]
+    if isinstance(values, tuple):
+        return tuple(clone_inputs(v, device) for v in values)
+    if isinstance(values, dict):
+        return {k: clone_inputs(v, device) for k, v in values.items()}
+    return copy.deepcopy(values)
+
+
+def compare_outputs(actual, expected, tol, case_dtype, **kwargs):
+    """One output contract for public trials, hidden cases and baselines."""
+    if not isinstance(actual, torch.Tensor) or not isinstance(expected, torch.Tensor):
+        return False, {"mode": "output-type", "max_diff": None}
+    if actual.shape != expected.shape or actual.dtype != expected.dtype or actual.device != expected.device:
+        return False, {"mode": "shape-dtype-device", "max_diff": None,
+                       "actual": [list(actual.shape), str(actual.dtype), str(actual.device)],
+                       "expected": [list(expected.shape), str(expected.dtype), str(expected.device)]}
+    return check_close(actual, expected, tol, case_dtype, **kwargs)
+
+
 def check_close(actual, expected, tol: dict, case_dtype: str, ref_mod=None,
                 init_kwargs=None, task_dir: Path | None = None, inputs=None) -> tuple:
     """分段感知的容差判定，返回 (ok, detail)。
@@ -141,7 +167,11 @@ def check_close(actual, expected, tol: dict, case_dtype: str, ref_mod=None,
                              既容得下除法舍入边界，又拦得住真正写错的实现。
     """
     limit = resolve_tolerance_limit(tol, case_dtype, expected.dtype)
-    a, e = actual.float().reshape(-1), expected.float().reshape(-1)
+    # float32 would erase int32 differences above 2^24.
+    compare_dtype = torch.float64 if not expected.is_floating_point() else torch.float32
+    a, e = actual.to(compare_dtype).reshape(-1), expected.to(compare_dtype).reshape(-1)
+    if not bool(torch.isfinite(a).all()) or not bool(torch.isfinite(e).all()):
+        return False, {"mode": "nonfinite", "max_diff": None}
 
     seg_specs = load_tolerance_segments(task_dir) if (ref_mod is not None and task_dir) else None
     bounds = output_segments(ref_mod, init_kwargs or {}, e.numel(), inputs) if seg_specs else None
@@ -280,20 +310,16 @@ def stage_correctness(task_dir: Path, gen_task_dir: Path, submission: Path, case
         inputs = move_inputs_to_device(case_inputs(gen_mod, case), device)
         init_kwargs = case_init_kwargs(task_dir, ref_mod, case)
 
-        expected = ref_mod.Model(**init_kwargs).to(device)(*inputs)
-        actual = cand_mod.ModelNew(**init_kwargs).to(device)(*inputs)
+        # Candidates such as AdamW mutate their inputs: never hand them the
+        # buffers already used by the oracle, or let them mutate expected.
+        with torch.no_grad():
+            expected = ref_mod.Model(**init_kwargs).to(device)(*clone_inputs(inputs))
+            actual = cand_mod.ModelNew(**init_kwargs).to(device)(*clone_inputs(inputs))
         torch.cuda.synchronize()
-
-        # 形状/dtype 不合直接判失败；数值比较走分段感知的 check_close
-        # （task.yaml 未声明 tolerance_segments 时与原来的整体 allclose 等价）
-        if actual.shape == expected.shape and actual.dtype == expected.dtype:
-            ok, detail = check_close(
-                actual, expected, tol, str(case.get("dtype", "")),
-                ref_mod=ref_mod, init_kwargs=init_kwargs, task_dir=task_dir,
-                inputs=inputs,
-            )
-        else:
-            ok, detail = False, {"mode": "shape-or-dtype", "max_diff": None}
+        ok, detail = compare_outputs(
+            actual, expected, tol, str(case.get("dtype", "")),
+            ref_mod=ref_mod, init_kwargs=init_kwargs, task_dir=task_dir, inputs=inputs,
+        )
         if not ok:
             failures.append({"case": case["name"], "max_diff": detail.get("max_diff"),
                              "detail": detail})
@@ -367,6 +393,9 @@ def main() -> int:
     ap.add_argument("--task", required=True, help="任务 id，如 1002_paged_attention")
     ap.add_argument("--submission", required=True, type=Path, help="ModelNew 候选源文件")
     ap.add_argument("--skip-perf", action="store_true")
+    ap.add_argument("--public", action="store_true", help="重放在线原生 dtype 的公开输入与同一容差")
+    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--trials", type=int, default=3)
     args = ap.parse_args()
 
     task_dir = TASKS / args.task
@@ -385,10 +414,17 @@ def main() -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 1
 
-    hidden_path, gen_dir = resolve_case_file(args.task, "hidden")
-    hidden = json.loads(hidden_path.read_text(encoding="utf-8"))
-    tol = load_tolerances(task_dir)
-    correctness = stage_correctness(task_dir, gen_dir, args.submission, hidden["cases"], tol)
+    if args.public:
+        from dcukb_online import public_trials
+        with torch.no_grad():
+            correctness = public_trials(task_dir, load_module(task_dir / "reference.py", "public_ref"),
+                                        load_module(args.submission, "public_cand"),
+                                        args.seed, args.trials, torch.device("cuda"))
+    else:
+        hidden_path, gen_dir = resolve_case_file(args.task, "hidden")
+        hidden = json.loads(hidden_path.read_text(encoding="utf-8"))
+        tol = load_tolerances(task_dir)
+        correctness = stage_correctness(task_dir, gen_dir, args.submission, hidden["cases"], tol)
     report["stages"]["correctness"] = correctness
     if not correctness["passed"]:
         print(json.dumps(report, ensure_ascii=False, indent=2))

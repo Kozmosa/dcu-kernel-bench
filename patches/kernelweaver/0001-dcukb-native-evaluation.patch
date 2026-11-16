@@ -1,0 +1,72 @@
+diff --git a/src/core/loader.py b/src/core/loader.py
+index faafa57..757bc9a 100644
+--- a/src/core/loader.py
++++ b/src/core/loader.py
+@@ -68,7 +68,7 @@ class KernelBenchLoader:
+             mode=semantics_mode,
+             max_anchor_hints=semantics_max_anchor_hints,
+         )
+-        return TaskSpec(
++        task = TaskSpec(
+             name=self._task_name(level, problem_id, problem_path),
+             description=f"KernelBench Level {level} / Problem {problem_id}: {info.description}",
+             source_code=scaffold,
+@@ -89,6 +89,10 @@ class KernelBenchLoader:
+             grounded_regions=grounded_regions,
+             semantic_profile=semantic_profile,
+         )
++        from ..evaluation.dcukb_bridge import dcukb_module
++        bridge = dcukb_module()
++        return bridge.prepare_task(task) if bridge is not None else task
++
+ 
+ 
+     @staticmethod
+diff --git a/src/evaluation/dcukb_bridge.py b/src/evaluation/dcukb_bridge.py
+new file mode 100644
+index 0000000..f07334f
+--- /dev/null
++++ b/src/evaluation/dcukb_bridge.py
+@@ -0,0 +1,21 @@
++"""Optional explicit DCUKB evaluation contract; configuration errors fail closed."""
++import importlib.util
++import os
++from pathlib import Path
++import sys
++
++
++def dcukb_module():
++    root = os.environ.get('DCUKB_ROOT')
++    if not root:
++        return None
++    path = Path(root).resolve() / 'benchmark/evaluator/dcukb_online.py'
++    name = '_dcukb_online_bridge'
++    cached = sys.modules.get(name)
++    if cached is not None and Path(cached.__file__).resolve() == path:
++        return cached
++    spec = importlib.util.spec_from_file_location(name, path)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    sys.modules[name] = module
++    return module
+diff --git a/src/evaluation/evaluator_paper.py b/src/evaluation/evaluator_paper.py
+index e83e738..695e393 100644
+--- a/src/evaluation/evaluator_paper.py
++++ b/src/evaluation/evaluator_paper.py
+@@ -58,6 +58,16 @@ class KernelBenchPaperEvaluator(Evaluator):
+                 f"KernelBenchPaperEvaluator only supports {supported_kernelbench_backends_text()} backends, got backend={backend}",
+             )
+ 
++        # Explicit DCUKB runs use native dtypes, task tolerances and static
++        # compliance. Never fall back to fp32/1e-4 after a contract error.
++        from .dcukb_bridge import dcukb_module
++        try:
++            bridge = dcukb_module()
++            if bridge is not None:
++                return bridge.evaluate(task, code, config, _success_result, _failure_result)
++        except Exception as exc:
++            return _failure_result("compile", "dcukb_contract_error", str(exc))
++
+         torch = _require_torch()
+         if not torch.cuda.is_available():
+             return _failure_result("runtime", "runtime_error", "runtime_error[cuda]: CUDA is not available")

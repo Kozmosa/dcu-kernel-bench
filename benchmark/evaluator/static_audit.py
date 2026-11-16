@@ -41,7 +41,7 @@ def load_task_forbidden(task_dir: Path) -> list[str]:
             in_block = True
             continue
         if in_block:
-            m = re.match(r"^\s+-\s+(\S+)\s*$", line)
+            m = re.match(r"^\s*-\s+(\S+)\s*$", line)
             if m:
                 forbidden.append(m.group(1))
             elif line.strip() and not line.startswith(" "):
