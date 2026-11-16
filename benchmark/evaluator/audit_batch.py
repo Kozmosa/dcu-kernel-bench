@@ -5,8 +5,9 @@
 为什么需要它：在线（PyramidKernel）与离线（本评测集终审）是两条链，口径不同，
 不能混用：
 
-  在线  KernelBench 口径：输入统一 cast fp32、allclose(atol=rtol=1e-4)；
-        speedup 的分母只能是 torch_eager / torch_compile_*（框架没有"外部基线"模式）
+  在线  设置 DCUKB_ROOT 的新版契约：保留原生 dtype、用 task.yaml 容差；
+        不读取隐藏 case，性能分母为公开形状的 torch_eager。
+        历史未桥接的 KernelBench 仍是 fp32 + 固定 1e-4，不与新版混比。
   离线  本文件这一侧：隐藏 case 按 task.yaml 的分档容差判定；perf 用
         private/<id>/perf_cases.json 的形状与计时参数；speedup 的分母来自
         private/<id>/baseline.json 里采的基线（aiter 官方实现 / torch_eager）
@@ -114,7 +115,58 @@ def discover_tasks(run_root: Path, manifest: Path | None) -> list[tuple[str, str
     return pairs
 
 
+def submission_problem(submission: Path) -> dict | None:
+    """Do not audit oracle exports or silently drop missing/failed searches."""
+    run_file = submission.parent / "run.json"
+    if run_file.exists():
+        try:
+            run = json.loads(run_file.read_text(encoding="utf-8"))
+            best_id = run.get("best_node_id")
+            node = (run.get("nodes") or {}).get(best_id) if best_id else None
+        except (ValueError, AttributeError, TypeError) as exc:
+            return {"failure_kind": "invalid_run", "reason": str(exc)}
+        if best_id in {None, "root", "phase2_root"}:
+            return {"failure_kind": "no_valid_candidate", "reason": "无合法生成候选（best_node_id 为空或为 oracle root）"}
+        if not node or not node.get("compile_ok") or not node.get("correct"):
+            return {"failure_kind": "no_valid_candidate", "reason": "所选候选未通过在线编译/正确性"}
+        if node.get("origin") in {"root", "phase2_root", "official_reference_not_evaluated"}:
+            return {"failure_kind": "oracle_export", "reason": "oracle 不能作为提交"}
+    if not submission.exists():
+        return {"failure_kind": "missing_submission", "reason": "缺少 best_code.py，仍计入失败分母"}
+    return None
+
+
+def cache_signature(submission: Path, task: str | None = None) -> str:
+    """Invalidate historical results when code, selection or the judge changes."""
+    import hashlib
+    digest = hashlib.sha256()
+    paths = [submission, submission.parent / "run.json", AUDIT,
+             AUDIT.parent / "static_audit.py", AUDIT.parent / "dcukb_online.py"]
+    pending, seen = ([task] if task else []), set()
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        paths.extend([REPO_ROOT / "benchmark/tasks" / name / "task.yaml",
+                      REPO_ROOT / "benchmark/tasks" / name / "reference.py"])
+        for kind in ("hidden_cases.json", "perf_cases.json", "baseline.json"):
+            path = PRIV / name / kind
+            paths.append(path)
+            if path.exists():
+                inherited = json.loads(path.read_text(encoding="utf-8")).get("inherit")
+                if inherited:
+                    pending.append(inherited)
+    for path in paths:
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes() if path.exists() else b"<missing>")
+    return digest.hexdigest()
+
+
 def run_one(task: str, submission: Path, timeout: int, skip_perf: bool) -> dict:
+    problem = submission_problem(submission)
+    if problem:
+        return {"task": task, "ok": False, **problem}
     cmd = [sys.executable, str(AUDIT), "--task", task, "--submission", str(submission)]
     if skip_perf:
         cmd.append("--skip-perf")
@@ -154,9 +206,10 @@ def run_one(task: str, submission: Path, timeout: int, skip_perf: bool) -> dict:
     return {
         "task": task,
         "ok": True,
+        "passed": r.returncode == 0,
         "submission": str(submission),
         "static_audit_passed": (stages.get("static_audit") or {}).get("passed"),
-        "correctness_passed": corr.get("passed"),
+        "correctness_passed": bool((stages.get("static_audit") or {}).get("passed") and corr.get("passed")),
         "correctness_case_count": corr.get("case_count"),
         "correctness_failures": [f.get("case") for f in (corr.get("failures") or [])],
         "baseline_status": perf.get("baseline_status"),
@@ -206,9 +259,6 @@ def main() -> int:
     plan, skipped, no_headline = [], [], []
     for task, dirname in pairs:
         sub = run_root / dirname / "best_code.py"
-        if not sub.exists():
-            skipped.append((task, "无 best_code.py（该题没跑或未产出）"))
-            continue
         impls = baseline_impls(task)
         # 正确性阶段与基线无关：没有主指标基线的题照样要审隐藏 case，只是拿不到
         # 该 impl 的 speedup（分母只剩 baseline.json 里实际有的那些 impl）。
@@ -251,20 +301,25 @@ def main() -> int:
         cache = cache_dir / f"{task}.json"
         if cache.exists() and not args.force:
             try:
-                results.append(json.loads(cache.read_text(encoding="utf-8")))
-                print(f"[{i}/{len(plan)}] {task:46} 用缓存")
-                continue
+                cached = json.loads(cache.read_text(encoding="utf-8"))
+                if cached.get("cache_signature") == cache_signature(sub, task) and cached.get("skip_perf") == args.skip_perf:
+                    results.append(cached)
+                    failures += int(not cached.get("passed"))
+                    print(f"[{i}/{len(plan)}] {task:46} 用缓存")
+                    continue
             except Exception:
                 pass
         print(f"[{i}/{len(plan)}] {task:46} 审...", flush=True)
         res = run_one(task, sub, args.timeout, args.skip_perf)
+        failures += int(not res.get("passed"))
         if not res.get("ok"):
-            failures += 1
             print(f"          [FAIL] {res.get('reason')}")
         else:
             got = res["by_impl"].get(args.impl)
             head = f"{args.impl} {fmt(got['mean_speedup'])}x（{got['case_count']} case）" if got else f"无 {args.impl} 数据"
             print(f"          correct={res['correctness_passed']}  {head}")
+        res["cache_signature"] = cache_signature(sub, task)
+        res["skip_perf"] = args.skip_perf
         cache.write_text(json.dumps(res, ensure_ascii=False, indent=2), encoding="utf-8")
         results.append(res)
 
@@ -313,7 +368,9 @@ def main() -> int:
     summary["aggregates"] = {
         "audited": len(results),
         "correctness_passed": sum(1 for r in summary["rows"] if r["correctness_passed"]),
-        "crashed": len(failed),
+        "crashed": sum(1 for r in failed if not r.get("failure_kind")),
+        "no_valid_candidate": sum(1 for r in failed if r.get("failure_kind") in {"no_valid_candidate", "oracle_export"}),
+        "missing_submission": sum(1 for r in failed if r.get("failure_kind") == "missing_submission"),
         f"{args.impl}_measured": len(sp),
         f"{args.impl}_mean_speedup": (sum(sp) / len(sp)) if sp else None,
         f"{args.impl}_median_speedup": statistics.median(sp) if sp else None,
@@ -321,7 +378,7 @@ def main() -> int:
         "mi_fallback_count": sum(1 for x in summary["rows"] if x.get("aiter_is_mi_fallback")),
         "_note": ("口径：离线终审，隐藏 case 用 task.yaml 分档容差；perf 用 private/<id>/perf_cases.json "
                   "的形状与计时参数，分母为 baseline.json 里该 impl 的实测耗时。"
-                  "与在线（KernelBench 1e-4 + torch_eager 分母）不可混比。"
+                  "新版在线共享 dtype/容差规则，但公开/隐藏样本与性能形状仍不同，不能混用 speedup。"
                   "aiter_is_mi_fallback=True 的题分母偏大 → 加速比偏高，引用须标注。"),
     }
     out = run_root / "offline_audit.json"

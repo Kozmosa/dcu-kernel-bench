@@ -55,3 +55,7 @@ python benchmark/evaluator/audit_model_class.py --task 1002_paged_attention \
 合法候选只与生成候选比较，所以速度即使比 root 慢 12.6 倍也不会被参考答案覆盖。没有合法候选时 `best_node_id=null`、`stats.search_status=no_valid_candidate`，所有节点/日志仍保存在 `run.json`，不导出 `best_code.py`；复用输出目录时会删除旧成功文件。CLI 的单题运行返回非零，批量摘要记录失败而不冒充成功。
 
 单次生成脚本保留失败的 `candidate_code.py` 与 `run.json`，不再用 root 作为失败占位。失败候选不会写成 `best_code.py`。旧实验归档保持原样。
+
+## 失败分母与缓存
+
+批量终审拒绝 `root/phase2_root` 和没有在线合法候选的 run；清单里的缺文件任务也计失败分母。缓存绑定候选代码、run.json 的选优、审计实现、任务定义、参考、隐藏/性能 case 与基线（含继承源），旧缓存不会在规则变化后继续冒充新结果。缓存失败仍返回失败退出码。
