@@ -5,7 +5,7 @@ DCU 侧的 `knowledge/kernelwiki_dcu/`（30 个页面 + 逐文件锁，34 个文
 
 **语料是仓库里的普通文件，不是补丁**：直接看
 `patches/kernelweaver-dcu-wiki/overlay/knowledge/kernelwiki_dcu/wiki/`，
-例如 `wiki/contracts/compliance.md`、`wiki/hardware/gfx936.md`、`wiki/operators/attention.md`。
+例如 `wiki/contracts/compliance.md`、`wiki/hardware/gfx928.md`、`wiki/operators/attention.md`。
 只有「修改框架既有文件」的部分是 patch。
 
 ## 目录
@@ -59,7 +59,7 @@ python benchmark/tools/apply_framework_fixes.py kernelweaver-dcu-wiki /path/to/K
 python3 -c "import sys;sys.path.insert(0,'.');from pathlib import Path;\
 from src.knowledge.public_wiki import audit_public_corpus as a;\
 print(a(Path('knowledge/kernelwiki_dcu'))['sha256'])"
-# 期望：fcc5010738256cfb26817c7a1aefc11a2966f1d26907a7c3cf8cbd4049cb8615
+# 期望：b75296feeba7a9664826d47882bf8c5e3f33d065aa5a9489524678855451649a
 ```
 
 端到端（两轨检索、合规页在上下文、sm86 被拒）：
@@ -70,7 +70,7 @@ import sys; sys.path.insert(0, '.')
 from pathlib import Path
 from src.knowledge.public_wiki import audit_public_corpus, PublicKernelWiki
 print('audit OK', audit_public_corpus(Path('knowledge/kernelwiki_dcu'), check_lock=True)['pages'])
-w = PublicKernelWiki(Path('knowledge/kernelwiki_dcu'), target_arch='gfx936')
+w = PublicKernelWiki(Path('knowledge/kernelwiki_dcu'), target_arch='gfx928')
 class T:  backend = 'triton'; reference_code = 'import torch\ns=torch.matmul(q,k)\nreturn torch.softmax(s,-1)'
 ev = w.retrieve(T()); print([e['id'] for e in ev], 'Platform symbols' in str(ev))
 PY
@@ -91,16 +91,16 @@ PY
 
 | 字段 | 值 |
 |---|---|
-| 汇总 SHA256 | `fcc5010738256cfb26817c7a1aefc11a2966f1d26907a7c3cf8cbd4049cb8615` |
+| 汇总 SHA256 | `b75296feeba7a9664826d47882bf8c5e3f33d065aa5a9489524678855451649a` |
 | 文件数 | 33（`index.yaml` + `data/` 2 + `sources/` 12 + `wiki/` 17）+ `corpus.lock.json` |
-| 页面数 | 31（含 gfx928 实测硬件页；gfx936 页保留作历史） |
+| 页面数 | 30（含 gfx928 实测硬件页） |
 | 冻结时间 | 2026-11-21（迁移到 gfx928 后重新冻结） |
-| 本轮内容改动 | `wiki/contracts/compliance.md`（平台符号类 / 别名解析 / 审计前置）、`wiki/hardware/gfx936.md`（hipcc 可用与不可用 API 面、Triton libdevice 路径）、`wiki/contracts/general.md`（原生 dtype + 任务容差） |
-| 目标架构 | **gfx928（K500SM_AI，120 CU）**；所有页面 `architectures: [gfx928]`，硬件页拆成 `gfx928.md`（实测）+ `gfx936.md`（历史 BW 快照）；配置里 `operator_memory_target_arch: gfx928` |
+| 本轮内容改动 | `wiki/contracts/compliance.md`（平台符号类 / 别名解析 / 审计前置）、`wiki/hardware/gfx928.md`（hipcc 可用与不可用 API 面、Triton libdevice 路径、实测资源上限）、`wiki/contracts/general.md`（原生 dtype + 任务容差） |
+| 目标架构 | **gfx928（K500SM_AI，120 CU）**；所有页面 `architectures: [gfx928]`，硬件页为 `gfx928.md`（实测）；配置里 `operator_memory_target_arch: gfx928` |
 
 ## 上限提醒
 
 `index.yaml` 的 `policy.max_body_chars: 1800`。当前 `wiki/contracts/compliance.md` 1788 字符、
-`wiki/hardware/gfx936.md` 1793 字符，已贴上限；再加内容要先删旧内容，否则检索证据里会被静默截断。
+`wiki/hardware/gfx928.md` 约 1730 字符，已贴上限；再加内容要先删旧内容，否则检索证据里会被静默截断。
 另外 `max_entries: 3` 且合规页常驻——题面命中 2 个算子页时硬件页会被挤出去（实测 attention 题如此）。
 要保证硬件页常在，需要把 `max_entries` 提到 4，或把最关键的硬件约束并进合规页。

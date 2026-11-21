@@ -2,8 +2,8 @@
 """migrate_target_arch.py —— 把题面里的"目标硬件架构"整体迁移到另一张卡。
 
 用途：换机器/换架构时，`Model` docstring 里那句
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
-必须跟着改，否则题面在骗模型（旧机是 gfx936 80 CU，新机是 gfx928 120 CU）。本脚本只改
+    Target hardware: Hygon DCU (<arch>). Implementation language: Triton.
+必须跟着改，否则题面在骗模型（不同卡的计算单元数、共享内存、带宽都不同）。本脚本只改
 **括号里的架构串**，其余一字不动；并同时改 `benchmark/kernelbench_compat/` 的镜像，
 保持"镜像与 tasks 逐字节一致"（tests/test_compat_mirrors.py 强制）。
 
@@ -81,7 +81,7 @@ def main() -> int:
         text = path.read_text(encoding="utf-8")
         new = text
         # 工具模板里的架构串不是"Target hardware"句，按字面替换两种旧写法
-        for old in ("gfx936/gfx938", "gfx936"):
+        for old in ("gfx936/gfx938", "gfx936", "gfx938"):
             new = new.replace(old, arch)
         if new != text:
             print(f"  {rel}: 字面替换架构串")

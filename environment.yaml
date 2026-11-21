@@ -9,10 +9,6 @@ hardware:
   benchmark_target_arch:
     - gfx928
 
-  # 历史目标（gfx936 时代的题面与全部旧基线都出自这台）：保留记录，不再作为目标。
-  historical_target_arch:
-    - gfx936
-    - gfx938
 
   # 当前机器（021 组 / 昆山），2026-11-21 实测。
   measured_machine:
@@ -48,7 +44,7 @@ software:
   triton: "3.3.0+das.opt1.dtk2604.torch290"
   # triton wheel：dtk2604/torch290/cp311，取自 download.sourcefind.cn /4/triton/DAS1.8/
   # 装机后已验证：vecadd ✓、tl.dot fp16 ✓（max err 1.6e-2）、triton.language.extra.libdevice ✓
-  aiter: ""                              # 未安装；采 aiter 基线前必须装（或装最小导入垫片）
+  aiter: ""                              # 不使用：本评测集的分母只用 torch_eager（aiter 路径暂缓）
   os: "Ubuntu 22.04.5 LTS 容器，宿主内核 3.10.0-957.el7"
 
 build:
@@ -64,6 +60,5 @@ timing:
   reduction: median
 
 notes:
-  - "旧机（现有基线来源）：BW / gfx936:sramecc+:xnack- / 80 CU / 68.7 GB / DTK 26.04 / triton 3.3.0——已不可用。"
-  - "benchmark/private/*/baseline.json 全部来自旧机（environment.gcn_arch=gfx936），在 gfx928 上**未重采前不可使用**。"
+  - "benchmark/private/*/baseline.json 已清空为 placeholder，待在本机以 torch_eager 为分母重采（aiter 路径暂缓）。"
   - "本机无外网（pypi / download.sourcefind.cn / 公网 443 均不可达）：triton 与 aiter 只能由本地上传；LLM 出口需反向隧道。"

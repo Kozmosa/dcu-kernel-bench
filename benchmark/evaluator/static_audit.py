@@ -35,7 +35,7 @@ GLOBAL_FORBIDDEN = [
     "rocprim", "hipcub",
 ]
 
-# 平台符号：这台机器（DCU / gfx936，hipcc + AMD Triton）上没有的东西。
+# 平台符号：DCU（hipcc + AMD Triton）上没有的东西。
 # 与 GLOBAL_FORBIDDEN 的区别：forbidden 是"能把活干完但不是你干的"，
 # platform 是"根本编译不过 / 跑不起来"。实测依据（r3 数据）：
 #   · `CUDART_INF_F` 未定义 → 1020_mla_decode_rope 直接编译失败；

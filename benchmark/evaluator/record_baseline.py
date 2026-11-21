@@ -4,7 +4,7 @@
 对 `private/<id>/perf_cases.json` 的每个 case：
   1. 用（继承链上）任务的 reference.py::make_inputs 生成输入
   2. 用 task.yaml 的容差校验该 case 的 reference 输出，作为 golden
-  3. 调用 private/<id>/aiter_impl.py 声明的 aiter 官方实现
+  3.（可选，已暂缓）调用 private/<id>/aiter_impl.py 声明的 aiter 官方实现
   4. **先校验 aiter 输出与 golden 一致**（不一致则拒绝记录，避免记下错误基线）
   5. cuda event 计时，按 perf_cases 的 timing 配置预热/重复，取中位数
   6. 写入 private/<id>/baseline.json 的 baselines[]
@@ -127,9 +127,9 @@ def time_callable(fn, warmup: int, repeat: int) -> tuple[float, float]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--task", required=True, help="任务 id，如 1002_paged_attention")
-    ap.add_argument("--impl", default="aiter",
-                    help="基线实现：aiter（默认，需 private/<id>/aiter_impl.py）"
-                         " 或 eager/torch_eager（直接计时 reference 本身，无需适配器）")
+    ap.add_argument("--impl", default="eager",
+                    help="基线实现：eager/torch_eager（默认，直接计时 reference 本身，无需适配器）；"
+                         "aiter 路径暂缓（需要 private/<id>/aiter_impl.py，已从仓库移除，见 git 历史）")
     ap.add_argument("--dry-run", action="store_true", help="只校验不写回 baseline.json")
     args = ap.parse_args()
 

@@ -1,7 +1,7 @@
 {
   "task_id": "0001_vecadd",
   "status": "placeholder",
-  "note": "在 DCU 真机上用 environment.yaml 锁定环境测量 aiter/DTK PyTorch 基线后填写。",
+  "note": "旧机器的基线已清理。用 benchmark/evaluator/record_baseline.py --impl eager 在当前机器上重采；本评测集的加速比分母只用 torch_eager。",
   "environment": null,
   "baselines": []
 }

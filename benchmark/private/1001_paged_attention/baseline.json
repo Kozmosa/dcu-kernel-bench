@@ -1,7 +1,7 @@
 {
   "task_id": "1001_paged_attention",
   "status": "placeholder",
-  "note": "在 DCU 真机上用 environment.yaml 锁定环境测量 aiter paged_attention_decode（pa_decode.py v1 路径）基线后填写；不得用 module_pa/预编译 aiter_ 路径替代（见 sources/1001_paged_attention.yaml 的排除说明）。",
+  "note": "旧机器的基线已清理。用 benchmark/evaluator/record_baseline.py --impl eager 在当前机器上重采；本评测集的加速比分母只用 torch_eager。",
   "environment": null,
   "baselines": []
 }

@@ -2,7 +2,7 @@
 
 ## 项目方向
 
-**dcu-kernel-bench**：面向海光 DCU 的算子生成评测集（**2026-11-21 起目标架构迁移为 gfx928 / K500SM_AI**；gfx936 是历史目标，旧基线仍标着它），方法论参照寒武纪 BANG C 算子评测集构建指南（分层隔离、统一 Starter、隐藏 Case、静态审计防绕过）。
+**dcu-kernel-bench**：面向海光 DCU 的算子生成评测集（**2026-11-21 起目标架构迁移为 gfx928 / K500SM_AI**），方法论参照寒武纪 BANG C 算子评测集构建指南（分层隔离、统一 Starter、隐藏 Case、静态审计防绕过）。
 
 主算子来源：`third_party/aiter`（OpenDAS/aiter，HCU 适配的开源算子库）。补充题源：FlagGems（Triton）、composable_kernel-das / HYTLASS（GEMM/Conv 类）、HYGON-AI 组织、**hipDNN 官方样例集 `opendtk/hipdnn_samples`**（2026-10-12 准入的 21 道 5xxx–8xxx 题即出自此，溯源 commit `b67a3f9`）。注意区分：**闭源 hipDNN 库**只作性能基线，不作题源；能作题源的是**公开可审查的样例源码**（`benchmark/sources/5001_conv2d_fwd.yaml` 有 sha256 证据）。
 
@@ -50,23 +50,25 @@
 
 ## 当前进度：生成框架接入（2026-10-01）
 
-采用 PyramidKernel（`../PyramidKernel`，与本仓库同级）驱动 Agent 生成 kernel，评测其在 DCU 上编写算子的能力。**当前走其原生 model_class 路径**：Agent 在 `ModelNew` scaffold 锚点内写**纯 Triton 代码**（`helpers` 区放 `@triton.jit` kernel，`forward_stmt_N` 区放 launch 逻辑），在 DCU 上由 DTK Triton JIT 编译为 gfx936，全程无 hipcc 参与；在线正确性/计时由框架自带的 KernelBenchPaperEvaluator 判定。
+采用 PyramidKernel（`../PyramidKernel`，与本仓库同级）驱动 Agent 生成 kernel，评测其在 DCU 上编写算子的能力。**当前走其原生 model_class 路径**：Agent 在 `ModelNew` scaffold 锚点内写**纯 Triton 代码**（`helpers` 区放 `@triton.jit` kernel，`forward_stmt_N` 区放 launch 逻辑），在 DCU 上由 DTK Triton JIT 编译（当前目标架构 gfx928），全程无 hipcc 参与；在线正确性/计时由框架自带的 KernelBenchPaperEvaluator 判定。
 
 已落地：
 
 - **1002_paged_attention**：1001 的 model_class 变体，题目文件 `benchmark/tasks/1002_paged_attention/reference.py`（自包含 Model/get_inputs/get_init_inputs，计算与 1001 逐行一致），镜像到 `benchmark/kernelbench_compat/level3/`（字节一致性由 `tests/test_1002_model_class.py` 保证）。运行：`--kernelbench-root benchmark/kernelbench_compat --level 3 --problem-id 1002 --backend triton`。
 - 本机（WSL，CPU）验证到"缺 GPU"为止：26/26 测试绿；quick profile（mock provider）全链路冒烟通过——静态守卫 0 拦截、全部节点到达评测器、唯一失败原因为 `CUDA is not available`。
-- 语义边界（有意为之）：在线评测为 KernelBench 语义（输入统一 cast fp32、allclose 1e-4、全局 RNG 输入、forbidden 仅 docstring 软约束）；本评测集的容差/隐藏 case/static_audit 硬审计/aiter 基线属**离线终审**，工具为 `benchmark/evaluator/audit_model_class.py`（静态审计 → 隐藏 case 正确性 → perf 计时；case 资产经 private/1002 的 `inherit` 字段复用 1001；static_audit 已支持剥除 docstring，避免题面声明禁用项被误杀）。GLM-5.3-flash 首个产物已通过全部终审（7 隐藏 case 含非 2 次幂 head/bf16/GQA，在线从未见过的 shape 族）。
+- 语义边界（有意为之）：在线评测为 KernelBench 语义（输入统一 cast fp32、allclose 1e-4、全局 RNG 输入、forbidden 仅 docstring 软约束）；本评测集的容差/隐藏 case/static_audit 硬审计属**离线终审**（分母只用 `torch_eager`），工具为 `benchmark/evaluator/audit_model_class.py`（静态审计 → 隐藏 case 正确性 → perf 计时；case 资产经 private/1002 的 `inherit` 字段复用 1001；static_audit 已支持剥除 docstring，避免题面声明禁用项被误杀）。GLM-5.3-flash 首个产物已通过全部终审（7 隐藏 case 含非 2 次幂 head/bf16/GQA，在线从未见过的 shape 族）。
 
 - **本地批量生成实测（2026-10-09，RTX 4050 Laptop + triton-windows 3.8 + CC Switch 网关 GLM-5.3-flash，quick 档 6 attempts/题）**：10xx 段前 10 道题全量跑通，8 道 correct（speedup：1016 57.6x、1014 23.1x、1011 11.2x、1002 8.7x、1010 7.7x、1015 3.0x、1012 1.02x、1018 1.01x），1017/1019 因多值 tuple 输出被评测器误杀（产物数值逐位正确，已改为单张量打包协议修正）。运行环境要点：`PYTHONUTF8=1`（中文题面临时文件编码）、provider 配 `timeout_seconds: 1200` + `stream: false`、境外端点走 `NO_PROXY` 直连。产物在 `../PyramidKernel/runs/grokbatch/`。
 
 待办：扩大真 LLM 实验规模（多任务、多预算、按 `impl` 分别与 aiter 基线对比，1017/1019 打包修正后重跑）。**性能基线**：旧 45 道题已采齐，2026-10-12 上游新准入的 21 道 5xxx–8xxx 题仍是 placeholder（见下文"本分支相对上游 main 的增量"）。
 
-真机（BW / gfx936，DTK 26.04）已验证（2026-10-01）：测试 26/26 绿；原生路径 quick 冒烟全部节点 correct（mock provider + 真评测器 + cuda_event 计时）；**Triton 3.3.0+das.opt1.dtk2604.torch290 已安装并验证 JIT**（vecadd + tl.dot fp16 矩阵乘）；**首个真 LLM 端到端完成**（GLM-5.3-flash 经 CC Switch 反向隧道，1002 任务 speedup 17.35x，含 debug 修复环路），访问与部署细节见 `../notes/曙光环境访问.md`。
+旧机（DTK 26.04，架构已退役）已验证（2026-10-01）：测试 26/26 绿；原生路径 quick 冒烟全部节点 correct（mock provider + 真评测器 + cuda_event 计时）；**Triton 3.3.0+das.opt1.dtk2604.torch290 已安装并验证 JIT**（vecadd + tl.dot fp16 矩阵乘）；**首个真 LLM 端到端完成**（GLM-5.3-flash 经 CC Switch 反向隧道，1002 任务 speedup 17.35x，含 debug 修复环路），访问与部署细节见 `../notes/曙光环境访问.md`。
 
-## 全量评测结果（2026-10-20，英文题面）
+## 全量评测结果（2026-10-20，旧机 gfx936；**2026-11-21 起作废**）
 
-一轮完整评测的现状，**对外引用一律以此为准**（报告：`benchmark/tools/metrics.md`，由 `collect_metrics.py` 生成）：
+> ⚠️ 这一整节是**旧机器**上的结果：基线已清空、目标架构已迁移到 gfx928、在线契约已换成原生 dtype + 任务容差。**不要对外引用**，保留只为追溯。
+
+一轮完整评测的当时现状（报告：`benchmark/tools/metrics.md`，由 `collect_metrics.py` 生成）：
 
 - **配置**：66 道 model_class、16 分片、`main` profile、模型 `gpt-6-astra`（hejuapi，经反向隧道）。**每配置只跑了一次**，逐题数字含采样噪声，聚合指标才可比。
 - **题面**：全英文；11 道（`1012`/`1015`/`1017`/`1020`/`1021`/`1026`/`1027`/`1029`/`2009`/`4001`/`4004`）额外删掉了做法/题解段落（见铁律 5）。删完后这些题**没有掉分**（`1021` 7.49x→9.17x、`1012` 9.01x→19.93x、`4001` 2.40x→4.03x）。
@@ -74,8 +76,8 @@
 - **离线终审（66 道全审）**：**Offline pass rate 43/66**；未过 23 = 静态判负 19（实现直接调 `torch.matmul`/`torch.softmax`/`torch.mm`/`F.linear`/`conv2d`/`autograd`/`cumsum` 等）+ 隐藏 case 跑不起来 3（`1016` 共享内存 96KB>64KB、`1022` `head_size=96` 非 2 次幂、`3007` 编译失败）+ 数值不达标 1（`5006` 8 例错 4）。`aiter` 有测值 25 道，中位 1.29x。
 - **加离线门槛**（在线 ∩ 离线通过）：Correct Rate 42/66、Geomean 8.79x、Median 7.35x、Mean 40.00x、Best 900.66x。**对外引用建议用这一栏**；`Success@K`/`First Correct`/`Refine Gain` 无法门槛化（终审只审最终 `best_code.py`）。
 - **统计口径修复（重要）**：`audit_batch.py` 原先只审有 `aiter` 基线的 33 道、且把崩溃任务从汇总里丢掉，导致「30 审 / 25 过」这种失真口径。现在：① 默认**全审 66 道**（正确性不依赖基线）；② 崩溃计入失败（`aggregates.crashed`）；③ 报告里崩溃/静态判负/数值不达标分三类列名。
-- **数据位置**：在线 `runs/dcukb_en_1019_1027`（+ 3 道补跑 + `6001` 的 HIP 重跑 + 11 道清理后重跑）→ `.dcu_runs/en66`；离线 → `.dcu_runs/offline_audit_clean`。
-- **已知缺口**：12 道 aiter 源题无 `aiter` 分母（见「基线覆盖现状」）；离线 3 道崩溃属实现侧；无重复运行，逐题 delta 不可单独归因。
+- **数据位置（旧机）**：在线 `runs/dcukb_en_1019_1027`（+ 3 道补跑 + `6001` 的 HIP 重跑 + 11 道清理后重跑）→ `.dcu_runs/en66`；离线 → `.dcu_runs/offline_audit_clean`。
+- **已知缺口（当时）**：12 道题缺 `aiter` 分母；离线 3 道崩溃属实现侧；无重复运行，逐题 delta 不可单独归因。（本节整体已随迁移作废。）
 
 ## 本分支相对上游 main 的增量（`main-merge`）
 
@@ -86,16 +88,15 @@
 | 增量 | 作用 |
 |---|---|
 | `benchmark/tools/dcukb.py` + `scan_candidates.json` | 算子收集流水线：`scan`（AST 扫 aiter 找候选并裁决）→ `admit`（sha256 证据）→ `new`（任务骨架）→ `mirror`（镜像一致性，`--check` 供 CI）。零第三方依赖 |
-| `benchmark/evaluator/record_baseline.py` | aiter 官方基线采集器：逐 perf case 计时，且**先与 reference 按 task.yaml 容差比对通过才记录**（避免记下错误基线） |
+| `benchmark/evaluator/record_baseline.py` | 基线采集器（默认 `--impl eager`，即 `torch_eager` 分母）：逐 perf case 计时，且**先与 reference 按 task.yaml 容差比对通过才记录**（避免记下错误基线） |
 | `benchmark/evaluator/audit_model_class.py`（替换上游版本） | 上游版本的**功能超集**：保留 `io.init_inputs` 按名取参 + 容差按输出 dtype，另加 ①逐参数用 `get_init_inputs()` 补齐 ②`io.init_inputs: []` 时无参构造 ③关键字绑定（`case_init_kwargs`），杜绝稀疏构造参数的位置错位 |
 | `tests/test_compat_mirrors.py` | 通用镜像一致性：按 difficulty→level 映射覆盖**全部** model_class 题，并检查"错 level 的残留镜像" |
 | `tests/test_reference_case_contract.py` | 通用 case 契约：逐 case 生成输入→构造 Model→跑 forward→校验单个 Tensor/数值有限/容差可解析；另含 `io.init_inputs` 声明与 Model 签名前缀一致、case 字段必须生效 |
-| `benchmark/private/<id>/aiter_impl.py`（44 个） | aiter 官方实现适配器，使基线可采集。契约 `run(inputs, init_kwargs: dict, device)`；按号段 1xxx 18 / 2xxx 9 / 3xxx 7 / 4xxx 10。覆盖 **44/66**——旧 45 道题里唯一缺口是 `4007_gemm_a16w16_atomic`（缺 `BW200-GEMM-A16W16-ATOMIC.json` tuner 配置）；2026-10-12 上游新准入的 21 道 hipDNN 样例题（5xxx–8xxx）**尚无适配器**（aiter 里未必有对等算子，待评估） |
-| `benchmark/private/<id>/baseline.json`（**45 道已实测 / 66 道 model_class**） | DCU 真机（BW / gfx936，DTK 26.04）采集的性能基线：旧 45 道**全部至少一种基线**（27 道 `aiter`+`torch_eager` 双基线、18 道仅 `torch_eager`）；新增 21 道仍是 **placeholder**。`record_baseline.py --impl {aiter,eager}` 按 impl **合并**写入（不覆盖另一种），`stage_perf` 带回 `impl`/`baseline_us`/`speedup`——**报加速比必须说明分母是哪个 impl**（例：`1017_mha` aiter 57 ms vs `torch_eager` 180 ms，相差 3.2x） |
+| ~~`benchmark/private/<id>/aiter_impl.py`（44 个）~~ | **已移除**（2026-11-21）：本评测集的分母只用 `torch_eager`，aiter 基线路径暂缓。需要时可从 git 历史取回 |
+| `benchmark/private/<id>/baseline.json` | 性能基线，**分母只用 `torch_eager`**：`record_baseline.py --impl eager` 逐 perf case 计时，先与 reference 按 task.yaml 容差比对通过才记录。旧机数字已在迁移时清空（placeholder），在本机重采后写回。 |
 | `audit_model_class.py` 的**分段容差** | `task.yaml` 的 `tolerance_segments` + `reference.output_segments()`，解"同一张量里不同段量级差几个数量级、单一 atol/rtol 表达不了"（样板 `4017`/`4018`/`4005`）；`max_mismatch_frac` 在分段与全局两条路径都生效，缺省 0 即等价于原 `allclose` |
 
-- **基线覆盖现状（2026-10-20 全量终审口径）**：33 道有 `aiter` 基线、其中 **25 道能测出数值**；其余 33 道只有 `torch_eager`。无 `aiter` 分母的 33 道分三类：**20 道 hipDNN 样例题**（hipDNN 在 DTK 26.04 上出不了基线，aiter 也无对位算子）、**12 道 aiter 源 Triton 题**、**1 道 `7001_ctc_loss`**（hipDNN 源、aiter 无对位）。**这 12 道已经逐题实测，结论是当前 DCU Triton 栈上补不出 `aiter` 分母**（`runs/aiter_diag_*` 有日志，非配置问题）：① 6 道 `RuntimeError: PassManager::run failed`（DCU Triton 后端 pass 崩：`1011`/`1030`/`3006`/`3007`/`4009`/`4010`）；② 3 道 `CompilationError`（HCU triton 不支持内核里的写法：`1029` 用 `tl.matrix_load`、`1018` 嵌套 `@triton.jit` 内联、`2001` 的 activation 闭包调用）；③ 1 道 `OutOfResources`（`1019` 需 81920B 共享内存，上限 65536，硬件限制）；④ 1 道能跑但**数值超容差**（`1027`：aiter int8 与 reference 差 0.058 > atol/rtol 0.02，按「基线先与 reference 对齐」的规矩拒绝记录）；⑤ `4007` 无适配器（缺 `BW200-GEMM-A16W16-ATOMIC.json`），且同族 GEMM 也是 PassManager 崩，补了 tuner 也大概率跑不起来。**替代方向**：给 attention/GEMM 族补一个**更强的分母**（`torch.nn.functional.scaled_dot_product_attention` / MIOpen / rocBLAS 路径），而不是继续在 aiter 上耗——因为题面 reference 是手写 matmul+softmax，`torch_eager` 对这几道本来就偏弱。
-- `record_baseline.py` 的适配器契约是 `run(inputs, init_kwargs: dict, device)`（按名取参）。**上游一个 `aiter_impl.py` 都没有、全部 `baseline.json` 都是 placeholder**，本分支补齐 44 个适配器，并在真机采到旧 45 道题的实测基线（新增 21 道待采）。两个已知天花板：`1019_mha_onekernel_bwd` 的 aiter 基线**不可得**（DTK 版 aiter 的 onekernel bwd 报 `PassManager::run failed`，shared memory 81920 > 65536 超出 DCU 上限，非配置问题）；`1014/1017/4001/4004/4006` 全部 + `4008` 部分 case 的 aiter 基线落在 **MI 系列 fallback tuner 配置**上（未针对 DCU 调优 → 性能次优 → **这些题的 speedup 会偏高**，引用时须标注）。
+- **基线口径（2026-11-21 起）**：`baseline.json` 只记 `torch_eager`（reference 原生执行、同机同时段），aiter 分母与其 44 个适配器已移除，旧机上那批 aiter 不可得/偏乐观的分析随之作废（git 历史可复查）。换机器必须重采：`record_baseline.py --task <id> --impl eager`。
 - 本地跑全部测试（本机无 pytest，驱动自带垫片）：
   `PYTHONPATH=../PyramidKernel <python> .dcu_runs/run_all_tests.py` → 本机可跑的 5 个套件 **100 项断言全绿**（`compat_mirrors` 3 + `prompt_english` 3 + `static_audit` 5 + `case_files` 5 + `hipdnn_batch` 84；后两者需要 `pyyaml`，Windows 侧缺它时改在 WSL 的 `python3` 下跑）。**需 torch 的套件**（`test_reference_case_contract` / `test_1002_model_class` / `test_reference_*`）只能在装了 DTK torch 的真机上跑。
 
@@ -113,9 +114,9 @@
 ## 环境注意
 
 - 真机评测依赖 DTK ≥ 25.04（Triton track 的硬要求）、hipcc、DTK 版 PyTorch。
-- **2026-11-21 换机实测：平台给的卡不是 BW**。`021 组/昆山`「异构加速卡AI 64GB PCIE」实测是 **K500SM_AI / `gfx928:sramecc+:xnack-` / 120 CU / 64 GiB**，而题目包声明的目标架构是 `gfx936`（题面与 `environment.yaml` 的 `benchmark_target_arch` 都是 gfx936）。完整实测值、失效清单与三条处置方案见 `docs/machine-2026-11-21-k500sm-gfx928.md`。**换机上机第一件事**：`source /opt/dtk/env.sh && python3 benchmark/tools/machine_fingerprint.py --expect environment.yaml`，据此判断"只重采基线"还是"要重测 wiki 硬件页 / 改题面架构口径"。
-- **迁移状态（2026-11-21）**：题面硬件句（66 题 + 66 镜像）、生成侧模板、DCU Wiki 全部页面与消融配置已迁到 `gfx928`；`environment.yaml` 的 `benchmark_target_arch` 改为 `[gfx928]`，旧架构记在 `historical_target_arch`。机器侧已装 `triton-3.3.0+das.opt1.dtk2604.torch290`（cp311，取自 download.sourcefind.cn/4/triton/DAS1.8/）并验证 vecadd + `tl.dot` + 通用 libdevice 均可用 → **DAS Triton 支持 gfx928**。仍缺：aiter（或垫片）、基线重采、LLM 出口（反向隧道）。迁移与复测细节见 `docs/machine-2026-11-21-k500sm-gfx928.md`。
-- 同一台机（021）的其他实测事实：容器只见 **1 张卡**（`torch.cuda.device_count()==1`）；**未装 triton 与 aiter**；**无外网**（pypi / download.sourcefind.cn / 公网 443 全不通），只能上传 wheel 或走反向隧道；无 cgroup 内存上限（宿主 503 GiB，`memory.max` 不存在）；静态 shared 上限仍是 **65536 B**（96 KiB 编译期报 `local memory exceeds limit`）。
+- **2026-11-21 换机实测：平台给的卡不是 BW**。`021 组/昆山`「异构加速卡AI 64GB PCIE」实测是 **K500SM_AI / `gfx928:sramecc+:xnack-` / 120 CU / 64 GiB**；题面与 `environment.yaml` 已按此迁移，当前 `benchmark_target_arch` 就是 `gfx928`。完整实测值、失效清单与三条处置方案见 `docs/machine-2026-11-21-k500sm-gfx928.md`。**换机上机第一件事**：`source /opt/dtk/env.sh && python3 benchmark/tools/machine_fingerprint.py --expect environment.yaml`，据此判断"只重采基线"还是"要重测 wiki 硬件页 / 改题面架构口径"。
+- **迁移状态（2026-11-21）**：题面硬件句（66 题 + 66 镜像）、生成侧模板、DCU Wiki 全部页面与消融配置已迁到 `gfx928`；`environment.yaml` 的 `benchmark_target_arch` 改为 `[gfx928]`。机器侧已装 `triton-3.3.0+das.opt1.dtk2604.torch290`（cp311，取自 download.sourcefind.cn/4/triton/DAS1.8/）并验证 vecadd + `tl.dot` + 通用 libdevice 均可用 → **DAS Triton 支持 gfx928**。aiter 不做（分母只用 `torch_eager`）；仍缺基线重采与 LLM 出口（反向隧道）。迁移与复测细节见 `docs/machine-2026-11-21-k500sm-gfx928.md`。
+- 同一台机（021）的其他实测事实：容器只见 **1 张卡**（`torch.cuda.device_count()==1`）；**（迁移时）未装 triton 与 aiter**；triton 已于 2026-11-21 装上并验证；**无外网**（pypi / download.sourcefind.cn / 公网 443 全不通），只能上传 wheel 或走反向隧道；无 cgroup 内存上限（宿主 503 GiB，`memory.max` 不存在）；静态 shared 上限仍是 **65536 B**（96 KiB 编译期报 `local memory exceeds limit`）。
 - 开发 venv 曾放在 WSL 侧 `~/.venvs/dcu-kernel-bench`（torch CPU + pytest），**现已不存在**（目录被清空），当前实际做法：Windows 用 `C:\Python314\python.exe`（有 numpy、无 torch、无 pyyaml），WSL 用系统 `python3`（有 pyyaml、无 torch）。要跑需 torch 的套件，只能上真机。**不要把 venv 放回 `/mnt/e`**：NTFS 挂载上的 `.venv` 已两次被清空 `bin/` 与 `site-packages/`（原因未查明）。
 - `third_party/aiter` 是独立 git 仓库。Windows 下它有两个文件名带冒号、无法 checkout 的 Triton autotune JSON，已用 sparse-checkout 排除并设 `core.protectNTFS=false`——**不要在该仓库内执行 `git reset --hard`**。
 - 网络：GitHub 直连不通，境外资源走代理 127.0.0.1:16888 或 ghfast.top 镜像；developer.sourcefind.cn / download.sourcefind.cn 直连。

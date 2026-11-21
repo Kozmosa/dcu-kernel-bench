@@ -2,8 +2,8 @@
 """machine_fingerprint.py —— 一条命令测出这台 DCU 机器的指纹（在目标机上跑）。
 
 为什么要这个脚本：换机器 / 换组之后，必须先判断"旧基线、旧 wiki 硬件页还能不能用"。
-判据不是看平台标签，而是看下面这些实测值是否与锁定的基线来源一致
-（现有基线来自 BW / gfx936:sramecc+:xnack- / 80 CU / 68.7 GB）。
+判据不是看平台标签，而是看下面这些实测值是否与 environment.yaml 记录一致
+（`--expect` 会读 environment.yaml 的 benchmark_target_arch 与 measured_machine 逐项比对）。
 
 用法（需要 hipcc 与 DTK 环境，CPU-only 机器上会跳过 HIP 探针）：
 
