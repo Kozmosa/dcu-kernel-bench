@@ -32,8 +32,8 @@ applicability:
 - Every model_class task; the task docstring's forbidden list is authoritative when it is stricter.
 ---
 
-The static audit runs before execution on both tracks; numerics are checked on one shape afterwards, so a
-correct candidate can still be rejected. Matching resolves import aliases (`nn.functional.mm`, `F.linear`),
+A static audit inspects the submitted file — offline here, before execution where the evaluation
+bridge is installed. Numerics are checked on one shape only, so a correct candidate can still fail. Matching resolves import aliases (`nn.functional.mm`, `F.linear`),
 skips docstrings, comments and prose, and inspects only code reachable from the model entry point: an unused
 helper is ignored, a called one is not.
 
@@ -46,13 +46,12 @@ helper is ignored, a called one is not.
 | `torch.cumsum` | block scan (Hillis-Steele or Blelloch) with a carried offset |
 | `torch.autograd` | hand-written backward kernel |
 
-Platform symbols are rejected separately: CUDA runtime types and calls (`cudaMalloc`, `cudaStream_t`,
-`cudaMemcpy`), CUDA headers such as cuda_runtime.h, CUDA math constants (`CUDART_*`) and PTX inline assembly
-do not exist on this target; use the hip equivalents, `INFINITY`, or a libdevice function. On this stack
-`at::cuda::`, `torch.cuda.` and ATen's cuda headers are the correct spelling and stay allowed.
+Platform symbols are rejected too: CUDA runtime calls (`cudaMalloc`, `cudaMemcpy`, `cudaStream_t`), CUDA
+headers, `CUDART_*` constants and PTX assembly do not exist here; use the hip spelling or `INFINITY`.
+On this stack `at::cuda::`, `torch.cuda.` and ATen cuda headers are correct and allowed.
 
-**When a hand-written kernel keeps failing, change the plan instead of retrying it.** Two failures on the same
-pattern is a signal, not bad luck:
+**When a hand-written kernel keeps failing, change the plan, not the retry.** Two failures on the same
+pattern is a signal:
 
 - decompose differently: smaller tiles, one pass per output segment, an explicit loop over blocks or taps;
 - if a fused kernel will not compile, split it into two kernels and fuse later;

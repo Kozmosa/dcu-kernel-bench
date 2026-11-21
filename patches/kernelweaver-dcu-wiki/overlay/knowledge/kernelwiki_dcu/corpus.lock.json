@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "sha256": "752d4143d46750d28e75ca4a1352ab7d0b12475f33990bb6bcd4ef9381c0838d",
+  "sha256": "e5a89979f8d5314df896f0cf882dabc3b5eea9badb602278f2cdd287ccdb1c06",
   "files": {
     "data/aliases.yaml": "487880e9dc6d7880b720cbfc520cfa00de3ed3db2efb4e9eb8820a2099a4d050",
     "data/operators.yaml": "bc48958cb7776e96e00f271380328bce4350ca235994f92c8b9fc044e127fc13",
@@ -17,8 +17,8 @@
     "sources/torch-ops.md": "29ed636796a068a34dd3be0155cbd8de81f39b06f9c0a9f4b30cb113f57fa76e",
     "sources/torch-pool.md": "f14fee007b823f8cb5fa151596f55651ff043e9a764f7adc5b7c42bce88b9fd8",
     "sources/torch-sdpa.md": "a221a4737476aa98722b798a4509fd8d4e5f05ce487f1f2998c993d9e033cf4d",
-    "wiki/contracts/compliance.md": "c11b0e73a41c3077aca10eadd12ee0fcdcd33e04cbddcfdcde3560f59a3e650c",
-    "wiki/contracts/general.md": "94efd8265473f27382c65aaa1d2f7228b0ebc8093301a8cc7034c56254d30424",
+    "wiki/contracts/compliance.md": "09fc1602f596bc0831804562a4ccda6c1f464306b432a1fc4cfdb5a48bbaf03f",
+    "wiki/contracts/general.md": "f3023fe4c9390b5f6301d4abf239ba9074aba555570b03173f24a1831f1affff",
     "wiki/hardware/gfx928.md": "52ab5e3417cc357173a1bbfd651b1b60222dc3076f442442fdf964f8a54d1394",
     "wiki/operators/attention.md": "d9ab256b97a10834ea546a0777c113767c3e6b09d16b5ae62f91816cfd4c1727",
     "wiki/operators/avgpool.md": "29dbe43cd1d0aa7fc5cd74bce8467c22b468d4e4a02886512f681158d04f6f9c",
@@ -36,5 +36,5 @@
     "wiki/operators/softmax.md": "53ac6e7874e369075b9b23e23c751045983858ae34d7423d2d22d4f606782ade",
     "wiki/operators/transposed_convolution.md": "3f536eebb24fc7e287cde2f928259c3035a75c8e9d00a8003a4236d9ac1f6a28"
   },
-  "frozen_at": "2026-11-21T08:30:41.094410+00:00"
+  "frozen_at": "2026-11-21T09:08:15.329107+00:00"
 }
