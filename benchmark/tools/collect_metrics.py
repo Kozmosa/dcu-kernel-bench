@@ -234,7 +234,9 @@ def main() -> int:
     w("")
     w(f"- accepted_tasks = **{n}**（solved = {sum(1 for r in rows if r['correct'])}）")
     w(f"- 候选口径：{'包含 root' if args.include_root else '**排除 root**（root 是框架直通脚手架，不算 Agent 产出）'}")
-    w(f"- 参考 baseline（speedup 分母）：{', '.join(f'`{x}`' for x in sorted(refs))}")
+    # 没有 champion 的题 primary_reference 为空，排序里要先剔掉 None，否则整份报告崩在这里。
+    named = sorted(x for x in refs if x)
+    w(f"- 参考 baseline（speedup 分母）：{', '.join(f'`{x}`' for x in named) if named else '（这批 run 里没有可用的 reference 标记）'}")
     if args.note:
         w(f"- 数据来源：{args.note}")
     w("")
