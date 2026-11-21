@@ -1,0 +1,120 @@
+diff --git a/configs/search/dcu_a_short.yaml b/configs/search/dcu_a_short.yaml
+new file mode 100644
+index 0000000..efbacbf
+--- /dev/null
++++ b/configs/search/dcu_a_short.yaml
+@@ -0,0 +1,24 @@
++description: Matched DCU ablation a_short
++max_attempts: 10
++epsilon: 0.3
++root_child_limit: 5
++dead_branch_threshold: 3
++leaderboard_size: 2
++context_limit: 5
++long_term_memory_enabled: false
++long_term_memory_top_k: 4
++long_term_memory_exploration_ratio: 0.0
++operator_memory_enabled: false
++operator_memory_public_corpus: false
++operator_memory_public_only: false
++operator_memory_path: knowledge/kernelwiki_dcu
++operator_memory_target_arch: gfx936
++operator_memory_experimental_page_ids: []
++profile_feedback_enabled: false
++evidence_workflow_enabled: false
++local_tuning_enabled: false
++plan_temperature: 0.0
++code_temperature: 0.0
++debug_temperature: 0.0
++timeout_seconds: 600
++max_retries: 3
+diff --git a/configs/search/dcu_b_longterm.yaml b/configs/search/dcu_b_longterm.yaml
+new file mode 100644
+index 0000000..cf51bf1
+--- /dev/null
++++ b/configs/search/dcu_b_longterm.yaml
+@@ -0,0 +1,24 @@
++description: Matched DCU ablation b_longterm
++max_attempts: 10
++epsilon: 0.3
++root_child_limit: 5
++dead_branch_threshold: 3
++leaderboard_size: 2
++context_limit: 5
++long_term_memory_enabled: true
++long_term_memory_top_k: 4
++long_term_memory_exploration_ratio: 0.0
++operator_memory_enabled: false
++operator_memory_public_corpus: false
++operator_memory_public_only: false
++operator_memory_path: knowledge/kernelwiki_dcu
++operator_memory_target_arch: gfx936
++operator_memory_experimental_page_ids: []
++profile_feedback_enabled: false
++evidence_workflow_enabled: false
++local_tuning_enabled: false
++plan_temperature: 0.0
++code_temperature: 0.0
++debug_temperature: 0.0
++timeout_seconds: 600
++max_retries: 3
+diff --git a/configs/search/dcu_c_wiki.yaml b/configs/search/dcu_c_wiki.yaml
+new file mode 100644
+index 0000000..9dc0aa6
+--- /dev/null
++++ b/configs/search/dcu_c_wiki.yaml
+@@ -0,0 +1,24 @@
++description: Matched DCU ablation c_wiki
++max_attempts: 10
++epsilon: 0.3
++root_child_limit: 5
++dead_branch_threshold: 3
++leaderboard_size: 2
++context_limit: 5
++long_term_memory_enabled: false
++long_term_memory_top_k: 4
++long_term_memory_exploration_ratio: 0.0
++operator_memory_enabled: true
++operator_memory_public_corpus: true
++operator_memory_public_only: false
++operator_memory_path: knowledge/kernelwiki_dcu
++operator_memory_target_arch: gfx936
++operator_memory_experimental_page_ids: []
++profile_feedback_enabled: false
++evidence_workflow_enabled: false
++local_tuning_enabled: false
++plan_temperature: 0.0
++code_temperature: 0.0
++debug_temperature: 0.0
++timeout_seconds: 600
++max_retries: 3
+diff --git a/configs/search/dcu_d_combined.yaml b/configs/search/dcu_d_combined.yaml
+new file mode 100644
+index 0000000..3fb9d3f
+--- /dev/null
++++ b/configs/search/dcu_d_combined.yaml
+@@ -0,0 +1,24 @@
++description: Matched DCU ablation d_combined
++max_attempts: 10
++epsilon: 0.3
++root_child_limit: 5
++dead_branch_threshold: 3
++leaderboard_size: 2
++context_limit: 5
++long_term_memory_enabled: true
++long_term_memory_top_k: 4
++long_term_memory_exploration_ratio: 0.0
++operator_memory_enabled: true
++operator_memory_public_corpus: true
++operator_memory_public_only: false
++operator_memory_path: knowledge/kernelwiki_dcu
++operator_memory_target_arch: gfx936
++operator_memory_experimental_page_ids: []
++profile_feedback_enabled: false
++evidence_workflow_enabled: false
++local_tuning_enabled: false
++plan_temperature: 0.0
++code_temperature: 0.0
++debug_temperature: 0.0
++timeout_seconds: 600
++max_retries: 3

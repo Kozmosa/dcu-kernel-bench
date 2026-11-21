@@ -1,0 +1,11 @@
+diff --git a/.gitattributes b/.gitattributes
+index 3225030..b1a3319 100644
+--- a/.gitattributes
++++ b/.gitattributes
+@@ -4,3 +4,6 @@
+ *.yaml text eol=lf
+ *.md text eol=lf
+ *.patch -text -whitespace
++
++# frozen corpus (byte-exact SHA256 lockfile): keep bytes, no CRLF rewriting
++knowledge/kernelwiki_dcu/** -text

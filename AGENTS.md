@@ -26,6 +26,7 @@
 | `benchmark/kernelbench_compat/` | ✅ | model_class 形态的框架寻题镜像树（`level{N}/<id>_*.py`，与 tasks 侧 reference.py 逐字节一致，测试强制） |
 | `benchmark/tools/` | ✅ | 工具与报告：`dcukb.py`（收集/准入/镜像）、`audit_prompts.py`（题面审计：后端口径/溯源泄漏/做法暴露）、`collect_metrics.py`（题目级指标：Compile/Correct Rate、Success@K、Fast1@K、Geomean/Median/Mean/Best Speedup、First Correct/Refine Gain Median，可叠加离线门槛）、`metrics.md`（**指标报告，唯一对外口径**）、`make_lean_prompts.py`（题面裁剪变体生成器，供 prompt 长度对照实验） |
 | `tests/test_prompt_english.py` | ✅ | 题面守卫：`Model` docstring 与题目源码零 CJK（含注释/assert 消息），`task.yaml` 与 case JSON 不在此列（不进 Agent 上下文） |
+| `patches/` | ✅ | **外部补丁序列**（框架源码不进本仓库）：`kernelweaver/`（基座 `c11ab7f`）、`pyramidkernel-1116/`（基座 `8352750`）是评测契约（原生 dtype + 任务容差 + oracle root 不参与选优）；`kernelweaver-dcu-wiki/`（基座 `cd5d85c`）是 DCU 公开 Wiki 语料 + 装载装配（`knowledge/kernelwiki_dcu/`、`src/knowledge/`、`configs/search/dcu_*.yaml`，装完自动核对语料 SHA256）。**`kernelweaver` 与 `kernelweaver-dcu-wiki` 暂时互斥**（前者按 `c11ab7f` 生成、撞 cli/workflow，后者依赖 `cd5d85c` 才有的 public_wiki 模块）；`pyramidkernel-1116` 无重叠。用 `benchmark/tools/apply_framework_fixes.py <series> <checkout> --check` 校验、去掉 `--check` 落地 |
 | `third_party/` | submodule | 外部仓库（aiter 等）以 git submodule 注册，**不 vendor 源码**；勿 `git add -f` 子仓内容 |
 | `operator_catalog.yaml` | ✅ | 全量算子登记与准入状态 |
 | `environment.yaml` | ✅ | 硬件/软件版本锁定 |

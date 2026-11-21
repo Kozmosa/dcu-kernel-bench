@@ -1,0 +1,132 @@
+diff --git a/scripts/audit_public_wiki.py b/scripts/audit_public_wiki.py
+index 6f34a1c..a0849d9 100644
+--- a/scripts/audit_public_wiki.py
++++ b/scripts/audit_public_wiki.py
+@@ -18,6 +18,8 @@ from src.knowledge.public_wiki import PUBLIC_ROOT, PublicKernelWiki, audit_publi
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--wiki", type=Path, default=PUBLIC_ROOT)
++    parser.add_argument("--target-arch", default="sm86")
++    parser.add_argument("--kernelbench-root", type=Path, default=ROOT / "KernelBench")
+     parser.add_argument("--freeze", action="store_true", help="Explicitly freeze reviewed source pages and retrieval data")
+     parser.add_argument("--manifest", type=Path, help="Optional task manifest; coverage only, no execution or generation")
+     parser.add_argument("--report", type=Path, help="Write an audit artifact outside the corpus")
+@@ -34,11 +36,11 @@ def main():
+     if args.manifest:
+         from src.core.loader import KernelBenchLoader
+         from src.experiment.batch_runner import load_task_manifest
+-        manifest = load_task_manifest(args.manifest, ROOT / "KernelBench", "cuda")
+-        wiki = PublicKernelWiki(args.wiki, target_arch="sm86")
++        manifest = load_task_manifest(args.manifest, args.kernelbench_root, "cuda")
++        wiki = PublicKernelWiki(args.wiki, target_arch=args.target_arch)
+         rows = []
+         for entry in manifest["tasks"]:
+-            task = KernelBenchLoader().load_official_problem(ROOT / "KernelBench", entry["level"], entry["problem_id"], backend=entry["backend"])
++            task = KernelBenchLoader().load_official_problem(args.kernelbench_root, entry["level"], entry["problem_id"], backend=entry["backend"])
+             evidence = wiki.retrieve(task)
+             pages = [p for p in evidence if p["page_type"] == "kernel"]
+             detected = wiki.task_families(task)
+diff --git a/src/knowledge/domain_wiki.py b/src/knowledge/domain_wiki.py
+index 07b829a..373e9ae 100644
+--- a/src/knowledge/domain_wiki.py
++++ b/src/knowledge/domain_wiki.py
+@@ -52,6 +52,7 @@ class DomainWiki:
+             str(page_id).strip() for page_id in (experimental_page_ids or []) if str(page_id).strip()
+         }
+         self.backend = _normal(payload.get("backend") or "")
++        self.backends = {_normal(item) for item in payload.get("backends", [])} or {self.backend}
+         policy = payload.get("policy") or {}
+         self.max_entries = max(0, int(policy.get("max_entries", 1)))
+         self.max_body_chars = max(0, int(policy.get("max_body_chars", 1400)))
+@@ -258,7 +259,7 @@ class DomainWiki:
+                     raise ValueError(f"Duplicate Wiki page id {page_id}: {markdown}")
+                 seen_ids.add(page_id)
+                 pages.append({
+-                    "path": str(markdown.relative_to(self.path)),
++                    "path": markdown.relative_to(self.path).as_posix(),
+                     "frontmatter": frontmatter,
+                     "body": body,
+                 })
+diff --git a/src/knowledge/public_wiki.py b/src/knowledge/public_wiki.py
+index fe8b4c3..2ebeabc 100644
+--- a/src/knowledge/public_wiki.py
++++ b/src/knowledge/public_wiki.py
+@@ -35,7 +35,7 @@ def corpus_files(path: Path) -> list[Path]:
+ 
+ 
+ def corpus_manifest(path: Path) -> dict:
+-    hashes = {str(p.relative_to(path)): hashlib.sha256(p.read_bytes()).hexdigest() for p in corpus_files(path)}
++    hashes = {p.relative_to(path).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in corpus_files(path)}
+     digest = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+     return {"version": 1, "sha256": digest, "files": hashes}
+ 
+@@ -75,18 +75,29 @@ def audit_public_corpus(path: Path, *, check_lock: bool = True) -> dict:
+                 raise ValueError(f"Missing provenance fields in {file}: {required - front.keys()}")
+             if front["id"] in pages:
+                 raise ValueError(f"Duplicate public page: {front['id']}")
+-            if (front["knowledge_scope"] != "public_general" or front["origin"] != "public_documentation"
+-                    or front["status"] != "reviewed" or front["reproducibility"] != "documentation"):
++            if front["knowledge_scope"] != "public_general" or front["status"] != "reviewed":
++                raise ValueError(f"Unreviewed or empirical page in public corpus: {file}")
++            provenance = (front["origin"], front["reproducibility"])
++            if provenance == ("public_documentation", "documentation"):
++                if front["confidence"] not in {"source-reported", "inferred"}:
++                    raise ValueError(f"Unsupported evidence claim: {file}")
++            elif provenance == ("local_measurement", "script"):
++                # 实测页：必须自报设备、软件栈与测量日期，且置信度只能是 measured。
++                missing = {"device", "stack", "measured_on"} - front.keys()
++                if missing:
++                    raise ValueError(f"Measured page missing provenance fields {missing}: {file}")
++                if front["confidence"] != "measured":
++                    raise ValueError(f"Measured page must claim confidence: measured: {file}")
++            else:
+                 raise ValueError(f"Unreviewed or empirical page in public corpus: {file}")
+-            if front["confidence"] not in {"source-reported", "inferred"}:
+-                raise ValueError(f"Unsupported evidence claim: {file}")
+             if file.relative_to(path).parts[0] == "sources":
+                 url = urlparse(str(front.get("url", "")))
+                 pinned = (url.hostname == "docs.nvidia.com" and "/archive/12.6.0/" in url.path
+                           or url.hostname == "raw.githubusercontent.com" and url.path.startswith("/pytorch/pytorch/v2.6.0/")
+                           or url.hostname == "docs.pytorch.org" and url.path.startswith("/docs/2.6/")
+                           or url.hostname == "developer.nvidia.com" and url.path == "/gpugems/gpugems3/part-vi-gpu-computing/chapter-39-parallel-prefix-sum-scan-cuda"
+-                          or url.hostname == "arxiv.org" and url.path == "/abs/2205.14135v1")
++                          or url.hostname == "arxiv.org" and url.path == "/abs/2205.14135v1"
++                          or url.hostname == "rocm.docs.amd.com" and url.path == "/projects/HIP/en/docs-6.4.0/how-to/hip_cpp_language_extensions.html")
+                 if url.scheme != "https" or not pinned or not front.get("revision"):
+                     raise ValueError(f"Source needs an approved, versioned primary URL: {file}")
+             elif not front.get("sources"):
+@@ -185,7 +196,7 @@ class PublicKernelWiki(DomainWiki):
+         return matched
+ 
+     def retrieve(self, task):
+-        if task.backend != self.backend or not self.max_entries:
++        if task.backend not in self.backends or not self.max_entries:
+             return []
+         families = self.task_families(task)
+         candidates, fallback, hardware = [], [], []
+@@ -193,7 +204,7 @@ class PublicKernelWiki(DomainWiki):
+             f = page["frontmatter"]
+             if not page["path"].startswith("wiki/"):
+                 continue
+-            if self.target_arch not in f.get("architectures", []) or self.backend not in f.get("backends", []):
++            if self.target_arch not in f.get("architectures", []) or task.backend not in f.get("backends", []):
+                 continue
+             overlap = families & set(f.get("operator_families", []))
+             if overlap:
+@@ -210,6 +221,16 @@ class PublicKernelWiki(DomainWiki):
+         if not selected:
+             selected = [(page, 0) for page in fallback[:1]]
+         selected += [(page, 0) for page in hardware[:1]]
++        # 合规页常驻：无论命中哪个算子页，都把"禁用算子/替代写法"塞进上下文，
++        # 因为离线静态审计会拦下在线能跑通的取巧实现。
++        compliance = [page for page in self.pages
++                      if page["frontmatter"].get("id") == "public-compliance"
++                      and task.backend in page["frontmatter"].get("backends", [])
++                      and self.target_arch in page["frontmatter"].get("architectures", [])]
++        if compliance and all(page is not compliance[0] for page, _ in selected):
++            if len(selected) >= self.max_entries:
++                selected = selected[: self.max_entries - 1]
++            selected.append((compliance[0], 0))
+         return [self._page_evidence(page, score, sorted(families)) for page, score in selected[:self.max_entries]]
+ 
+     def _page_evidence(self, page, score, query_terms):
