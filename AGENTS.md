@@ -10,6 +10,7 @@
 
 1. **源码隔离**：`third_party/aiter/` 和 `benchmark/private/` 的内容**绝不**进入给生成 Agent 的上下文。Agent 只看 `benchmark/tasks/<id>/`。
 2. **禁止绕过**：生成实现的核心计算必须在提交文件中完成，禁止调用 MIOpen / rocBLAS / hipBLASLt / hipDNN / ATen 完成核心计算（`static_audit.py` 强制检查）。
+   同一脚本还做**平台符号检查**（`kind=platform`）：CUDA runtime API、`cuda*.h`、`CUDART_*` 常量、PTX 内联汇编、Triton 的 NVIDIA 命名空间在 DCU（hipcc + AMD Triton）上必然编不过，出现即判失败；`at::cuda::` / `torch.cuda.` / `<ATen/cuda/...>` 在 ROCm 版 torch 里是正确写法，不检查。`--no-platform` 可单独关掉这一类（`tests/test_platform_audit.py` 回归）。
 3. **统一接口**：同一入口形态的任务共用同一结构——callable 任务共用 Starter（Agent 只补全 kernel 与 launch）；model_class 任务共用框架生成的 `ModelNew` scaffold（Agent 只在锚点区域内编辑）。
 4. **环境一致**：官方基线与生成实现必须在同一机器、同一 `environment.yaml` 锁定环境下比较。
 5. **题面全英文、且不写做法**：`Model` docstring 是唯一 Agent 可见上下文，必须**零 CJK**（`tests/test_prompt_english.py` 回归）且**不含实现路线**——数学定义/IO 契约/边界/禁用/硬件可以写，`online softmax`、`split-KV`、`two-pass`、"Target implementation shape"、"Reference structure" 这类做法叙述不行（`audit_prompts.py` 的 C 类「散文式题解」规则检查）。理由：语义已由 scaffold 里的参考实现给出，写做法等于给答案、会污染该题分数。
