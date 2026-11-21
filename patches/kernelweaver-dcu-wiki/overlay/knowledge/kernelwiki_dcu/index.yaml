@@ -1,0 +1,29 @@
+version: 1
+name: DCU portable HIP operator knowledge
+knowledge_scope: public_general
+backend: cuda
+architectures:
+- gfx936
+policy:
+  max_entries: 3
+  max_body_chars: 1800
+  global_constraints:
+  - Preserve the actual operator contract, dtype, strides, state updates and numerical
+    tolerance.
+  - Use the permitted build environment and validate every generated candidate.
+  - Read shape and layout from the current task; do not assume a shape or launch geometry
+    from a page.
+  - Optimization suggestions are hypotheses, with no measured speed guarantee.
+  - The cuda backend label denotes a HIP extension on this target, not NVIDIA hardware.
+  - Generic HIP and PyTorch documentation is guidance, not certification of DTK feature
+    support.
+  - The core computation must be implemented in the submitted kernel. Calls to torch.matmul,
+    torch.mm, torch.softmax, F.softmax, F.linear, conv2d, torch.cumsum or autograd inside the
+    compute path are rejected by the static audit even when the online numeric check passes;
+    rewrite them as explicit kernels (see the compliance page).
+  - Query installed device and compiler capabilities; wave size and shared-memory figures
+    stated in the hardware page are measured on the deployment stack and are advisory,
+    not vendor specifications.
+backends:
+- cuda
+- triton

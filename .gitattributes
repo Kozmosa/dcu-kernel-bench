@@ -1,3 +1,7 @@
 # 补丁文件必须保持 LF：本机 core.autocrlf=true 会在 checkout 时把 \n 翻成 \r\n，
 # 补丁的上下文行带上 \r 后 git apply 就匹配不上了（曾实测失败）。
 *.patch -text
+# DCU Wiki 语料的 overlay：锁文件是逐文件字节 SHA256，必须按字节检出（否则 CRLF 会让
+# apply_framework_fixes 的哈希对账直接失败）。与 patches/kernelweaver-dcu-wiki/0001 里的
+# 目标仓库规则同源。
+patches/kernelweaver-dcu-wiki/overlay/** -text
