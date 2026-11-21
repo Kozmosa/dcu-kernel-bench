@@ -121,11 +121,16 @@ def main():
     parser.add_argument('--skip-verify', action='store_true', help='skip the post-apply corpus lock check')
     parser.add_argument('--pull-overlay', action='store_true',
                         help='refresh patches/<series>/overlay/ from the checkout instead of installing')
+    parser.add_argument('--skip-base-check', action='store_true',
+                        help='跳过基座祖先检查（用于交付的快照 tar 包：没有上游 git 历史）')
     args = parser.parse_args()
     base, folder = SERIES[args.framework]
     target = args.checkout.resolve()
     series_dir = ROOT / 'patches' / folder
-    git(target, 'merge-base', '--is-ancestor', base, 'HEAD')
+    if not args.skip_base_check:
+        git(target, 'merge-base', '--is-ancestor', base, 'HEAD')
+    else:
+        print(f'skip base check (expect {base})')
 
     if args.pull_overlay:
         pull_overlay(target, series_dir)
