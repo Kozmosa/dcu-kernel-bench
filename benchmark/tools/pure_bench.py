@@ -181,6 +181,9 @@ def run_one(item: dict, args, kernelbench_root: Path, pure_root: Path) -> dict:
         "reference_runtimes": evaluation.reference_runtimes, "speedups": evaluation.speedups,
         "primary_reference": evaluation.primary_reference,
         "debug_attempts": 0, "llm_usage": usage,
+        # 与框架臂对齐：评测日志必须落进 run.json，否则事后无法核对这一条走的是
+        # 1116 在线契约（dcukb_contract=native_v1 / 原生 dtype / 任务容差）还是上游 fp32 语义。
+        "logs": list(evaluation.logs),
     }
     result["nodes"] = {"n1": node}
     result["best_node_id"] = "n1" if evaluation.compile_ok and evaluation.correct else None
