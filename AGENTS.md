@@ -113,6 +113,8 @@
 ## 环境注意
 
 - 真机评测依赖 DTK ≥ 25.04（Triton track 的硬要求）、hipcc、DTK 版 PyTorch。
+- **2026-11-21 换机实测：平台给的卡不是 BW**。`021 组/昆山`「异构加速卡AI 64GB PCIE」实测是 **K500SM_AI / `gfx928:sramecc+:xnack-` / 120 CU / 64 GiB**，而题目包声明的目标架构是 `gfx936`（题面与 `environment.yaml` 的 `benchmark_target_arch` 都是 gfx936）。完整实测值、失效清单与三条处置方案见 `docs/machine-2026-11-21-k500sm-gfx928.md`。**换机上机第一件事**：`source /opt/dtk/env.sh && python3 benchmark/tools/machine_fingerprint.py --expect environment.yaml`，据此判断"只重采基线"还是"要重测 wiki 硬件页 / 改题面架构口径"。
+- 同一台机（021）的其他实测事实：容器只见 **1 张卡**（`torch.cuda.device_count()==1`）；**未装 triton 与 aiter**；**无外网**（pypi / download.sourcefind.cn / 公网 443 全不通），只能上传 wheel 或走反向隧道；无 cgroup 内存上限（宿主 503 GiB，`memory.max` 不存在）；静态 shared 上限仍是 **65536 B**（96 KiB 编译期报 `local memory exceeds limit`）。
 - 开发 venv 曾放在 WSL 侧 `~/.venvs/dcu-kernel-bench`（torch CPU + pytest），**现已不存在**（目录被清空），当前实际做法：Windows 用 `C:\Python314\python.exe`（有 numpy、无 torch、无 pyyaml），WSL 用系统 `python3`（有 pyyaml、无 torch）。要跑需 torch 的套件，只能上真机。**不要把 venv 放回 `/mnt/e`**：NTFS 挂载上的 `.venv` 已两次被清空 `bin/` 与 `site-packages/`（原因未查明）。
 - `third_party/aiter` 是独立 git 仓库。Windows 下它有两个文件名带冒号、无法 checkout 的 Triton autotune JSON，已用 sparse-checkout 排除并设 `core.protectNTFS=false`——**不要在该仓库内执行 `git reset --hard`**。
 - 网络：GitHub 直连不通，境外资源走代理 127.0.0.1:16888 或 ghfast.top 镜像；developer.sourcefind.cn / download.sourcefind.cn 直连。
