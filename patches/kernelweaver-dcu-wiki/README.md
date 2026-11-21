@@ -59,7 +59,7 @@ python benchmark/tools/apply_framework_fixes.py kernelweaver-dcu-wiki /path/to/K
 python3 -c "import sys;sys.path.insert(0,'.');from pathlib import Path;\
 from src.knowledge.public_wiki import audit_public_corpus as a;\
 print(a(Path('knowledge/kernelwiki_dcu'))['sha256'])"
-# 期望：b75296feeba7a9664826d47882bf8c5e3f33d065aa5a9489524678855451649a
+# 期望：752d4143d46750d28e75ca4a1352ab7d0b12475f33990bb6bcd4ef9381c0838d
 ```
 
 端到端（两轨检索、合规页在上下文、sm86 被拒）：
@@ -91,7 +91,7 @@ PY
 
 | 字段 | 值 |
 |---|---|
-| 汇总 SHA256 | `b75296feeba7a9664826d47882bf8c5e3f33d065aa5a9489524678855451649a` |
+| 汇总 SHA256 | `752d4143d46750d28e75ca4a1352ab7d0b12475f33990bb6bcd4ef9381c0838d` |
 | 文件数 | 33（`index.yaml` + `data/` 2 + `sources/` 12 + `wiki/` 17）+ `corpus.lock.json` |
 | 页面数 | 30（含 gfx928 实测硬件页） |
 | 冻结时间 | 2026-11-21（迁移到 gfx928 后重新冻结） |
