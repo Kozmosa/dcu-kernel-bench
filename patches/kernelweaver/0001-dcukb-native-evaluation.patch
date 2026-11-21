@@ -50,10 +50,10 @@ index 0000000..f07334f
 +    sys.modules[name] = module
 +    return module
 diff --git a/src/evaluation/evaluator_paper.py b/src/evaluation/evaluator_paper.py
-index e83e738..695e393 100644
+index f324d57..d700336 100644
 --- a/src/evaluation/evaluator_paper.py
 +++ b/src/evaluation/evaluator_paper.py
-@@ -58,6 +58,16 @@ class KernelBenchPaperEvaluator(Evaluator):
+@@ -68,6 +68,16 @@ class KernelBenchPaperEvaluator(Evaluator):
                  f"KernelBenchPaperEvaluator only supports {supported_kernelbench_backends_text()} backends, got backend={backend}",
              )
  

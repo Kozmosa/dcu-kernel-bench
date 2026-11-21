@@ -39,15 +39,55 @@ def task_directory(task) -> Path:
     return directory
 
 
-def prompt_contract(task) -> str:
+def _machine_readable(value):
+    """只保留可机读字段：数字、纯 ASCII 名字及其容器。
+
+    `task.yaml` 的 `tolerance` 里夹着中文的 `compare` / `note` 散文，注入生成上下文
+    会违反「题面零 CJK」的铁律，所以含非 ASCII 的字符串整条丢掉——判定本身仍由
+    `task.yaml` 原文决定，不依赖这份摘要。
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        return value if value.isascii() else None
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            if not (isinstance(key, str) and key.isascii()):
+                continue
+            item = _machine_readable(item)
+            if item not in (None, {}, []):
+                cleaned[key] = item
+        return cleaned
+    if isinstance(value, (list, tuple)):
+        items = [_machine_readable(item) for item in value]
+        return [item for item in items if item not in (None, {}, [])]
+    return None
+
+
+def contract_payload(task) -> dict:
+    """task.yaml 里可以给生成侧看的机器可读摘要（去掉散文、去掉非 ASCII）。"""
     spec = yaml.safe_load((task_directory(task) / 'task.yaml').read_text(encoding='utf-8'))
-    public = {key: spec[key] for key in ('io', 'tolerance', 'tolerance_segments', 'forbidden') if key in spec}
-    return ('DCUKB evaluation contract (authoritative): preserve native input dtypes; '
-            'inputs are NOT uniformly converted to fp32. Output shape, dtype and device '
-            'must match Model. Use the task tolerances below, NOT a fixed 1e-4. '
-            'Support the declared dtype/shape domain. Core computation must use your '
-            'own kernels; static compliance is checked before execution.\n'
-            + json.dumps(public, ensure_ascii=True, sort_keys=True))
+    public = {}
+    for key in ('io', 'tolerance', 'tolerance_segments', 'forbidden'):
+        if key in spec:
+            cleaned = _machine_readable(spec[key])
+            if cleaned not in (None, {}, []):
+                public[key] = cleaned
+    return public
+
+
+def prompt_contract(task) -> str:
+    public = contract_payload(task)
+    contract = ('DCUKB evaluation contract (authoritative): preserve native input dtypes; '
+                'inputs are NOT uniformly converted to fp32. Output shape, dtype and device '
+                'must match Model. Use the task tolerances below, NOT a fixed 1e-4. '
+                'Support the declared dtype/shape domain. Core computation must use your '
+                'own kernels; static compliance is checked before execution.\n'
+                + json.dumps(public, ensure_ascii=True, sort_keys=True))
+    return contract
 
 
 def prepare_task(task):

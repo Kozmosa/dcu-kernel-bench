@@ -24,10 +24,11 @@
 
 | 仓库 | 起点 | 补丁目录 |
 |---|---|---|
-| Kozmosa/KernelWeaver | `c11ab7f` | `patches/kernelweaver/` |
+| Kozmosa/KernelWeaver | `cd5d85c`（2026-11-21 从 `c11ab7f` rebase 过来） | `patches/kernelweaver/` |
 | Kozmosa/PyramidKernel | `8352750` | `patches/pyramidkernel-1116/` |
 
-两个目录是两个独立序列，各自按文件名顺序应用，**不要与旧 `patches/pyramidkernel/0001..0006` 混用**。旧目录保留历史部署补丁。脚本检查基座祖先、完整补丁适用性，并在失败时停止，不模糊套用补丁。
+两个目录是两个独立序列，各自按文件名顺序应用，**不要与旧 `patches/pyramidkernel/0001..0006` 混用**。
+KernelWeaver 侧两个序列（`kernelweaver` 与 `kernelweaver-dcu-wiki`）自 2026-11-21 起同以 `cd5d85c` 为基座，改的文件不重叠，可任意顺序、任意组合落地；rebase 时唯一需要人工合并的是 `src/core/workflow.py` 的三个评测调用点（`_evaluate_plan_code` / `_evaluate_debug` / `run_search_agent`）——`cd5d85c` 在那个位置引入了 `normalize_anchor_scaffold(...)`，合并后要写成 `_evaluate_generated(task, normalized_code, config, evaluator)`，两个特性都保留。旧目录保留历史部署补丁。脚本检查基座祖先、完整补丁适用性，并在失败时停止，不模糊套用补丁。
 
 ```bash
 python benchmark/tools/apply_framework_fixes.py kernelweaver /path/to/KernelWeaver --check

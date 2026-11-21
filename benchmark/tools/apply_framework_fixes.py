@@ -26,11 +26,13 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 SERIES = {
-    'kernelweaver': ('c11ab7f', 'kernelweaver'),
+    'kernelweaver': ('cd5d85c', 'kernelweaver'),
     'pyramidkernel': ('8352750', 'pyramidkernel-1116'),
-    # Wiki 语料的装载装配依赖 cd5d85c 引入的 src/knowledge/public_wiki.py 与 .gitattributes，
-    # 而 kernelweaver 代码序列是按 c11ab7f 生成的（两者在 cli/workflow 上会撞），
-    # 所以这里如实记录不同的基座。
+    # 两个 KernelWeaver 序列现在都以 cd5d85c 为基座（2026-11-21 rebase），可以任意顺序、
+    # 任意组合落地：改的文件不重叠，`0002-exclude-oracle-roots` 原先撞在
+    # src/core/workflow.py 的 `_evaluate_plan_code` 上，已按 cd5d85c 的
+    # `normalize_anchor_scaffold` 版本重新合并。Wiki 语料另外依赖 cd5d85c 才有的
+    # src/knowledge/public_wiki.py 与 .gitattributes。
     'kernelweaver-dcu-wiki': ('cd5d85c', 'kernelweaver-dcu-wiki'),
 }
 OVERLAY_DIR = 'overlay'

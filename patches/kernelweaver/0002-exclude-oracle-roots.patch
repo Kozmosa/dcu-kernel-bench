@@ -1,8 +1,8 @@
 diff --git a/src/cli.py b/src/cli.py
-index b7ca245..389e276 100644
+index 6d1449c..dfa4ba1 100644
 --- a/src/cli.py
 +++ b/src/cli.py
-@@ -495,12 +495,12 @@ def _run_kernelbench_batch(args: argparse.Namespace) -> int:
+@@ -563,12 +563,12 @@ def _run_kernelbench_batch(args: argparse.Namespace) -> int:
                  )
                  run_path = save_run(result, task_output_dir)
                  validation_path = None
@@ -17,7 +17,7 @@ index b7ca245..389e276 100644
                          "workflow": result.workflow,
                          "run_profile": result.run_profile,
                          "search_profile": result.search_profile,
-@@ -612,17 +612,17 @@ def _report_paper(args: argparse.Namespace) -> int:
+@@ -670,17 +670,17 @@ def _report_paper(args: argparse.Namespace) -> int:
  
  def _save_and_print(result, output_dir: str) -> int:
      run_path = save_run(result, output_dir)
@@ -38,7 +38,7 @@ index b7ca245..389e276 100644
      print(f"task={result.task_name} workflow={result.workflow} best_node={result.best_node_id} status={best.status}")
      print(f"run_profile={result.run_profile} search={result.search_profile} evaluator={result.evaluator_profile} measurement={result.measurement_profile}")
      print(f"attempts={result.stats.get('attempt_count', 0)} pruned={len(result.pruned_nodes)}")
-@@ -639,7 +639,7 @@ def _show_run(args: argparse.Namespace) -> int:
+@@ -697,7 +697,7 @@ def _show_run(args: argparse.Namespace) -> int:
  def _summarize_runs(args: argparse.Namespace) -> int:
      for raw_path in args.paths:
          result = load_run(raw_path)
@@ -48,10 +48,10 @@ index b7ca245..389e276 100644
              f"{raw_path}: task={result.task_name} workflow={result.workflow} "
              f"run_profile={result.run_profile} best={result.best_node_id} "
 diff --git a/src/core/tree.py b/src/core/tree.py
-index e0e2e17..c07e4f7 100644
+index 28fa474..ac40362 100644
 --- a/src/core/tree.py
 +++ b/src/core/tree.py
-@@ -72,7 +72,8 @@ class TreeMemory:
+@@ -75,7 +75,8 @@ class TreeMemory:
  
      def update_leaderboard(self, node_id: str, config: StarkConfig) -> None:
          node = self.nodes[node_id]
@@ -62,10 +62,10 @@ index e0e2e17..c07e4f7 100644
                  self.leaderboard.append(node_id)
              self.leaderboard.sort(
 diff --git a/src/core/workflow.py b/src/core/workflow.py
-index 2eb9912..251ddb2 100644
+index 734f8ba..d63356b 100644
 --- a/src/core/workflow.py
 +++ b/src/core/workflow.py
-@@ -55,6 +55,15 @@ def _evaluation_to_root_node(code: str, evaluation: EvaluationResult) -> SearchN
+@@ -59,6 +59,15 @@ def _evaluation_to_root_node(code: str, evaluation: EvaluationResult) -> SearchN
      )
  
  
@@ -81,25 +81,25 @@ index 2eb9912..251ddb2 100644
  def _has_valid_anchor_edits(code: str, anchor_edits: list[AnchorEdit]) -> bool:
      available_anchors = set(extract_anchor_names(code))
      if not anchor_edits or not available_anchors:
-@@ -186,7 +195,7 @@ def _evaluate_plan_code(
-     candidate_code = code_agent.run(task, selected_node, proposal, code_context)
-     if not _anchors_preserved(selected_node.code, candidate_code):
+@@ -219,7 +228,7 @@ def _evaluate_plan_code(
+     normalized_code = normalize_anchor_scaffold(selected_node.code, candidate_code)
+     if normalized_code is None:
          return candidate_code, _broken_anchor_evaluation(selected_node.code, candidate_code)
--    return candidate_code, evaluator.evaluate(task, candidate_code, config)
-+    return candidate_code, _evaluate_generated(task, candidate_code, config, evaluator)
+-    return normalized_code, evaluator.evaluate(task, normalized_code, config)
++    return normalized_code, _evaluate_generated(task, normalized_code, config, evaluator)
  
  
  def _evaluate_debug(
-@@ -201,7 +210,7 @@ def _evaluate_debug(
-     proposal = _build_debug_proposal(selected_node)
-     if not _anchors_preserved(selected_node.code, candidate_code):
+@@ -235,7 +244,7 @@ def _evaluate_debug(
+     normalized_code = normalize_anchor_scaffold(selected_node.code, candidate_code)
+     if normalized_code is None:
          return proposal, candidate_code, _broken_anchor_evaluation(selected_node.code, candidate_code)
--    return proposal, candidate_code, evaluator.evaluate(task, candidate_code, config)
-+    return proposal, candidate_code, _evaluate_generated(task, candidate_code, config, evaluator)
+-    return proposal, normalized_code, evaluator.evaluate(task, normalized_code, config)
++    return proposal, normalized_code, _evaluate_generated(task, normalized_code, config, evaluator)
  
  
  def _finalize_run(
-@@ -215,8 +224,13 @@ def _finalize_run(
+@@ -249,8 +258,13 @@ def _finalize_run(
      selection_exclusions: list[dict[str, str]],
      workflow: str,
  ) -> RunResult:
@@ -115,7 +115,7 @@ index 2eb9912..251ddb2 100644
      stats["pruned_count"] = len(tree.pruned_nodes)
      return RunResult(
          task_name=task.name,
-@@ -247,9 +261,9 @@ def _finalize_run(
+@@ -281,9 +295,9 @@ def _finalize_run(
          kernelbench_evaluator=config.kernelbench_evaluator,
          grounded_regions=list(task.grounded_regions),
          semantic_profile=task.semantic_profile,
@@ -128,7 +128,7 @@ index 2eb9912..251ddb2 100644
      )
  
  
-@@ -447,7 +461,7 @@ def run_search_agent(task: TaskSpec, config: StarkConfig, provider, evaluator) -
+@@ -592,7 +606,7 @@ def run_search_agent(task: TaskSpec, config: StarkConfig, provider, evaluator) -
  
          context = _search_only_context(tree, selected_id)
          proposal, candidate_code = provider.generate_search_candidate(task, selected_node, context)
@@ -183,7 +183,7 @@ index 7374b1c..9b34081 100644
  
  
 diff --git a/src/models.py b/src/models.py
-index b87c887..dadc33d 100644
+index 66b9352..f4dacaa 100644
 --- a/src/models.py
 +++ b/src/models.py
 @@ -129,6 +129,12 @@ class SearchNode:
@@ -199,7 +199,7 @@ index b87c887..dadc33d 100644
      @property
      def is_failure(self) -> bool:
          return self.node_status in {"compile_fail", "runtime_fail", "correctness_fail"}
-@@ -211,7 +217,7 @@ class StarkConfig:
+@@ -261,7 +267,7 @@ class StarkConfig:
  class RunResult:
      task_name: str
      config: StarkConfig
@@ -208,7 +208,7 @@ index b87c887..dadc33d 100644
      leaderboard: list[str]
      nodes: dict[str, SearchNode]
      selection_history: list[str]
-@@ -240,3 +246,15 @@ class RunResult:
+@@ -290,3 +296,15 @@ class RunResult:
      speedups: dict[str, float | None] = field(default_factory=dict)
      primary_reference: str | None = None
      semantic_profile: SemanticProfile | None = None
