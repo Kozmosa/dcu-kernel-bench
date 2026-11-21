@@ -1,20 +1,24 @@
 # environment.yaml — 评测环境锁定
 # 官方基线与 Agent 生成实现必须在本文件锁定的同一环境内比较。
-# 2026-11-21 更新：按新上机环境实测填写。注意：**实测卡的架构与题目包声明的目标架构不一致**，
-# 详见 docs/machine-2026-11-21-k500sm-gfx928.md。
+# 2026-11-21：旧机（BW）不可用，评测目标**迁移到当前机器**（K500SM_AI / gfx928）。
+# 迁移范围：题面硬件句、kernelbench 镜像、工具模板、DCU Wiki 语料与消融配置。
+# 未完成：基线重采、aiter 安装、LLM 出口（见 docs/machine-2026-11-21-k500sm-gfx928.md）。
 
 hardware:
-  # 题目包（task docstring / task.yaml / kernelbench 镜像）里声明的目标架构。
-  # 现有 66 道题的题面写的是 gfx936；这是"题面口径"，不能因换机擅自改写，除非决定整体迁移。
+  # 题目包（task docstring / kernelbench 镜像）声明的目标架构 —— 迁移后统一为 gfx928。
   benchmark_target_arch:
+    - gfx928
+
+  # 历史目标（gfx936 时代的题面与全部旧基线都出自这台）：保留记录，不再作为目标。
+  historical_target_arch:
     - gfx936
     - gfx938
 
-  # 本轮实际拿到的卡（021 组 / 昆山），2026-11-21 实测。
+  # 当前机器（021 组 / 昆山），2026-11-21 实测。
   measured_machine:
     device_name: "K500SM_AI"
     vendor: "C-3000"
-    gcn_arch: "gfx928:sramecc+:xnack-"   # ← 与 benchmark_target_arch 不同
+    gcn_arch: "gfx928:sramecc+:xnack-"
     device_id: "0x6210"                  # rocm-smi DID
     pci_bus: "0000:4:00.0"
     vbios: "5.715.001000p.618009"
@@ -24,24 +28,27 @@ hardware:
     workgroup_max: 1024
     max_waves_per_cu: 40
     work_items_per_cu: 2560
-    vram_mib: 65520                      # rocm-smi 口径，约 64 GiB
+    vram_mib: 65520
     l2_kib: 8192
     clock_mhz: 1400
     power_cap_w: 300
-    shared_mem_per_block_bytes: 65536    # 96 KiB 静态 shared 直接编译失败
-    copy_GBps: 687.2                     # 自测 float4 拷贝 512 MiB×10，仅作量级参考
-    visible_hcu: 1                       # 容器内只有 1 张卡（torch device_count=1）
+    shared_mem_per_block_bytes: 65536    # 96 KiB 静态 shared 编译期被拒
+    copy_GBps: 687.8                     # 自测 float4 拷贝 512 MiB×10，仅作量级参考
+    visible_hcu: 1
     host: "crdnotebook-2123985930296999938-scne28t3r4-69492"
     host_cpu: "Hygon C86 7185 32-core（nproc 可见 32）"
-    host_ram_gib: 503                    # 未设 cgroup 内存上限（memory.max 不存在）
+    host_ram_gib: 503                    # 无 cgroup 内存上限
     disk: "overlay 1.8T，可用 524G"
 
 software:
   dtk: "26.04"                           # /opt/dtk -> /opt/dtk-26.04，source /opt/dtk/env.sh
   hipcc: "dcc 25.10.0-0 (clang 17.0.0)"
   python: "3.11.9"
-  torch: "2.9.0+das.opt1.dtk2604"        # HIP 6.3.26093
-  triton: ""                             # 镜像内**未安装**，需上传 DAS wheel（dtk2604/torch290/cp311）
+  torch: "2.9.0+das.opt1.dtk2604"        # HIP 6.3.26093，wheel tag cp311
+  triton: "3.3.0+das.opt1.dtk2604.torch290"
+  # triton wheel：dtk2604/torch290/cp311，取自 download.sourcefind.cn /4/triton/DAS1.8/
+  # 装机后已验证：vecadd ✓、tl.dot fp16 ✓（max err 1.6e-2）、triton.language.extra.libdevice ✓
+  aiter: ""                              # 未安装；采 aiter 基线前必须装（或装最小导入垫片）
   os: "Ubuntu 22.04.5 LTS 容器，宿主内核 3.10.0-957.el7"
 
 build:
@@ -49,15 +56,14 @@ build:
   cxxstd: c++17
   default_flags:
     - "-O3"
-    # 运行时 hipcc 会自动探测本机架构；写死 --offload-arch 时必须用实测架构，否则产物跑不起来
-    - "--offload-arch=gfx928"
+    - "--offload-arch=gfx928"            # 显式指定时必须与实测架构一致，否则产物跑不起来
 
 timing:
   warmup_iters: 10
   repeat_iters: 50
-  reduction: median           # 预热后重复运行取中位数
+  reduction: median
 
 notes:
-  - "上一台机器（现有基线的来源）：BW / gfx936:sramecc+:xnack- / 80 CU / 68.7 GB / DTK 26.04 / torch 2.9.0 / triton 3.3.0+das.opt1.dtk2604。"
-  - "benchmark/private/*/baseline.json 全部来自旧机（environment.device=BW, gcn_arch=gfx936），在本机上不可直接使用，换机后必须重采。"
-  - "本机无外网（pypi、download.sourcefind.cn、公网 443 均不可达）：triton 与 aiter 只能上传 wheel/包，或走反向隧道。"
+  - "旧机（现有基线来源）：BW / gfx936:sramecc+:xnack- / 80 CU / 68.7 GB / DTK 26.04 / triton 3.3.0——已不可用。"
+  - "benchmark/private/*/baseline.json 全部来自旧机（environment.gcn_arch=gfx936），在 gfx928 上**未重采前不可使用**。"
+  - "本机无外网（pypi / download.sourcefind.cn / 公网 443 均不可达）：triton 与 aiter 只能由本地上传；LLM 出口需反向隧道。"

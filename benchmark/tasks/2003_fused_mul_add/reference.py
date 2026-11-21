@@ -85,7 +85,7 @@ class Model(nn.Module):
         provided by any precompiled operator library is also forbidden (the final
         static audit does substring matching on the code outside
         docstrings/comments);
-      - Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+      - Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self):

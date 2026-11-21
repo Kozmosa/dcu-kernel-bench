@@ -64,7 +64,7 @@ class Model(nn.Module):
 
     Disallowed list: aiter / torch.matmul / torch.bmm / torch.einsum /
     torch.nn.functional.linear / torch.topk / torch.argmax / torch.sigmoid.
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self, fused_shared_experts: bool = True):

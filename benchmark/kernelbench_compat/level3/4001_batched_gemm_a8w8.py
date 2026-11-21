@@ -58,7 +58,7 @@ class Model(nn.Module):
         .to(torch.int8) / .to(out_dtype) at the entry point recovers them
         losslessly.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: TN layout (x row-major (B,M,K), w row-major (B,N,K)), no split-K;
     B/M/N/K are any values >= 1 with no alignment requirement; the accumulation
     runs in float32 and must agree with the reference fp32 GEMM within tolerance.

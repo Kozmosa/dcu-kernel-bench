@@ -75,7 +75,7 @@ class Model(nn.Module):
     substring matching):
     torch.scatter / .scatter( / .scatter_( / scatter_add / scatter_reduce /
     index_put / torch.put( / .put_( / index_copy / torch_scatter / hipdnn.
-    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    Target hardware: Hygon DCU (gfx928). Implementation language: HIP
     (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
     regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
     is not available on this machine).

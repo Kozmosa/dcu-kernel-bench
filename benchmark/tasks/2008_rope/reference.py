@@ -75,7 +75,7 @@ class Model(nn.Module):
     Forbidden: scaled_dot_product_attention / sdpa / flash_attn /
     torch.matmul / torch.bmm / torch.einsum / torch.softmax / torch.polar /
     torch.view_as_complex.
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: dense sbhd non-cached forward; variable-length thd, cos/sin cache
     addressing, the dual-input GQA case, the backward pass, and 2D image rotation are
     outside this task.

@@ -8,7 +8,7 @@ id: public-compliance
 title: Compliance with the task forbidden-operator list
 type: contract
 architectures:
-- gfx936
+- gfx928
 backends:
 - cuda
 - triton

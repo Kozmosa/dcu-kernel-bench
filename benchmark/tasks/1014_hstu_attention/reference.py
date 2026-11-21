@@ -70,7 +70,7 @@ class Model(nn.Module):
       - Use float32 for intermediate accumulation; cast the output back to v's
         dtype.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: forward only, non-quantized inputs, no dropout, no
     backpropagation.
     """

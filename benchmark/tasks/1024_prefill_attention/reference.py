@@ -72,7 +72,7 @@ class Model(nn.Module):
         from int(b_seq_len.max()), and the kernel masks out-of-range rows/columns
         per sequence using L_i.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: contiguous non-paged KV, ragged variable-length batch, GQA,
     causal/non-causal, fp16/bf16 non-quantized inputs; no paged KV cache, no
     prefix-pool indirect addressing, no custom mask, no sliding window, no

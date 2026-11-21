@@ -92,7 +92,7 @@ class Model(nn.Module):
     torch.nn.functional.group_norm / F.group_norm / torch.group_norm /
     native_group_norm / torch.ops.aten.native_group_norm /
     torch.ops.aten.group_norm / autograd / .backward( / miopen / hipdnn.
-    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    Target hardware: Hygon DCU (gfx928). Implementation language: HIP
     (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor regions;
     device code must include <hip/hip_runtime.h> -- <cuda_runtime.h> is not available
     on this machine).

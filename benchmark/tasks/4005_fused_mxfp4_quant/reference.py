@@ -149,7 +149,7 @@ class Model(nn.Module):
         (bfloat16/float16 values are exact in fp32); just compute with those
         values directly.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: single-path residual + RMSNorm + MXFP4 dynamic quantization
     (block size 32, even rounding), without the downstream GEMM main
     computation.

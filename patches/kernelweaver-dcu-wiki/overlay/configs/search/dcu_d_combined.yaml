@@ -12,7 +12,7 @@ operator_memory_enabled: true
 operator_memory_public_corpus: true
 operator_memory_public_only: false
 operator_memory_path: knowledge/kernelwiki_dcu
-operator_memory_target_arch: gfx936
+operator_memory_target_arch: gfx928
 operator_memory_experimental_page_ids: []
 profile_feedback_enabled: false
 evidence_workflow_enabled: false

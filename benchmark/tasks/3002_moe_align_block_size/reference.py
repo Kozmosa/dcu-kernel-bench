@@ -76,7 +76,7 @@ class Model(nn.Module):
       - Integer arithmetic throughout (no floating-point accumulation); the
         output is packed into float32 integers per the protocol above.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: the pure scheduling prologue (sorting / alignment / block table
     generation); no grouped GEMM body and no routing scores (softmax/topk are
     already done upstream).

@@ -85,7 +85,7 @@ class Model(nn.Module):
         multiplication and direct division differ by 1 ulp, which shifts code
         words on tie boundaries); int8 rounding uses round_half_even.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: 2D contiguous input, int8 and fp8 e4m3 target dtypes, three
     modes in one operator; without the GEMM back-end computation and without
     block-scaling floating-point (mxfp4) quantization.

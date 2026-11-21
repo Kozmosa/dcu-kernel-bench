@@ -84,7 +84,7 @@ class Model(nn.Module):
         (including their in-place _ forms, which complete the core update step in
         a single call) (the final static audit does substring matching on code
         outside docstrings/comments);
-      - target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+      - target hardware: Hygon DCU (gfx928). Implementation language: HIP
         (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
         regions; device code must include <hip/hip_runtime.h> --
         <cuda_runtime.h> is not available on this machine).

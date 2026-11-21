@@ -8,7 +8,7 @@ status: reviewed
 confidence: inferred
 reproducibility: documentation
 architectures:
-- gfx936
+- gfx928
 backends:
 - cuda
 - triton

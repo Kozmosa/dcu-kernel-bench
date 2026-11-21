@@ -27,7 +27,7 @@ sys.path.insert(0, str(CODE_ROOT))
 import yaml  # noqa: E402
 
 PROMPT_SYSTEM = (
-    "You are a high-performance kernel engineer targeting a Hygon DCU accelerator (gfx936, DTK 26.04). "
+    "You are a high-performance kernel engineer targeting a Hygon DCU accelerator (gfx928, DTK 26.04). "
     "You write complete, correct, runnable code. Reply with code only."
 )
 
@@ -67,7 +67,7 @@ def wiki_context(task) -> str:
     """取 DCU Wiki 的检索结果（含常驻的合规页），拼成可注入提示词的文本。"""
     from src.knowledge.public_wiki import PublicKernelWiki
 
-    wiki = PublicKernelWiki(CODE_ROOT / "knowledge/kernelwiki_dcu", target_arch="gfx936")
+    wiki = PublicKernelWiki(CODE_ROOT / "knowledge/kernelwiki_dcu", target_arch="gfx928")
     pages = wiki.retrieve(task)
     blocks = []
     for page in pages:

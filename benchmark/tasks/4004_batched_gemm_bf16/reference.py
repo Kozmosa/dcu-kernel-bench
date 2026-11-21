@@ -50,7 +50,7 @@ class Model(nn.Module):
         exactly representable in fp32, so .to(torch.bfloat16) at the entry point
         recovers them losslessly.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: TN layout (x row-major (B,M,K), weight row-major (B,N,K)), no
     split-K, no quantization component at all (pure bf16 inputs, no scale
     dequantization).

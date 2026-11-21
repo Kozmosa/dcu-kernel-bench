@@ -3,7 +3,7 @@
 // 评测约定：
 //   - 补全 vecadd_kernel 与 vecadd_launch；函数签名不可改。
 //   - 只允许使用 HIP runtime / 设备代码；task.yaml 的 forbidden 列表会被静态审计。
-//   - 由 evaluator 用 hipcc 与本文件连同 harness 一起编译，目标 gfx936/gfx938。
+//   - 由 evaluator 用 hipcc 与本文件连同 harness 一起编译，目标 gfx928。
 
 #include <hip/hip_runtime.h>
 

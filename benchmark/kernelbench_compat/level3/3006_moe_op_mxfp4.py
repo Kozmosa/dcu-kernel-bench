@@ -167,7 +167,7 @@ class Model(nn.Module):
         are all exactly representable in fp32), so they must be restored
         losslessly at the entry point (.to(torch.uint8) / .to(torch.long)).
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: MoE grouped GEMM of mxfp4 activations x mxfp4 weights plus the
     routing weight multiply; the token-expert alignment scheduling metadata
     (sorted_token_ids / expert_ids / num_tokens_post_padded) is an

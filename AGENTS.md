@@ -2,7 +2,7 @@
 
 ## 项目方向
 
-**dcu-kernel-bench**：面向海光 DCU（gfx936/gfx938）的算子生成评测集，方法论参照寒武纪 BANG C 算子评测集构建指南（分层隔离、统一 Starter、隐藏 Case、静态审计防绕过）。
+**dcu-kernel-bench**：面向海光 DCU 的算子生成评测集（**2026-11-21 起目标架构迁移为 gfx928 / K500SM_AI**；gfx936 是历史目标，旧基线仍标着它），方法论参照寒武纪 BANG C 算子评测集构建指南（分层隔离、统一 Starter、隐藏 Case、静态审计防绕过）。
 
 主算子来源：`third_party/aiter`（OpenDAS/aiter，HCU 适配的开源算子库）。补充题源：FlagGems（Triton）、composable_kernel-das / HYTLASS（GEMM/Conv 类）、HYGON-AI 组织、**hipDNN 官方样例集 `opendtk/hipdnn_samples`**（2026-10-12 准入的 21 道 5xxx–8xxx 题即出自此，溯源 commit `b67a3f9`）。注意区分：**闭源 hipDNN 库**只作性能基线，不作题源；能作题源的是**公开可审查的样例源码**（`benchmark/sources/5001_conv2d_fwd.yaml` 有 sha256 证据）。
 
@@ -114,6 +114,7 @@
 
 - 真机评测依赖 DTK ≥ 25.04（Triton track 的硬要求）、hipcc、DTK 版 PyTorch。
 - **2026-11-21 换机实测：平台给的卡不是 BW**。`021 组/昆山`「异构加速卡AI 64GB PCIE」实测是 **K500SM_AI / `gfx928:sramecc+:xnack-` / 120 CU / 64 GiB**，而题目包声明的目标架构是 `gfx936`（题面与 `environment.yaml` 的 `benchmark_target_arch` 都是 gfx936）。完整实测值、失效清单与三条处置方案见 `docs/machine-2026-11-21-k500sm-gfx928.md`。**换机上机第一件事**：`source /opt/dtk/env.sh && python3 benchmark/tools/machine_fingerprint.py --expect environment.yaml`，据此判断"只重采基线"还是"要重测 wiki 硬件页 / 改题面架构口径"。
+- **迁移状态（2026-11-21）**：题面硬件句（66 题 + 66 镜像）、生成侧模板、DCU Wiki 全部页面与消融配置已迁到 `gfx928`；`environment.yaml` 的 `benchmark_target_arch` 改为 `[gfx928]`，旧架构记在 `historical_target_arch`。机器侧已装 `triton-3.3.0+das.opt1.dtk2604.torch290`（cp311，取自 download.sourcefind.cn/4/triton/DAS1.8/）并验证 vecadd + `tl.dot` + 通用 libdevice 均可用 → **DAS Triton 支持 gfx928**。仍缺：aiter（或垫片）、基线重采、LLM 出口（反向隧道）。迁移与复测细节见 `docs/machine-2026-11-21-k500sm-gfx928.md`。
 - 同一台机（021）的其他实测事实：容器只见 **1 张卡**（`torch.cuda.device_count()==1`）；**未装 triton 与 aiter**；**无外网**（pypi / download.sourcefind.cn / 公网 443 全不通），只能上传 wheel 或走反向隧道；无 cgroup 内存上限（宿主 503 GiB，`memory.max` 不存在）；静态 shared 上限仍是 **65536 B**（96 KiB 编译期报 `local memory exceeds limit`）。
 - 开发 venv 曾放在 WSL 侧 `~/.venvs/dcu-kernel-bench`（torch CPU + pytest），**现已不存在**（目录被清空），当前实际做法：Windows 用 `C:\Python314\python.exe`（有 numpy、无 torch、无 pyyaml），WSL 用系统 `python3`（有 pyyaml、无 torch）。要跑需 torch 的套件，只能上真机。**不要把 venv 放回 `/mnt/e`**：NTFS 挂载上的 `.venv` 已两次被清空 `bin/` 与 `site-packages/`（原因未查明）。
 - `third_party/aiter` 是独立 git 仓库。Windows 下它有两个文件名带冒号、无法 checkout 的 Triton autotune JSON，已用 sparse-checkout 排除并设 `core.protectNTFS=false`——**不要在该仓库内执行 `git reset --hard`**。

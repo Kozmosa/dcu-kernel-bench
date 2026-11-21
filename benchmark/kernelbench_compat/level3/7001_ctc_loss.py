@@ -97,7 +97,7 @@ class Model(nn.Module):
     library-level one-step CTC primitive) / warpctc / warp_ctc / torch.autograd
     and .backward() (automatic differentiation must not be used to obtain the
     gradient).
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: single blank, reduction='none' (per-sequence loss plus the full
     gradient), the input is already a probability (no apply_softmax branch), and
     there are no empty target sequences.

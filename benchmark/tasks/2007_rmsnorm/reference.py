@@ -65,7 +65,7 @@ class Model(nn.Module):
     torch.nn.RMSNorm / torch.layer_norm / torch.nn.functional.layer_norm /
     torch.nn.LayerNorm / torch.norm / torch.linalg.norm /
     torch.linalg.vector_norm.
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self, variant: str = "fused_add", eps: float = 1e-5):

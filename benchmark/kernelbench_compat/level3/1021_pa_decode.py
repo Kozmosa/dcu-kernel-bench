@@ -68,7 +68,7 @@ class Model(nn.Module):
       - Unreferenced physical blocks and slots beyond seq_len must not affect the
         output.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: single-token decode, non-quantized KV, no ALiBi, no sliding
     window; the long-context regime (max(seq_lens) > 8192).
     """

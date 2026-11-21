@@ -86,7 +86,7 @@ class Model(nn.Module):
       - Use float32 for intermediate accumulation; the output is cast back to
         the input dtype.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: prefill multi-token queries, non-quantized KV; includes the ALiBi
     bias variant and the unbiased baseline (alibi_slopes passed as None); does
     not include sliding window, does not include a quantized KV cache, and the

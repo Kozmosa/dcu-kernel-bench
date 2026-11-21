@@ -79,7 +79,7 @@ class Model(nn.Module):
     torch.nn.BatchNorm2d / torch.nn.BatchNorm3d /
     torch.ops.aten.batch_norm / torch.ops.aten.native_batch_norm /
     autograd / .backward(.
-    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    Target hardware: Hygon DCU (gfx928). Implementation language: HIP
     (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor regions;
     device code must include <hip/hip_runtime.h> -- <cuda_runtime.h> is not available
     on this machine).

@@ -93,7 +93,7 @@ class Model(nn.Module):
       task.yaml forbidden list (it covers the source operator library and other
       closed-source acceleration libraries; the final static audit does substring
       matching on the code outside docstrings / comments);
-    - Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    - Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self, activation: str = "silu", alpha=None, limit=None):

@@ -71,7 +71,7 @@ class Model(nn.Module):
       - The scheduling strategy (persistent single kernel or a regular grid) is
         free to choose; only semantic correctness and performance are assessed.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: ragged-batch decode, non-quantized fp16/bf16, no causal mask, no
     ALiBi/sliding window, no GQA.
     """

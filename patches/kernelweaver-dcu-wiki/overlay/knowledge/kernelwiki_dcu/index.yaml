@@ -3,7 +3,7 @@ name: DCU portable HIP operator knowledge
 knowledge_scope: public_general
 backend: cuda
 architectures:
-- gfx936
+- gfx928
 policy:
   max_entries: 3
   max_body_chars: 1800

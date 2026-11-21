@@ -76,7 +76,7 @@ class Model(nn.Module):
     operator directly and doing a full sort to take the first k are the same
     shortcut, so any appearance in any form fails (Triton primitives are
     unrestricted).
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self, k: int = 8):

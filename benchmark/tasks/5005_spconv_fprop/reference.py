@@ -89,7 +89,7 @@ class Model(nn.Module):
     torch.nn.functional.linear / torch.nn.Linear / index_add_ /
     torch.index_add / index_put / torch.index_put / scatter_add_ /
     .scatter_( / torch.scatter / segment_reduce / miopen / hipdnn.
-    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    Target hardware: Hygon DCU (gfx928). Implementation language: HIP
     (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
     regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
     is not available on this machine).

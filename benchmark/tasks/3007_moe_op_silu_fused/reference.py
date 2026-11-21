@@ -95,7 +95,7 @@ class Model(nn.Module):
 
     Disallowed list: torch.matmul / torch.bmm / torch.einsum /
     torch._scaled_mm / torch.nn.functional.silu / torch.SiLU / torch.sigmoid.
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self, mul_routed_weight=True, quant="dense", block_n=128, block_k=128):

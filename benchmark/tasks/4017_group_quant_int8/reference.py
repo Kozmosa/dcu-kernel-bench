@@ -58,7 +58,7 @@ class Model(nn.Module):
         are first clamped to [-128, 127] and then truncated toward zero into
         int8.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: 2D contiguous input, torch.int8 code words, fp32 scale, without
     the GEMM back-end computation.
     """

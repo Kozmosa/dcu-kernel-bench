@@ -48,7 +48,7 @@ class Model(nn.Module):
     Forbidden list: aiter / torch.softmax / torch.nn.functional.softmax /
     torch.nn.Softmax / torch.log_softmax / torch.nn.functional.log_softmax /
     torch.nn.LogSoftmax / torch.special.softmax / torch.special.log_softmax.
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self):

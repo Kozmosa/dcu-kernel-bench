@@ -57,7 +57,7 @@ class Model(nn.Module):
         .to(in_dtype) at the entry point recovers the quantization code words
         losslessly.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: 2D GEMM (no batch dimension), x row-major (M,K) / w row-major
     (N,K), scalar (per-token x per-channel) scales; excluding 128x128 blocked
     scales, a batch dimension, and output-buffer preallocation variants.

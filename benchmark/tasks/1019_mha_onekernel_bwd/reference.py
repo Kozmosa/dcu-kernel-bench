@@ -69,7 +69,7 @@ class Model(nn.Module):
         protocol above (compute dq/dk/dv internally first, then flatten and
         concatenate each).
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: dense fixed-length (non-varlen), non-quantized inputs, no dropout /
     ALiBi / bias / fp8; causal and non-causal are selected by __init__'s causal
     switch.

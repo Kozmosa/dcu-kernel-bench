@@ -72,7 +72,7 @@ class Model(nn.Module):
           the input dtype.
         - Sentinel padding slots must not contaminate any valid output.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: non-quantized fp16/bf16 weights and activations (no w8a8 / int4 /
     mxfp4 quantization), no fused activation (SiLU/GELU etc.), no bias,
     top_k <= 8, num_experts <= 256.

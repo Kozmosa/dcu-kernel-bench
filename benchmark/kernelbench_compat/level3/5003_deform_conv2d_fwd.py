@@ -83,7 +83,7 @@ class Model(nn.Module):
     torch.nn.functional.grid_sample (F.grid_sample) /
     torch.nn.functional.unfold (F.unfold) / torch.matmul / torch.bmm /
     torch.mm / torch.einsum / torch.tensordot / miopen / hipdnn / aiter.
-    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    Target hardware: Hygon DCU (gfx928). Implementation language: HIP
     (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
     regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
     is not available on this machine).

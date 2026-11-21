@@ -125,7 +125,7 @@ class Model(nn.Module):
         codewords, the fp16 v and the bool mask are all exactly representable in
         fp32, so the original dtypes are recovered losslessly at the entry.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: non-causal forward, bool mask, GQA, both the HND and NHD layouts;
     does not include the causal variant, float additive masks, LSE output, or the
     quantization stage itself (the int8 codewords are given directly as inputs).

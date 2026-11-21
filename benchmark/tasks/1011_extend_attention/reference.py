@@ -77,7 +77,7 @@ class Model(nn.Module):
         kernel, mask the out-of-range query rows with each sequence's
         cur_seq_len_extend).
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: prefix+extend mixed, variable-length (ragged) batch, GQA,
     causal/non-causal, Q/K/V head-dimension relation as above; no custom mask,
     no sliding window, no attention sink, no KV dequantization scale, the logit

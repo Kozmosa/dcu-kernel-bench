@@ -111,7 +111,7 @@ class Model(nn.Module):
     torch.topk / scatter (including every form scatter_ / scatter_add_ /
     scatter_reduce / torch.scatter) / index_put (including index_put_ and
     torch.index_put) / segment_reduce.
-    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    Target hardware: Hygon DCU (gfx928). Implementation language: HIP
     (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
     regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
     is not available on this machine).

@@ -76,7 +76,7 @@ class Model(nn.Module):
 
     Forbidden: torch.nn.functional.silu / torch.nn.functional.gelu /
     torch.nn.SiLU / torch.nn.GELU / torch.sigmoid / torch.erf / torch.tanh.
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self, activation: str = "silu"):

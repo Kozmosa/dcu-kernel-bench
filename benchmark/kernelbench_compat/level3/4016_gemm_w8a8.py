@@ -103,7 +103,7 @@ class Model(nn.Module):
         representable, so .to(torch.int8) / .to(torch.float32) at the entry
         point recover them losslessly.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: block shape fixed at [128,128], A is 2D (M,K), no bias, no
     splitK; the output is bfloat16 / float16.
     """

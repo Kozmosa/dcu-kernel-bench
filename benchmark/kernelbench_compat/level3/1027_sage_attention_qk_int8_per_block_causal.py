@@ -72,7 +72,7 @@ class Model(nn.Module):
     (4) Forbidden list: scaled_dot_product_attention / sdpa / flash_attn /
       torch.matmul / torch.bmm / torch.einsum / torch.softmax, as well as
       equivalent wrappers of any third-party operator library.
-      Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+      Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
       Task scope: causal forward, HND layout, no attn_mask, no LSE output, no
       dropout; the non-causal branch and the NHD layout are not part of this
       task.

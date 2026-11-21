@@ -86,7 +86,7 @@ class Model(nn.Module):
     .index_select( / torch.take_along_dim / .take_along_dim( /
     torch.take( / .take( (including the Tensor.take method form) /
     torch.embedding / nn.Embedding / .embedding( / hipdnn.
-    Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP
+    Target hardware: Hygon DCU (gfx928). Implementation language: HIP
     (compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor
     regions; device code must include <hip/hip_runtime.h> -- <cuda_runtime.h>
     is not available on this machine).

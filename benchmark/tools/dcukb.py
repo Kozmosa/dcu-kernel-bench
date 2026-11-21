@@ -781,7 +781,7 @@ class Model(nn.Module):
       - ModelNew 的 __init__ 与 forward 签名不可更改。
       - 中间累加用 float32；输出 cast 回输入 dtype。
 
-    目标硬件：海光 DCU（gfx936），实现语言 Triton。
+    目标硬件：海光 DCU（gfx928），实现语言 Triton。
     """
 
     def __init__(self, # TODO: init 参数

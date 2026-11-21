@@ -91,7 +91,7 @@ class Model(nn.Module):
       - The 1-D concatenation layout of the output must match the specification
         above (the evaluator compares element by element).
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: single-token decode, use_rope always true, non-quantized
     fp16/bf16, no logit cap, no causal mask / ALiBi / sliding window.
     """

@@ -63,7 +63,7 @@ class Model(nn.Module):
       - Accumulate intermediates in float32; cast the output back to the input
         dtype.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self):

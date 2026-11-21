@@ -53,7 +53,7 @@ class Model(nn.Module):
 
     Forbidden list: torch.nn.functional.layer_norm / torch.layer_norm /
     torch.nn.LayerNorm.
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     """
 
     def __init__(self, eps: float = 1e-5):

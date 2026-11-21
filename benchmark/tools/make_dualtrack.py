@@ -24,9 +24,9 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 TASKS = REPO / "benchmark" / "tasks"
 COMPAT = REPO / "benchmark" / "kernelbench_compat"
 
-TRITON_SENTENCE = "Target hardware: Hygon DCU (gfx936). Implementation language: Triton."
+TRITON_SENTENCE = "Target hardware: Hygon DCU (gfx928). Implementation language: Triton."
 HIP_SENTENCE_RAW = (
-    "Target hardware: Hygon DCU (gfx936/gfx938). Implementation language: HIP "
+    "Target hardware: Hygon DCU (gfx928). Implementation language: HIP "
     "(compiled by hipcc; write inside the CUDA_CU_SRC / CUDA_CPP_SRC anchor regions; "
     "device code must include <hip/hip_runtime.h> -- <cuda_runtime.h> is not available "
     "on this machine)."
@@ -34,7 +34,7 @@ HIP_SENTENCE_RAW = (
 
 HIP_START = re.compile(r"(?:-\s*)?Target hardware:\s*Hygon DCU", re.I)
 HIP_TAIL = re.compile(r"not available\s+on this machine\)\.", re.I)
-TRITON_LINE = re.compile(r"Target hardware:\s*Hygon DCU \(gfx936\)\.\s*Implementation language: Triton\.", re.I)
+TRITON_LINE = re.compile(r"Target hardware:\s*Hygon DCU \(gfx928\)\.\s*Implementation language: Triton\.", re.I)
 
 HIP_ONLY_TOKENS = re.compile(r"hipcc|hip/hip_runtime|CUDA_CU_SRC|CUDA_CPP_SRC|hipLaunchKernel|__global__", re.I)
 

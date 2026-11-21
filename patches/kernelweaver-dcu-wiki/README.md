@@ -59,7 +59,7 @@ python benchmark/tools/apply_framework_fixes.py kernelweaver-dcu-wiki /path/to/K
 python3 -c "import sys;sys.path.insert(0,'.');from pathlib import Path;\
 from src.knowledge.public_wiki import audit_public_corpus as a;\
 print(a(Path('knowledge/kernelwiki_dcu'))['sha256'])"
-# 期望：98f5d2e9ffcd45ed248918cdff62fcba1463df10394c1b58808812a8a31612b0
+# 期望：fcc5010738256cfb26817c7a1aefc11a2966f1d26907a7c3cf8cbd4049cb8615
 ```
 
 端到端（两轨检索、合规页在上下文、sm86 被拒）：
@@ -91,11 +91,12 @@ PY
 
 | 字段 | 值 |
 |---|---|
-| 汇总 SHA256 | `98f5d2e9ffcd45ed248918cdff62fcba1463df10394c1b58808812a8a31612b0` |
+| 汇总 SHA256 | `fcc5010738256cfb26817c7a1aefc11a2966f1d26907a7c3cf8cbd4049cb8615` |
 | 文件数 | 33（`index.yaml` + `data/` 2 + `sources/` 12 + `wiki/` 17）+ `corpus.lock.json` |
-| 页面数 | 30 |
-| 冻结时间 | 2026-11-21 |
+| 页面数 | 31（含 gfx928 实测硬件页；gfx936 页保留作历史） |
+| 冻结时间 | 2026-11-21（迁移到 gfx928 后重新冻结） |
 | 本轮内容改动 | `wiki/contracts/compliance.md`（平台符号类 / 别名解析 / 审计前置）、`wiki/hardware/gfx936.md`（hipcc 可用与不可用 API 面、Triton libdevice 路径）、`wiki/contracts/general.md`（原生 dtype + 任务容差） |
+| 目标架构 | **gfx928（K500SM_AI，120 CU）**；所有页面 `architectures: [gfx928]`，硬件页拆成 `gfx928.md`（实测）+ `gfx936.md`（历史 BW 快照）；配置里 `operator_memory_target_arch: gfx928` |
 
 ## 上限提醒
 

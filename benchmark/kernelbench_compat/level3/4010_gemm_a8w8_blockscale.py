@@ -72,7 +72,7 @@ class Model(nn.Module):
       - Use float32 for intermediate accumulation; the output is cast to
         out_dtype.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: a single matrix (no batch dimension), no bias, no splitK; the
     code-word and scale value ranges follow the task generator (code words are
     fp8 values in [0, 0.1), scales are float32 in [0, 1)).

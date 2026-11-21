@@ -68,4 +68,4 @@ def test_cjk_pattern_sanity():
     """防止正则写宽/写窄导致上面两条恒真。"""
     assert CJK.search("目标硬件")
     assert CJK.search("target hardware；")
-    assert not CJK.search("Target hardware: Hygon DCU (gfx936).")
+    assert not CJK.search("Target hardware: Hygon DCU (gfx928).")

@@ -68,7 +68,7 @@ class Model(nn.Module):
         protocol above (compute out and lse internally first, then flatten and
         concatenate them).
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: dense 4D forward, non-quantized inputs, no bias, no dropout, no
     sliding window.
     """

@@ -80,7 +80,7 @@ class Model(nn.Module):
         integers that fp32 represents exactly, so .to(torch.int32) /
         .to(torch.long) at the entry recovers them losslessly.
 
-    Target hardware: Hygon DCU (gfx936). Implementation language: Triton.
+    Target hardware: Hygon DCU (gfx928). Implementation language: Triton.
     Task scope: paged KV + prefill/decode mixed ragged batch + GQA + causal right
     alignment + sliding window + logit softcap + attention sinks; no ALiBi, no
     query-query bias, no multimodal bidirectional prefix, no fp8 quantized KV with
