@@ -1,7 +1,7 @@
 {
   "task_id": "2014_instancenorm_fwd",
   "status": "placeholder",
-  "note": "旧机器的基线已清理。用 benchmark/evaluator/record_baseline.py --impl eager 在当前机器上重采；本评测集的加速比分母只用 torch_eager。",
+  "note": "本评测集不预存基线：在线加速比用**同一轮现测**的 torch_eager 分母（run.json 的 reference_runtimes）；离线 perf 阶段没有 baseline.json 时只输出耗时、不输出加速比。需要离线加速比时再跑 record_baseline.py --impl eager。",
   "environment": null,
   "baselines": []
 }

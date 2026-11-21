@@ -93,10 +93,10 @@
 | `tests/test_compat_mirrors.py` | 通用镜像一致性：按 difficulty→level 映射覆盖**全部** model_class 题，并检查"错 level 的残留镜像" |
 | `tests/test_reference_case_contract.py` | 通用 case 契约：逐 case 生成输入→构造 Model→跑 forward→校验单个 Tensor/数值有限/容差可解析；另含 `io.init_inputs` 声明与 Model 签名前缀一致、case 字段必须生效 |
 | ~~`benchmark/private/<id>/aiter_impl.py`（44 个）~~ | **已移除**（2026-11-21）：本评测集的分母只用 `torch_eager`，aiter 基线路径暂缓。需要时可从 git 历史取回 |
-| `benchmark/private/<id>/baseline.json` | 性能基线，**分母只用 `torch_eager`**：`record_baseline.py --impl eager` 逐 perf case 计时，先与 reference 按 task.yaml 容差比对通过才记录。旧机数字已在迁移时清空（placeholder），在本机重采后写回。 |
+| `benchmark/private/<id>/baseline.json` | **可选**离线性能基线，当前全部为 placeholder。**不重采**：在线加速比用同一轮现测的 `torch_eager` 分母（`run.json` 的 `reference_runtimes`）；离线 perf 阶段没有基线时只出耗时、不出加速比。需要时 `record_baseline.py --impl eager`（先与 reference 对齐才记录）。 |
 | `audit_model_class.py` 的**分段容差** | `task.yaml` 的 `tolerance_segments` + `reference.output_segments()`，解"同一张量里不同段量级差几个数量级、单一 atol/rtol 表达不了"（样板 `4017`/`4018`/`4005`）；`max_mismatch_frac` 在分段与全局两条路径都生效，缺省 0 即等价于原 `allclose` |
 
-- **基线口径（2026-11-21 起）**：`baseline.json` 只记 `torch_eager`（reference 原生执行、同机同时段），aiter 分母与其 44 个适配器已移除，旧机上那批 aiter 不可得/偏乐观的分析随之作废（git 历史可复查）。换机器必须重采：`record_baseline.py --task <id> --impl eager`。
+- **基线与分母口径（2026-11-21 起）**：**指标不依赖预存基线**——在线加速比的分母是同一轮里现测的 `torch_eager`（框架评测器在 `run.json` 写 `reference_runtimes`），所以换机器不需要重采、`baseline.json` 保持 placeholder 即可；离线 perf 阶段无基线时只出耗时。aiter 分母与 44 个适配器已移除（git 历史可查）。只有需要"离线 perf 加速比"这一列时才 `record_baseline.py --impl eager`。
 - 本地跑全部测试（本机无 pytest，驱动自带垫片）：
   `PYTHONPATH=../PyramidKernel <python> .dcu_runs/run_all_tests.py` → 本机可跑的 5 个套件 **100 项断言全绿**（`compat_mirrors` 3 + `prompt_english` 3 + `static_audit` 5 + `case_files` 5 + `hipdnn_batch` 84；后两者需要 `pyyaml`，Windows 侧缺它时改在 WSL 的 `python3` 下跑）。**需 torch 的套件**（`test_reference_case_contract` / `test_1002_model_class` / `test_reference_*`）只能在装了 DTK torch 的真机上跑。
 
@@ -114,8 +114,8 @@
 ## 环境注意
 
 - 真机评测依赖 DTK ≥ 25.04（Triton track 的硬要求）、hipcc、DTK 版 PyTorch。
-- **2026-11-21 换机实测：平台给的卡不是 BW**。`021 组/昆山`「异构加速卡AI 64GB PCIE」实测是 **K500SM_AI / `gfx928:sramecc+:xnack-` / 120 CU / 64 GiB**；题面与 `environment.yaml` 已按此迁移，当前 `benchmark_target_arch` 就是 `gfx928`。完整实测值、失效清单与三条处置方案见 `docs/machine-2026-11-21-k500sm-gfx928.md`。**换机上机第一件事**：`source /opt/dtk/env.sh && python3 benchmark/tools/machine_fingerprint.py --expect environment.yaml`，据此判断"只重采基线"还是"要重测 wiki 硬件页 / 改题面架构口径"。
-- **迁移状态（2026-11-21）**：题面硬件句（66 题 + 66 镜像）、生成侧模板、DCU Wiki 全部页面与消融配置已迁到 `gfx928`；`environment.yaml` 的 `benchmark_target_arch` 改为 `[gfx928]`。机器侧已装 `triton-3.3.0+das.opt1.dtk2604.torch290`（cp311，取自 download.sourcefind.cn/4/triton/DAS1.8/）并验证 vecadd + `tl.dot` + 通用 libdevice 均可用 → **DAS Triton 支持 gfx928**。aiter 不做（分母只用 `torch_eager`）；仍缺基线重采与 LLM 出口（反向隧道）。迁移与复测细节见 `docs/machine-2026-11-21-k500sm-gfx928.md`。
+- **2026-11-21 换机实测：平台给的卡不是 BW**。`021 组/昆山`「异构加速卡AI 64GB PCIE」实测是 **K500SM_AI / `gfx928:sramecc+:xnack-` / 120 CU / 64 GiB**；题面与 `environment.yaml` 已按此迁移，当前 `benchmark_target_arch` 就是 `gfx928`。完整实测值、失效清单与三条处置方案见 `docs/machine-2026-11-21-k500sm-gfx928.md`。**换机上机第一件事**：`source /opt/dtk/env.sh && python3 benchmark/tools/machine_fingerprint.py --expect environment.yaml`，据此判断"硬件页可沿用"还是"要按新卡重测硬件页 / 重新决定架构口径"。
+- **迁移状态（2026-11-21）**：题面硬件句（66 题 + 66 镜像）、生成侧模板、DCU Wiki 全部页面与消融配置已迁到 `gfx928`；`environment.yaml` 的 `benchmark_target_arch` 改为 `[gfx928]`。机器侧已装 `triton-3.3.0+das.opt1.dtk2604.torch290`（cp311，取自 download.sourcefind.cn/4/triton/DAS1.8/）并验证 vecadd + `tl.dot` + 通用 libdevice 均可用 → **DAS Triton 支持 gfx928**。aiter 不做、基线也不预采（分母是同轮现测的 `torch_eager`）；只剩 LLM 出口（反向隧道）待办。迁移与复测细节见 `docs/machine-2026-11-21-k500sm-gfx928.md`。
 - 同一台机（021）的其他实测事实：容器只见 **1 张卡**（`torch.cuda.device_count()==1`）；**（迁移时）未装 triton 与 aiter**；triton 已于 2026-11-21 装上并验证；**无外网**（pypi / download.sourcefind.cn / 公网 443 全不通），只能上传 wheel 或走反向隧道；无 cgroup 内存上限（宿主 503 GiB，`memory.max` 不存在）；静态 shared 上限仍是 **65536 B**（96 KiB 编译期报 `local memory exceeds limit`）。
 - 开发 venv 曾放在 WSL 侧 `~/.venvs/dcu-kernel-bench`（torch CPU + pytest），**现已不存在**（目录被清空），当前实际做法：Windows 用 `C:\Python314\python.exe`（有 numpy、无 torch、无 pyyaml），WSL 用系统 `python3`（有 pyyaml、无 torch）。要跑需 torch 的套件，只能上真机。**不要把 venv 放回 `/mnt/e`**：NTFS 挂载上的 `.venv` 已两次被清空 `bin/` 与 `site-packages/`（原因未查明）。
 - `third_party/aiter` 是独立 git 仓库。Windows 下它有两个文件名带冒号、无法 checkout 的 Triton autotune JSON，已用 sparse-checkout 排除并设 `core.protectNTFS=false`——**不要在该仓库内执行 `git reset --hard`**。

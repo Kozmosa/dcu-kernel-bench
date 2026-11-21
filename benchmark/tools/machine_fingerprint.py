@@ -14,12 +14,13 @@
 
 `--expect` 会读 environment.yaml 的 `hardware.benchmark_target_arch` 与
 `hardware.measured_machine`，逐项比对并给出结论：
-  · 架构/设备名一致  → 只重采基线即可
-  · 架构不同         → 基线重采 + wiki 硬件页要重测（架构口径要先决策）
+  · 架构/设备名一致  → wiki 硬件页可沿用（基线本就不预存）
+  · 架构不同         → wiki 硬件页要按新卡重测（架构口径要先决策）
 """
 import argparse
 import json
 import os
+import platform
 import pathlib
 import shutil
 import subprocess
@@ -119,7 +120,7 @@ def torch_info():
 
 
 def host_info():
-    info = {"host": os.uname().nodename, "nproc": os.cpu_count()}
+    info = {"host": platform.node(), "nproc": os.cpu_count()}
     for key, path in (("cgroup_memory_max", "/sys/fs/cgroup/memory.max"),
                       ("cgroup_cpu_max", "/sys/fs/cgroup/cpu.max")):
         try:
@@ -143,10 +144,10 @@ def compare(expect_path, fingerprint):
     if target and arch:
         base = arch.split(":")[0]
         if base in target:
-            lines.append(f"架构一致（{base} ∈ target_arch）→ 只需重采基线")
+            lines.append(f"架构一致（{base} ∈ target_arch）→ wiki 硬件页与基线口径都无需重做")
         else:
             lines.append(f"⚠ 架构不一致：实测 {base or '?'}，题面包声明 {target} "
-                         f"→ 先决定架构口径（换机器 / 迁移题面 / 双架构），再谈基线")
+                         f"→ 先决定架构口径（换机器 / 迁移题面 / 双架构），再谈硬件页")
     for key, expect_value in (("device", machine.get("device_name")),
                               ("compute_units", machine.get("compute_units")),
                               ("vram_mib", machine.get("vram_mib"))):
@@ -178,7 +179,9 @@ def main():
     smem64 = probe("smem64", SMEM64, device_id=arch)
     fingerprint.update(smem64 if "error" not in smem64 else {"smem64_error": smem64})
     smem96 = probe("smem96", SMEM96, device_id=arch)
-    if "error" in smem96:
+    if "error" in smem96 and not smem96.get("log"):
+        fingerprint["smem_96k"] = "未测（" + str(smem96.get("error")) + "）"
+    elif "error" in smem96:
         log = str(smem96.get("log") or smem96.get("error"))
         first = next((ln for ln in log.splitlines() if "error:" in ln), log[-120:])
         fingerprint["smem_96k"] = "compile_failed (预期：超出 64 KiB 上限) ← " + first.strip()

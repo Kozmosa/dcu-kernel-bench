@@ -2,7 +2,7 @@
 # 官方基线与 Agent 生成实现必须在本文件锁定的同一环境内比较。
 # 2026-11-21：旧机（BW）不可用，评测目标**迁移到当前机器**（K500SM_AI / gfx928）。
 # 迁移范围：题面硬件句、kernelbench 镜像、工具模板、DCU Wiki 语料与消融配置。
-# 未完成：基线重采、aiter 安装、LLM 出口（见 docs/machine-2026-11-21-k500sm-gfx928.md）。
+# 基线不预采（在线加速比用同轮现测的 torch_eager 分母）；待办只有 LLM 出口。
 
 hardware:
   # 题目包（task docstring / kernelbench 镜像）声明的目标架构 —— 迁移后统一为 gfx928。
@@ -60,5 +60,5 @@ timing:
   reduction: median
 
 notes:
-  - "benchmark/private/*/baseline.json 已清空为 placeholder，待在本机以 torch_eager 为分母重采（aiter 路径暂缓）。"
+  - "不预存基线：在线加速比用同一轮现测的 torch_eager 分母（run.json 的 reference_runtimes），benchmark/private/*/baseline.json 保持 placeholder；离线 perf 阶段无基线时只出耗时不出加速比。"
   - "本机无外网（pypi / download.sourcefind.cn / 公网 443 均不可达）：triton 与 aiter 只能由本地上传；LLM 出口需反向隧道。"

@@ -8,7 +8,7 @@
 |---|---|
 | `hidden_cases.json` | 隐藏正确性案例（含边界、非对齐、极值输入描述与种子） |
 | `perf_cases.json` | 性能计时输入（预热/重复次数可覆盖 environment.yaml 默认值） |
-| `baseline.json` | 性能基线：当前只用 `torch_eager`（reference 原生执行、同机同环境）；aiter 路径暂缓 |
+| `baseline.json` | 可选离线性能基线。**当前留空**：在线加速比用同轮现测的 `torch_eager` 分母；离线 perf 无基线时只出耗时。需要时 `record_baseline.py --impl eager` 再采 |
 | `gold_source/` | 官方实现快照（可选，仅作性能上界溯源） |
 
 规则：任一隐藏正确性 Case 失败 → 不进入性能评分；基线必须与生成实现同机同环境测量。
