@@ -16,7 +16,7 @@ operator_families:
 - matmul
 tags:
 - matmul
-priority: 60
+priority: 72
 sources:
 - source-torch-ops
 - source-hip-language

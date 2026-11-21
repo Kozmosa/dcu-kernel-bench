@@ -5,7 +5,7 @@ backend: cuda
 architectures:
 - gfx928
 policy:
-  max_entries: 3
+  max_entries: 4
   max_body_chars: 1800
   global_constraints:
   - Preserve the actual operator contract, dtype, strides, state updates and numerical

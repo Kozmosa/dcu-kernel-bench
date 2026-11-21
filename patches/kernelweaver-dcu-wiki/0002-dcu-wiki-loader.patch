@@ -48,7 +48,7 @@ index 07b829a..373e9ae 100644
                      "body": body,
                  })
 diff --git a/src/knowledge/public_wiki.py b/src/knowledge/public_wiki.py
-index fe8b4c3..2ebeabc 100644
+index fe8b4c3..73d9f7f 100644
 --- a/src/knowledge/public_wiki.py
 +++ b/src/knowledge/public_wiki.py
 @@ -35,7 +35,7 @@ def corpus_files(path: Path) -> list[Path]:
@@ -113,20 +113,32 @@ index fe8b4c3..2ebeabc 100644
                  continue
              overlap = families & set(f.get("operator_families", []))
              if overlap:
-@@ -210,6 +221,16 @@ class PublicKernelWiki(DomainWiki):
-         if not selected:
-             selected = [(page, 0) for page in fallback[:1]]
-         selected += [(page, 0) for page in hardware[:1]]
+@@ -204,12 +215,23 @@ class PublicKernelWiki(DomainWiki):
+             elif f.get("type") == "contract":
+                 fallback.append(page)
+         candidates.sort(key=lambda x: (-x[0], x[1]))
+-        # Reserve one context slot for hardware; unmatched operators get only
+-        # a contract checklist, with the missing semantic coverage made explicit.
+-        selected = [(page, score) for score, _, page in candidates[:max(1, self.max_entries - 1)]]
 +        # 合规页常驻：无论命中哪个算子页，都把"禁用算子/替代写法"塞进上下文，
 +        # 因为离线静态审计会拦下在线能跑通的取巧实现。
 +        compliance = [page for page in self.pages
 +                      if page["frontmatter"].get("id") == "public-compliance"
 +                      and task.backend in page["frontmatter"].get("backends", [])
 +                      and self.target_arch in page["frontmatter"].get("architectures", [])]
-+        if compliance and all(page is not compliance[0] for page, _ in selected):
-+            if len(selected) >= self.max_entries:
-+                selected = selected[: self.max_entries - 1]
-+            selected.append((compliance[0], 0))
++        # 硬件页与合规页是保留槽：它们不可能被算子页替换（硬件页承载 wavefront、
++        # 静态共享内存这类别处没有的实测事实）。剩下的槽位才按分数给算子页。
++        reserved = list(hardware[:1]) + list(compliance[:1])
++        slots = max(1, self.max_entries - len(reserved))
++        selected = [(page, score) for score, _, page in candidates[:slots]]
+         if not selected:
+-            selected = [(page, 0) for page in fallback[:1]]
+-        selected += [(page, 0) for page in hardware[:1]]
++            # 没有专门算子页时发通用契约检查单（不能是常驻的合规页，否则这一页永远发不出去）。
++            checklist = [page for page in fallback
++                         if all(page is not kept for kept in reserved)]
++            selected = [(page, 0) for page in checklist[:slots]]
++        selected += [(page, 0) for page in reserved]
          return [self._page_evidence(page, score, sorted(families)) for page, score in selected[:self.max_entries]]
  
      def _page_evidence(self, page, score, query_terms):
