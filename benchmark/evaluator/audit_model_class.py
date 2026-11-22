@@ -299,6 +299,21 @@ def case_init_args(task_dir: Path, ref_mod, case: dict) -> list:
     return [kwargs[name] for name in order if name in kwargs]
 
 
+def _error_stage(stage: str, exc: BaseException) -> dict:
+    """把候选侧的异常变成一份可上报的失败结论，而不是让脚本直接崩掉。
+
+    判负方向本来就对（候选编不过/跑不起来就是不过），但崩溃会丢掉原因：批量端只看到
+    "未拿到 JSON 报告（exit 1）"，无法区分"候选编不过"和"审计脚本自己坏了"。
+    """
+    import traceback
+    tail = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))[-800:]
+    return {"passed": False, "case_count": 0, "error_type": type(exc).__name__,
+            "error": f"{stage}: {type(exc).__name__}: {exc}"[:500],
+            "traceback_tail": tail,
+            "failures": [{"case": f"<{stage}-error>", "error_type": type(exc).__name__,
+                          "error": str(exc)[:400]}]}
+
+
 def stage_correctness(task_dir: Path, gen_task_dir: Path, submission: Path, cases: list[dict], tol: dict) -> dict:
     ref_mod = load_module(task_dir / "reference.py", "audit_ref_model")
     cand_mod = load_module(submission, "audit_candidate")
@@ -416,15 +431,21 @@ def main() -> int:
 
     if args.public:
         from dcukb_online import public_trials
-        with torch.no_grad():
-            correctness = public_trials(task_dir, load_module(task_dir / "reference.py", "public_ref"),
-                                        load_module(args.submission, "public_cand"),
-                                        args.seed, args.trials, torch.device("cuda"))
+        try:
+            with torch.no_grad():
+                correctness = public_trials(task_dir, load_module(task_dir / "reference.py", "public_ref"),
+                                            load_module(args.submission, "public_cand"),
+                                            args.seed, args.trials, torch.device("cuda"))
+        except Exception as exc:  # noqa: BLE001 - 候选侧异常要变成结论，不能崩
+            correctness = _error_stage("public_correctness", exc)
     else:
         hidden_path, gen_dir = resolve_case_file(args.task, "hidden")
         hidden = json.loads(hidden_path.read_text(encoding="utf-8"))
         tol = load_tolerances(task_dir)
-        correctness = stage_correctness(task_dir, gen_dir, args.submission, hidden["cases"], tol)
+        try:
+            correctness = stage_correctness(task_dir, gen_dir, args.submission, hidden["cases"], tol)
+        except Exception as exc:  # noqa: BLE001
+            correctness = _error_stage("hidden_correctness", exc)
     report["stages"]["correctness"] = correctness
     if not correctness["passed"]:
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -434,7 +455,10 @@ def main() -> int:
         perf_path, gen_dir = resolve_case_file(args.task, "perf")
         perf = json.loads(perf_path.read_text(encoding="utf-8"))
         baseline = json.loads((PRIV / args.task / "baseline.json").read_text(encoding="utf-8"))
-        report["stages"]["performance"] = stage_perf(task_dir, gen_dir, args.submission, perf, baseline)
+        try:
+            report["stages"]["performance"] = stage_perf(task_dir, gen_dir, args.submission, perf, baseline)
+        except Exception as exc:  # noqa: BLE001 - 计时失败不该把整份报告弄丢
+            report["stages"]["performance"] = _error_stage("performance", exc)
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0

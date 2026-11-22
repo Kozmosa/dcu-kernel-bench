@@ -203,6 +203,7 @@ def run_one(task: str, submission: Path, timeout: int, skip_perf: bool) -> dict:
                       for x in rows],
         }
 
+    corr_failures = corr.get("failures") or []
     return {
         "task": task,
         "ok": True,
@@ -211,7 +212,12 @@ def run_one(task: str, submission: Path, timeout: int, skip_perf: bool) -> dict:
         "static_audit_passed": (stages.get("static_audit") or {}).get("passed"),
         "correctness_passed": bool((stages.get("static_audit") or {}).get("passed") and corr.get("passed")),
         "correctness_case_count": corr.get("case_count"),
-        "correctness_failures": [f.get("case") for f in (corr.get("failures") or [])],
+        "correctness_failures": [f.get("case") for f in corr_failures],
+        # 候选在隐藏 case 上编译/运行报错时，audit_model_class 会把它写成 error_type；
+        # 这里带出来，汇总里才能区分"编不过"和"数值不对"。
+        "correctness_error_type": corr.get("error_type"),
+        "correctness_error_tail": (corr.get("traceback_tail") or corr.get("error") or "")[-600:],
+        "correctness_failure_tail": json.dumps(corr_failures[:1], ensure_ascii=False)[:600] if corr_failures else "",
         "baseline_status": perf.get("baseline_status"),
         "timing": perf.get("timing"),
         "by_impl": per_impl,
@@ -329,18 +335,11 @@ def main() -> int:
     # （编译失败 / 共享内存超限 / 后端 pass crash），必须计入失败，否则
     # 「审了 30 道、通过 25 道」会把 3 道真实失败藏成"工具侧问题"。
     failed = [r for r in results if not r.get("ok")]
-    summary = {
-        "run_root": str(run_root),
-        "headline_impl": args.impl,
-        "audited": len(results),
-        "skipped": [{"task": t, "reason": w} for t, w in skipped],
-        "rows": [],
-        "aggregates": {},
-    }
+    new_rows: list[dict] = []
     for r in sorted(rows, key=lambda x: x["task"]):
         got = r["by_impl"].get(args.impl) or {}
         eager = r["by_impl"].get("torch_eager") or {}
-        summary["rows"].append({
+        row = {
             "task": r["task"],
             "correctness_passed": r["correctness_passed"],
             "aiter_mean_speedup": got.get("mean_speedup"),
@@ -348,10 +347,20 @@ def main() -> int:
             "aiter_is_mi_fallback": r.get("aiter_baseline_is_mi_fallback"),
             "torch_eager_mean_speedup": eager.get("mean_speedup"),
             "measurement_impls": sorted(r["by_impl"].keys()),
-        })
+        }
+        # 判负要把原因写下来：编译错误/运行时错误/数值不达标是三种不同的失败。
+        if not r["correctness_passed"]:
+            err_type = r.get("correctness_error_type")
+            if err_type:
+                row["failure_reason"] = f"候选{err_type}"
+                row["failure_tail"] = (r.get("correctness_error_tail") or "")[-400:]
+            else:
+                row["failure_reason"] = "隐藏 case 判负（数值/形状）"
+                row["failure_tail"] = (r.get("correctness_failure_tail") or "")[-400:]
+        new_rows.append(row)
     for r in sorted(failed, key=lambda x: x["task"]):
         tail = " ".join((r.get("tail") or "").split())
-        summary["rows"].append({
+        new_rows.append({
             "task": r["task"],
             "correctness_passed": False,
             "aiter_mean_speedup": None,
@@ -362,6 +371,30 @@ def main() -> int:
             "failure_reason": r.get("reason"),
             "failure_tail": tail[-400:],
         })
+
+    # 合并写：`--tasks`/`--limit` 只重跑一部分题时，不能把另外几十题的结果冲掉。
+    out = run_root / "offline_audit.json"
+    merged: dict[str, dict] = {}
+    if out.exists():
+        try:
+            old = json.loads(out.read_text(encoding="utf-8"))
+            for old_row in old.get("rows") or []:
+                if old_row.get("task"):
+                    merged[old_row["task"]] = old_row
+        except (ValueError, OSError) as exc:
+            print(f"[warn] 旧汇总读不了，按全新建（{exc}）", file=sys.stderr)
+    for row in new_rows:
+        merged[row["task"]] = row
+
+    summary = {
+        "run_root": str(run_root),
+        "headline_impl": args.impl,
+        "audited": len(results),
+        "this_run_tasks": sorted(r["task"] for r in rows) + sorted(r["task"] for r in failed),
+        "skipped": [{"task": t, "reason": w} for t, w in skipped],
+        "rows": [merged[t] for t in sorted(merged)],
+        "aggregates": {},
+    }
 
     sp = [x["aiter_mean_speedup"] for x in summary["rows"]
           if isinstance(x.get("aiter_mean_speedup"), (int, float))]
