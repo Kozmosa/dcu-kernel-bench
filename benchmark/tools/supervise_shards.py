@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
-"""supervise_shards.py —— 框架臂分片监督器（崩了自动重启、卡死自动重拉、可续跑）。
+"""supervise_shards.py —— 框架臂分片看护：自动重启 + 断点续跑 + 只跑没跑完的题。
 
-设计要点（对应这一轮踩过的坑）：
-  · 单 GPU：评测端已有 gpu_evaluation_lock，多分片会排队而不是互相污染计时；LLM 调用是 IO 型，
-    所以并发主要受 prompt 与出口带宽限制。默认 6 分片/轨（共 12 条流）。
-  · 每个分片一个 `run-kernelbench-batch` 进程；summary.json 出现即视为该分片完成，不再重启。
-  · 日志 mtime 超过 STALL_MIN 分钟没有更新 → 判定卡死，kill 后重拉（最多 MAX_RESTARTS 次）。
-  · 记忆池放在 RUN_ROOT/pools/memory_pool.json（全新目录 = 全新记忆，不和旧轮混）。
-  · 所有参数用环境变量覆盖，不改代码即可调并发/候选数。
+设计要点（对应 2026-11-21/22 那一轮踩过的坑）：
+
+  · **完成判据是「已完成题数 == 清单题数」**，不是 `summary.json` 是否存在。
+    框架的 batch 在 provider 预检失败时会 abort 整批（`batch_aborted`）并照常写
+    summary.json——用 summary.json 判完成，会把"abort 掉一半的分片"当成跑完了，
+    实测因此白等 8 小时。
+  · **进程存活用 pid 文件 + `/proc/<pid>/cmdline` 双重校验**。只看 `os.kill(pid,0)`
+    会被 pid 复用骗到（旧 pid 被别的活进程占用 → 以为分片还在跑，于是永不重启）。
+  · **每轮把剩余题重写成 `run_<name>.json` 再起**，已完成的不重跑；分片清单本体的写法：
+    `<MANIFEST_DIR>/<prefix>_<track>_s<k>.json`。
+  · 单 GPU：评测端有 `gpu_evaluation_lock`（设置 `STARK_GPU_EVALUATION_LOCK` 才生效）。
+  · 记忆池在 `RUN_ROOT/pools/memory_pool.json`（全新目录 = 全新记忆）。
+  · `DCUKB_ROOT` 只作为**透传**：设了就把 1116 在线契约带进子进程，没设就走上游
+    KernelBench 语义（fp32 + allclose 1e-4）。上游 KernelBench L1 这种没有 task.yaml
+    的题目必须不设。
 
 用法：
-    python3 /root/supervise_fw.py            # 前台跑（建议 nohup/setsid）
-    RUN_ROOT=/root/runs2 SHARDS_PER_TRACK=6 python3 /root/supervise_fw.py
+
+    # 1) 跑 DCUKB 自己的题（1116 契约）
+    RUN_ROOT=/root/runs2 MANIFEST_DIR=/root/manifests python3 benchmark/tools/supervise_shards.py
+
+    # 2) 跑上游 KernelBench L1（上游语义，不要设 DCUKB_ROOT）
+    RUN_ROOT=/root/runs/kb_l1 MANIFEST_DIR=/root/manifests/kb_l1 SHARD_PREFIX=kn_l1 \
+      KERNELBENCH_ROOT=/root/KernelBench-main python3 benchmark/tools/supervise_shards.py
 """
 import json
 import os
@@ -26,54 +39,93 @@ ROOT = pathlib.Path(os.environ.get("RUN_ROOT", "/root/runs2"))
 CODE = pathlib.Path(os.environ.get("CODE_DIR", "/root/KernelWeaver"))
 DCUKB = pathlib.Path(os.environ.get("DCUKB_DIR", "/root/dcukb"))
 MANIFESTS = pathlib.Path(os.environ.get("MANIFEST_DIR", "/root/manifests"))
+KB_ROOT = pathlib.Path(os.environ.get("KERNELBENCH_ROOT", str(DCUKB / "benchmark" / "kernelbench_compat")))
+PREFIX = os.environ.get("SHARD_PREFIX", "fw")
+TRACKS = [t.strip() for t in os.environ.get("TRACKS", "triton,cuda").split(",") if t.strip()]
+SHARDS = int(os.environ.get("SHARDS_PER_TRACK", "6"))
 SEARCH = os.environ.get("SEARCH_CONFIG", "dcu_d_combined")
 ATTEMPTS = os.environ.get("MAX_ATTEMPTS", "10")
-SHARDS = int(os.environ.get("SHARDS_PER_TRACK", "6"))
+POLL = float(os.environ.get("POLL_SECONDS", "90"))
 STALL_MIN = float(os.environ.get("STALL_MIN", "50"))
 MAX_RESTARTS = int(os.environ.get("MAX_RESTARTS", "8"))
-POLL = float(os.environ.get("POLL_SECONDS", "60"))
 
 LOG_DIR = ROOT / "logs"
 POOL = ROOT / "pools" / "memory_pool.json"
 STATUS = ROOT / "supervisor_status.json"
 
 
-def now():
+def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def shard_specs():
-    for track in ("triton", "cuda"):
-        for i in range(SHARDS):
-            name = f"fw_{track}_s{i}"
+    for track in TRACKS:
+        for index in range(SHARDS):
+            name = f"{PREFIX}_{track}_s{index}"
             yield name, track, MANIFESTS / f"{name}.json", ROOT / name
 
 
-def launch(name, track, manifest, out_dir, restarts):
-    log = LOG_DIR / f"{name}.log"
-    cmd = [
-        sys.executable, "-m", "src.cli", "run-kernelbench-batch",
-        "--kernelbench-root", str(DCUKB / "benchmark" / "kernelbench_compat"),
-        "--manifest", str(manifest),
-        "--backend", track,
-        "--search-config", SEARCH,
-        "--provider", "openai-compatible",
-        "--env-file", str(CODE / ".env"),
-        "--max-attempts", ATTEMPTS,
-        "--output-dir", str(out_dir),
-    ]
+def pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def shard_pid(out_dir: pathlib.Path):
+    path = out_dir / ".supervisor.pid"
+    if not path.exists():
+        return None
+    try:
+        pid = int(path.read_text().strip())
+    except ValueError:
+        return None
+    if not pid_alive(pid):
+        return None
+    try:
+        cmdline = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes().decode("utf-8", "replace")
+    except OSError:
+        return None
+    return pid if "run-kernelbench-batch" in cmdline else None
+
+
+def done_aliases(out_dir: pathlib.Path, tasks: list[dict]) -> set:
+    done = set()
+    if not out_dir.is_dir():
+        return done
+    for task in tasks:
+        rel = "%s_l%s_p%s" % (task["alias"], task["level"], task["problem_id"])
+        if (out_dir / rel / "run.json").exists():
+            done.add(task["alias"])
+    return done
+
+
+def launch(name, track, manifest: pathlib.Path, out_dir: pathlib.Path):
     env = dict(os.environ)
     env["KW_MEMORY_POOL"] = str(POOL)
-    for key in ("HTTPS_PROXY", "HTTP_PROXY", "OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL",
-                "OPENAI_WIRE_API", "OPENAI_HTTP_STREAM", "OPENAI_MAX_RETRIES", "PYTHONPATH"):
-        value = os.environ.get(key)
-        if value:
-            env[key] = value
-    with open(log, "a", buffering=1) as fh:
-        fh.write(f"\n===== [{now()}] launch #{restarts} {name} ({track}) attempts={ATTEMPTS} search={SEARCH}\n")
-        fh.flush()
-        proc = subprocess.Popen(cmd, cwd=str(CODE), env=env, stdout=fh, stderr=subprocess.STDOUT,
-                                start_new_session=True)
+    log = LOG_DIR / f"{name}.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(log, "a", buffering=1) as handle:
+        handle.write("\n===== [%s] launch %s (%s) attempts=%s manifest=%s contract=%s\n"
+                     % (now(), name, track, ATTEMPTS, manifest.name,
+                        "dcukb" if os.environ.get("DCUKB_ROOT") else "upstream"))
+        handle.flush()
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "src.cli", "run-kernelbench-batch",
+             "--kernelbench-root", str(KB_ROOT),
+             "--manifest", str(manifest),
+             "--backend", track,
+             "--search-config", SEARCH,
+             "--provider", "openai-compatible",
+             "--env-file", str(CODE / ".env"),
+             "--max-attempts", ATTEMPTS,
+             "--output-dir", str(out_dir)],
+            cwd=str(CODE), env=env, stdout=handle, stderr=subprocess.STDOUT, start_new_session=True)
+    (out_dir / ".supervisor.pid").write_text(str(proc.pid), encoding="utf-8")
     return proc
 
 
@@ -82,16 +134,30 @@ def main() -> int:
         path.mkdir(parents=True, exist_ok=True)
     if not POOL.exists():
         POOL.write_text("{}\n", encoding="utf-8")
+
     state = {}
     for name, track, manifest, out_dir in shard_specs():
         if not manifest.exists():
-            print(f"[fatal] 缺 manifest: {manifest}", file=sys.stderr)
+            print("[fatal] 缺 manifest: %s" % manifest, file=sys.stderr)
             return 2
-        state[name] = {"track": track, "proc": None, "restarts": 0, "done": False,
-                       "manifest": str(manifest), "out": str(out_dir)}
+        state[name] = {"track": track, "manifest": manifest, "out": out_dir,
+                       "restarts": 0, "proc": None}
+
+    def write_status():
+        STATUS.write_text(json.dumps({
+            "updated": now(),
+            "run_root": str(ROOT),
+            "manifest_dir": str(MANIFESTS),
+            "kernelbench_root": str(KB_ROOT),
+            "contract": "dcukb" if os.environ.get("DCUKB_ROOT") else "upstream",
+            "shards": {name: {"running": bool(shard_pid(item["out"])),
+                              "restarts": item["restarts"],
+                              "done": item.get("done"), "total": item.get("total")}
+                       for name, item in state.items()},
+        }, indent=1), encoding="utf-8")
 
     def stop(signum, _frame):
-        print(f"[{now()}] 收到信号 {signum}，停止所有分片", flush=True)
+        print("[%s] 收到信号 %s，停止所有分片" % (now(), signum), flush=True)
         for item in state.values():
             proc = item["proc"]
             if proc and proc.poll() is None:
@@ -99,70 +165,57 @@ def main() -> int:
                     os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
                 except Exception:  # noqa: BLE001
                     pass
+        write_status()
         raise SystemExit(0)
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
 
-    for name, item in state.items():
-        if (pathlib.Path(item["out"]) / "summary.json").exists():
-            item["done"] = True
-            print(f"[{now()}] {name} 已有 summary.json，跳过", flush=True)
-            continue
-        item["proc"] = launch(name, item["track"], pathlib.Path(item["manifest"]), pathlib.Path(item["out"]), 0)
-        print(f"[{now()}] 启动 {name} pid={item['proc'].pid}", flush=True)
+    print("[%s] supervisor up: %d 分片 run_root=%s manifest_dir=%s kernelbench=%s contract=%s"
+          % (now(), len(state), ROOT, MANIFESTS, KB_ROOT,
+             "dcukb" if os.environ.get("DCUKB_ROOT") else "upstream"), flush=True)
 
     while True:
-        changed = False
         for name, item in state.items():
-            if item["done"]:
+            manifest = item["manifest"]
+            out_dir = item["out"]
+            tasks = json.loads(manifest.read_text(encoding="utf-8"))["tasks"]
+            done = done_aliases(out_dir, tasks)
+            remaining = [t for t in tasks if t["alias"] not in done]
+            item["done"] = len(done)
+            item["total"] = len(tasks)
+            if not remaining:
+                if item["proc"] is not None and item["proc"].poll() is not None:
+                    item["proc"] = None
                 continue
-            out_dir = pathlib.Path(item["out"])
-            log_path = LOG_DIR / f"{name}.log"
-            if (out_dir / "summary.json").exists():
-                item["done"] = True
-                changed = True
-                log_path.open("a").write(f"===== [{now()}] {name} 完成（summary.json 出现）\n")
+
+            pid = shard_pid(out_dir)
+            if pid:
+                # 卡死判定：日志长时间不更新且进程还在
+                log = LOG_DIR / f"{name}.log"
+                if log.exists() and (time.time() - log.stat().st_mtime) > STALL_MIN * 60:
+                    if item["restarts"] < MAX_RESTARTS:
+                        print("[%s] %s 卡死（日志 %d 分钟未更新），重启 #%d"
+                              % (now(), name, STALL_MIN, item["restarts"] + 1), flush=True)
+                        try:
+                            os.killpg(os.getpgid(pid), signal.SIGTERM)
+                        except Exception:  # noqa: BLE001
+                            pass
+                        item["restarts"] += 1
                 continue
-            proc = item["proc"]
-            alive = proc is not None and proc.poll() is None
-            stalled = False
-            if alive and log_path.exists():
-                age_min = (time.time() - log_path.stat().st_mtime) / 60.0
-                stalled = age_min > STALL_MIN
-            if alive and not stalled:
-                continue
-            reason = "卡死" if stalled else f"退出码 {proc.poll() if proc else 'n/a'}"
-            if stalled:
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                except Exception:  # noqa: BLE001
-                    pass
-            item["restarts"] += 1
-            changed = True
+
             if item["restarts"] > MAX_RESTARTS:
-                item["done"] = True
-                log_path.open("a").write(f"===== [{now()}] {name} 重启超限（{reason}），放弃\n")
                 continue
-            log_path.open("a").write(f"===== [{now()}] {name} {reason} → 重启 #{item['restarts']}\n")
-            item["proc"] = launch(name, item["track"], pathlib.Path(item["manifest"]), out_dir, item["restarts"])
-        if changed or not STATUS.exists():
-            STATUS.write_text(json.dumps({
-                "updated": now(),
-                "root": str(ROOT),
-                "shards_per_track": SHARDS,
-                "search": SEARCH,
-                "max_attempts": ATTEMPTS,
-                "done": sorted(n for n, i in state.items() if i["done"]),
-                "running": sorted(n for n, i in state.items()
-                                  if i["proc"] and i["proc"].poll() is None and not i["done"]),
-                "restarts": {n: i["restarts"] for n, i in state.items() if i["restarts"]},
-            }, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
-        if all(i["done"] for i in state.values()):
-            print(f"[{now()}] 全部分片结束", flush=True)
-            return 0
+            resume = MANIFESTS / ("run_%s.json" % name)
+            resume.write_text(json.dumps({
+                "name": "run_%s" % name, "backend": item["track"], "tasks": remaining,
+            }, indent=1, ensure_ascii=False), encoding="utf-8")
+            item["proc"] = launch(name, item["track"], resume, out_dir)
+            print("[%s] %s 启动：剩 %d/%d 题 pid=%s"
+                  % (now(), name, len(remaining), len(tasks), item["proc"].pid), flush=True)
+        write_status()
         time.sleep(POLL)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())
