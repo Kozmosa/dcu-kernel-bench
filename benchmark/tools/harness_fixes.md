@@ -408,3 +408,29 @@ RuntimeError: element 0 of tensors does not require grad and does not have a gra
 "编译通过 **且** 静态合规"。2026-11-22 那一轮 HIP 轨 `65/66` 就是 `1032_deform_attention_bwd`：
 10 个候选全部调用 `torch.softmax`（`task.yaml` 禁止提交侧调用，参考实现自己可以用），并非编译失败。
 报告里应把「真编译失败」与「静态合规失败」分两栏。
+
+## 缺陷 4（2026-11-23）：脚手架把"提交侧禁用"的调用原样带进题面
+
+**位置**：`benchmark/tasks/1032_deform_attention_bwd/reference.py` 的模块级辅助函数
+`_deform_attn_forward`（脚手架由 `Model.forward` 生成，辅助函数是它的闭包依赖，会整段搬进题面）。
+
+**根因**：该函数第 32 行用 `torch.softmax(wf, dim=-1)` 归一化采样权重，而 `task.yaml` **禁止提交侧**
+调用 `torch.softmax` / `F.softmax`。这一行不落在任何 `# <<<IMPROVE:...>>>` 锚点里，Agent 会把它当成
+"参考语义、不能动"，于是每份产物都原样继承 → `static_audit` 恒命中
+`{"symbol": "torch.softmax", "kind": "forbidden", "line": 32}`。叠加缺陷 3 的 `failure_stage=compile`
+口径，整题在 Compile 一栏恒负，看上去像"HIP 编译不过"，实际从未进入编译阶段。
+
+**修复**：参考实现改成显式 max-exp-sum（与 `torch.softmax` 等价且数值稳定），镜像逐字节同步；
+题面里那段"脚手架仍含 `torch.softmax`、必须替换"的说法随之改成对禁用项本身的说明（不再暗示题面自带违规代码）。
+
+**扫描口径（本机，torch-free 复现）**：用 `KernelBenchLoader` 从 66 个镜像逐个重建脚手架（`backend=cuda`），
+对 `GLOBAL_FORBIDDEN ∪ task.yaml forbidden` 跑 `static_audit.audit_file`，并标注命中行是否落在 IMPROVE 锚点内：
+
+| 分类 | 题数 | 含义 |
+|---|---|---|
+| 锚点内 | 66 | 脚手架在每个锚点里自带朴素 PyTorch 起点（`F.conv2d`/`torch.matmul`/`autograd.grad`/`#include <cuda.h>`），模型按指示重写 → 无害 |
+| **锚点外（bare）** | **0** | 会被静默继承的禁用调用——修复前 `1032` 是唯一一例 |
+
+结论：1032 的 `torch.softmax` 是"参考语义区里的禁用符号"这一**唯一**残留；其余 65 道的脚手架违规全部位于
+锚点内。以后新增题目时，第 7 步本地验证应补一条断言：**脚手架在无任何编辑的情况下，锚点外不得命中审计规则**。
+复现脚本：`.tmp_audit/scaffold_audit_sweep.py`（仓库外，证据不入库）。
