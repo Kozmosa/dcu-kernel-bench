@@ -127,7 +127,21 @@ First Correct 分布：框架 `1→43、2→15、3→3、9→1`；纯 API `1→5
 - 只有纯 API 通过：`1014_hstu_attention`、`3003_moe_op`、`8001_cumsum`
 - 都没过：`1016_lean_atten_paged`、`1032_deform_attention_bwd`、`3002_moe_align_block_size`、`3007_moe_op_silu_fused`、`4018_quant`、`5002_conv2d_bwd`、`5004_deform_conv2d_bwd`、`5006_spconv_bwd`
 
-**跨四轨都没过的硬骨头**：`1032_deform_attention_bwd`、`5002_conv2d_bwd`、`5004_deform_conv2d_bwd`、`5006_spconv_bwd`（反向 / 稀疏类）。
+**跨四轨都没过的 4 题：`1032_deform_attention_bwd`、`5002_conv2d_bwd`、`5004_deform_conv2d_bwd`、`5006_spconv_bwd`**
+—— ⚠️ **这 4 题不是"题目难"，是评测桥接的 bug**（2026-11-23 复查结论）：
+
+- 它们的参考实现用 `torch.autograd.grad` 反传求梯度，而 `dcukb_online._evaluate()` 把 trials 包在
+  `with torch.no_grad():` 里 → 参考实现自己就抛
+  `RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn`；
+- 参考实现对不上，**任何候选**都判负 → 这 4 题在两条臂、两条轨上恒为失败；
+- 同一坑 2026-10-16 已在 KernelBench 的 `eval.py` 上修过（`benchmark/tools/harness_fixes.md` 缺陷 1/2），
+  但 1116 契约绕开那个 eval、走我们自己的桥，于是在这里又复现了一次；
+- 已修：`dcukb_online.py` 与 `audit_model_class.py` 的三处 `torch.no_grad()` 改成
+  `torch.enable_grad()`（前向题不建图、零开销；反向题才能跑）。真机 A/B 验证：4 题的
+  public / hidden 两条路径从 `False` 全部变为 `True`。
+
+**因此本报告的 Correct Rate 对两条臂都系统性少算了最多 4 题**（两组同减，对比结论不受影响，
+但绝对数字偏低）。补测这 4 题后需要重算 §1–§3 的数字。
 
 ## 5. 口径与偏差（引用数字时必须一起给）
 
@@ -140,6 +154,12 @@ First Correct 分布：框架 `1→43、2→15、3→3、9→1`；纯 API `1→5
 4. **Accelerator 侧数字越小越可疑**：`Mean Speedup` 与 `Best Speedup` 由个别 GEMM 题主导（纯 API Triton Best 5694×），不要用它下能力结论；**覆盖率（真解数）与 Fast1 才是可比的**。
 5. **Geomean 反向的解释**：Triton 轨纯 API Geomean（7.03×）高于框架（4.45×），是因为两边真解集合不同——框架多解出的 8 题是 attention/GEMM 块量化类（加速比天然低），纯 API 的真解集合里高加速比算子占比更高。HIP 轨两边真解集合差异更小，框架反而领先（6.33× vs 4.32×）。
 6. 两条臂都是**单次运行**，逐题数字含采样噪声（温度 0 但不能消除服务端非确定性）；聚合指标才可比。
+7. **评测桥接的 `no_grad` bug**（2026-11-23 发现并修复）：反向题（`1032`/`5002`/`5004`/`5006`）的参考实现
+   需要 autograd，被 `torch.no_grad()` 包住时直接抛错，导致这 4 题对谁都判负。修复后它们的在线正确性
+   与离线终审都恢复可判。**本报告的数字未补测**，引用时请注明"4 道反向题因桥接 bug 未计入有效结果"。
+8. **Compile Rate 的口径**：1116 契约把**静态审计失败**标成 `failure_stage=compile`，所以这一栏实际是
+   "编译通过 **且** 静态合规"。本轮 HIP 轨 65/66 就是被 `1032_deform_attention_bwd` 拉下的——它的 10 个候选
+   全部调用了 `torch.softmax`（参考实现自己也用，但 `task.yaml` 禁止提交侧调用），并非编译失败。
 
 ## 6. 复现
 

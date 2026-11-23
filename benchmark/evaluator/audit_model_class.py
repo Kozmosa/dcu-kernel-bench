@@ -327,7 +327,12 @@ def stage_correctness(task_dir: Path, gen_task_dir: Path, submission: Path, case
 
         # Candidates such as AdamW mutate their inputs: never hand them the
         # buffers already used by the oracle, or let them mutate expected.
-        with torch.no_grad():
+# 反向题（1032/5002/5004/5006 …）的参考实现用 torch.autograd.grad 求梯度，
+        # 包在 no_grad 里会直接报 "does not require grad and does not have a grad_fn"，
+        # 整题对谁都判负。用 enable_grad() 覆盖：前向题不建图，零开销。
+        # 同一坑 2026-10-16 在 KernelBench 的 eval.py 上修过（见 benchmark/tools/harness_fixes.md），
+        # 1116 契约绕开那个 eval，所以这里要各自修一遍。
+        with torch.enable_grad():
             expected = ref_mod.Model(**init_kwargs).to(device)(*clone_inputs(inputs))
             actual = cand_mod.ModelNew(**init_kwargs).to(device)(*clone_inputs(inputs))
         torch.cuda.synchronize()
@@ -432,7 +437,12 @@ def main() -> int:
     if args.public:
         from dcukb_online import public_trials
         try:
-            with torch.no_grad():
+# 反向题（1032/5002/5004/5006 …）的参考实现用 torch.autograd.grad 求梯度，
+            # 包在 no_grad 里会直接报 "does not require grad and does not have a grad_fn"，
+            # 整题对谁都判负。用 enable_grad() 覆盖：前向题不建图，零开销。
+            # 同一坑 2026-10-16 在 KernelBench 的 eval.py 上修过（见 benchmark/tools/harness_fixes.md），
+            # 1116 契约绕开那个 eval，所以这里要各自修一遍。
+            with torch.enable_grad():
                 correctness = public_trials(task_dir, load_module(task_dir / "reference.py", "public_ref"),
                                             load_module(args.submission, "public_cand"),
                                             args.seed, args.trials, torch.device("cuda"))

@@ -370,3 +370,41 @@ python .dcu_runs/deploy/compare_full66.py \
 运行观察：16 片（每片 4–5 题）稳定跑完；此前试过 24 片，5 分钟后**整机被平台下线**
 （24 进程同一秒消失、0 题完成），而启动时内存 446 GB 可用、GPU 仅用 2 MiB —— 不是
 资源压力。16 片是已验证的稳妥档位。
+
+---
+
+## 缺陷 3（2026-11-23）：1116 在线桥接把 `no_grad` 又加回来了
+
+**位置**：`benchmark/evaluator/dcukb_online.py` 的 `_evaluate()`、`benchmark/evaluator/audit_model_class.py`
+的 `stage_correctness()` 与 `--public` 分支（本仓库自己的代码，不是 KernelBench）。
+
+**根因**：这三处都用 `with torch.no_grad():` 包住「参考实现 vs 候选」的执行。缺陷 1/2 修的是
+KernelBench 的 `eval.py`，而 1116 契约**绕开那个 eval**、直接走 `dcukb_online.py`，于是同一个坑又出现了：
+反向题（`1032_deform_attention_bwd` / `5002_conv2d_bwd` / `5004_deform_conv2d_bwd` /
+`5006_spconv_bwd`）的参考实现要用 `torch.autograd.grad`，在 no_grad 下直接抛
+
+```
+RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
+```
+
+参考实现对不上 → **这两条臂、两条轨上这 4 题对任何候选都恒判负**。2026-11-22 全量跑里，
+它们被误当成"题目硬骨头"，还拉低了 HIP 轨的 Compile Rate（见下）。
+
+**修复**：三处换成 `torch.enable_grad()`（与缺陷 1/2 同一处理；前向题不建图、零开销，反向题才能跑）。
+
+**验证**（真机，参考实现当候选，A/B 同题对比）：
+
+| 题 | before(no_grad) | after(enable_grad) |
+|---|---|---|
+| 1032_deform_attention_bwd | public ✗ / hidden ✓ | public ✓ / hidden ✓ |
+| 5002_conv2d_bwd | ✗ / ✓ | ✓ / ✓ |
+| 5004_deform_conv2d_bwd | ✗ / ✓ | ✓ / ✓ |
+| 5006_spconv_bwd | ✗ / ✓ | ✓ / ✓ |
+
+（hidden 侧在"before"里也通过，是因为 `stage_correctness` 自身的 `enable_grad` 覆盖了外层的 no_grad；
+`--public` 与在线桥接没有这层内层覆盖，所以暴露了问题。）
+
+**附带口径提醒**：1116 契约把**静态审计失败**标成 `failure_stage=compile`，所以 Compile Rate 实际是
+"编译通过 **且** 静态合规"。2026-11-22 那一轮 HIP 轨 `65/66` 就是 `1032_deform_attention_bwd`：
+10 个候选全部调用 `torch.softmax`（`task.yaml` 禁止提交侧调用，参考实现自己可以用），并非编译失败。
+报告里应把「真编译失败」与「静态合规失败」分两栏。

@@ -204,7 +204,12 @@ def _evaluate(task, code, config, success, failure, *, device=None):
                 return failure('runtime', 'runtime_error', 'DCUKB evaluation requires a CUDA/HIP device')
             device = torch.device(f'cuda:{torch.cuda.current_device()}')
         try:
-            with torch.no_grad():
+# 反向题（1032/5002/5004/5006 …）的参考实现用 torch.autograd.grad 求梯度，
+            # 包在 no_grad 里会直接报 "does not require grad and does not have a grad_fn"，
+            # 整题对谁都判负。用 enable_grad() 覆盖：前向题不建图，零开销。
+            # 同一坑 2026-10-16 在 KernelBench 的 eval.py 上修过（见 benchmark/tools/harness_fixes.md），
+            # 1116 契约绕开那个 eval，所以这里要各自修一遍。
+            with torch.enable_grad():
                 ref_mod = _load_source(task.reference_code, tmp, 'dcukb_reference')
                 cand_mod = _load_source(code, tmp, 'dcukb_candidate')
                 report = public_trials(task_dir, ref_mod, cand_mod, config.seed,
