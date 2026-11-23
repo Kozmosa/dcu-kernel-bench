@@ -34,11 +34,16 @@ def _deform_attn_forward(value_f, spatial_shapes, level_start_index,
     n_points = sampling_locations_f.shape[4]
 
     # Normalize the sampling weights: flatten (levels x points) into one
-    # dimension and run a numerically stable softmax
+    # dimension and run a numerically stable softmax. Written with explicit
+    # max-exp-sum steps rather than torch.softmax: the scaffold handed to the
+    # candidate is built from this forward, and it must not carry a call that
+    # the submission itself is forbidden to use.
     wf = attention_weights_f.reshape(n, n_queries, num_heads,
                                      n_levels * n_points)
-    wf = torch.softmax(wf, dim=-1).view(n, n_queries, num_heads,
-                                        n_levels, n_points)
+    wf = wf - wf.max(dim=-1, keepdim=True).values
+    wf = torch.exp(wf)
+    wf = (wf / wf.sum(dim=-1, keepdim=True)).view(n, n_queries, num_heads,
+                                                  n_levels, n_points)
 
     n_idx = torch.arange(n, device=value_f.device).view(n, 1, 1)
     h_idx = torch.arange(num_heads, device=value_f.device).view(1, 1, num_heads)
@@ -179,10 +184,10 @@ class Model(nn.Module):
       - Using torch.autograd / autograd.grad / .backward() to backpropagate for the
         gradients is forbidden; the gradients must be hand-written from the
         analytic formulas above.
-      - The scaffold is derived from the reference forward and therefore still
-        contains a torch.softmax call; that call must be replaced with your own
-        in-kernel normalization. Leaving it in place fails the static compliance
-        check even when the produced numbers match the reference.
+      - The sampling weights are normalized by a softmax over the flattened
+        level x point domain. torch.softmax / torch.nn.functional.softmax are
+        forbidden in the submission, so the forward normalization and its
+        backward must both be written explicitly in your kernels.
       - All gradient accumulation is done in float32; the three gradient segments
         are cast back to the value dtype and concatenated in the segment order
         above; forward returns the single tensor out (the evaluator compares a
