@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "sha256": "54b6fdbf6105003fafef93964216f7ee8d8459c631ed5c4f48486a392578b718",
+  "sha256": "32c47f2d5c1aac27c96f2db43905e79b0a2a26f80333f987541145f77be08ce2",
   "files": {
     "data/aliases.yaml": "8f687aeabfab69a8e8b685833125aa9366f4f867e464292df841b7b704b07d81",
     "data/operators.yaml": "44b445761fbee39ff666480d93036a1442c80a1f8640438c831f370600b052d5",
@@ -18,7 +18,7 @@
     "sources/torch-ops.md": "29ed636796a068a34dd3be0155cbd8de81f39b06f9c0a9f4b30cb113f57fa76e",
     "sources/torch-pool.md": "f14fee007b823f8cb5fa151596f55651ff043e9a764f7adc5b7c42bce88b9fd8",
     "sources/torch-sdpa.md": "a221a4737476aa98722b798a4509fd8d4e5f05ce487f1f2998c993d9e033cf4d",
-    "wiki/contracts/compliance.md": "09fc1602f596bc0831804562a4ccda6c1f464306b432a1fc4cfdb5a48bbaf03f",
+    "wiki/contracts/compliance.md": "ed694a09a0cdab5a08432fbc7f34b5fd96b537deef83330a1869f35860bf3145",
     "wiki/contracts/general.md": "f3023fe4c9390b5f6301d4abf239ba9074aba555570b03173f24a1831f1affff",
     "wiki/hardware/gfx928.md": "52ab5e3417cc357173a1bbfd651b1b60222dc3076f442442fdf964f8a54d1394",
     "wiki/operators/attention.md": "d9ab256b97a10834ea546a0777c113767c3e6b09d16b5ae62f91816cfd4c1727",
@@ -42,5 +42,5 @@
     "wiki/operators/topk.md": "86e1b881bbdf7fa56b4334c873612434012617b18818909d0c778b76a76e1c46",
     "wiki/operators/transposed_convolution.md": "3f536eebb24fc7e287cde2f928259c3035a75c8e9d00a8003a4236d9ac1f6a28"
   },
-  "frozen_at": "2026-11-21T09:38:55.197792+00:00"
+  "frozen_at": "2026-11-23T09:51:23.875432+00:00"
 }

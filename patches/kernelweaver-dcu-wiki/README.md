@@ -74,7 +74,7 @@ python benchmark/tools/apply_framework_fixes.py kernelweaver-dcu-wiki /path/to/K
 python3 -c "import sys;sys.path.insert(0,'.');from pathlib import Path;\
 from src.knowledge.public_wiki import audit_public_corpus as a;\
 print(a(Path('knowledge/kernelwiki_dcu'))['sha256'])"
-# 期望：54b6fdbf6105003fafef93964216f7ee8d8459c631ed5c4f48486a392578b718
+# 期望：32c47f2d5c1aac27c96f2db43905e79b0a2a26f80333f987541145f77be08ce2
 ```
 
 端到端（两轨检索、合规页与硬件页在上下文、无算子页时给通用检查单）：
@@ -110,7 +110,7 @@ PY
 
 | 字段 | 值 |
 |---|---|
-| 汇总 SHA256 | `54b6fdbf6105003fafef93964216f7ee8d8459c631ed5c4f48486a392578b718` |
+| 汇总 SHA256 | `32c47f2d5c1aac27c96f2db43905e79b0a2a26f80333f987541145f77be08ce2` |
 | 文件数 | 39（`index.yaml` + `data/` 2 + `sources/` 13 + `wiki/` 23）+ `corpus.lock.json` |
 | 页面数 | 36（2 契约 + 1 硬件实测 + 20 算子 + 13 来源） |
 | 覆盖 family | 20：matmul / elementwise / normalization / maxpool / avgpool / reduction / scan / convolution / transposed_convolution / cross_entropy / softmax / attention / rope / moe / quantization / indexing / topk / ctc_loss / deform_convolution / sparse_convolution |

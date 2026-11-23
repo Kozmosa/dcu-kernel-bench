@@ -179,6 +179,10 @@ class Model(nn.Module):
       - Using torch.autograd / autograd.grad / .backward() to backpropagate for the
         gradients is forbidden; the gradients must be hand-written from the
         analytic formulas above.
+      - The scaffold is derived from the reference forward and therefore still
+        contains a torch.softmax call; that call must be replaced with your own
+        in-kernel normalization. Leaving it in place fails the static compliance
+        check even when the produced numbers match the reference.
       - All gradient accumulation is done in float32; the three gradient segments
         are cast back to the value dtype and concatenated in the segment order
         above; forward returns the single tensor out (the evaluator compares a

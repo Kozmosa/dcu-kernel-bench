@@ -27,6 +27,9 @@ advice:
   those APIs exists on this target.
 - When a hand-written kernel fails twice on the same pattern, change the decomposition instead of retrying
   it, and never revert to a blocked call as the fallback.
+- The scaffold is built from the reference forward, so it can still carry a blocked call copied from the
+  reference (a torch.softmax statement, for example). The reference is allowed to use those APIs, the
+  submission is not — replace every such call with your own kernel arithmetic before submitting.
 - Validate the replacement against the reference before optimizing.
 applicability:
 - Every model_class task; the task docstring's forbidden list is authoritative when it is stricter.
