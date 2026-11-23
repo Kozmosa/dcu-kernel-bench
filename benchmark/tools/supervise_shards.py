@@ -48,6 +48,13 @@ ATTEMPTS = os.environ.get("MAX_ATTEMPTS", "10")
 POLL = float(os.environ.get("POLL_SECONDS", "90"))
 STALL_MIN = float(os.environ.get("STALL_MIN", "50"))
 MAX_RESTARTS = int(os.environ.get("MAX_RESTARTS", "8"))
+# 内存闸门：容器 cgroup v1 上限 115 GiB，每个分片峰值约 4 GiB（父进程 + 隔离评测子进程）。
+# 2026-11-22 用 28 分片直接把 cgroup 打爆（oom-kill 掉 python3 与 sshd，机器要重启）。
+MEM_GUARD_GIB = float(os.environ.get("MEM_GUARD_GIB", "95"))
+LAUNCH_STAGGER = float(os.environ.get("LAUNCH_STAGGER", "6"))
+CGROUP_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
+CGROUP_V1_CURRENT = pathlib.Path("/sys/fs/cgroup/memory/memory.usage_in_bytes")
+CGROUP_V1_LIMIT = pathlib.Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")
 
 LOG_DIR = ROOT / "logs"
 POOL = ROOT / "pools" / "memory_pool.json"
@@ -63,6 +70,23 @@ def shard_specs():
         for index in range(SHARDS):
             name = f"{PREFIX}_{track}_s{index}"
             yield name, track, MANIFESTS / f"{name}.json", ROOT / name
+
+
+def memory_gib() -> float:
+    for path in (CGROUP_CURRENT, CGROUP_V1_CURRENT):
+        try:
+            return int(path.read_text().strip()) / 2 ** 30
+        except (OSError, ValueError):
+            continue
+    return 0.0
+
+
+def memory_limit_gib() -> float:
+    try:
+        value = int(CGROUP_V1_LIMIT.read_text().strip())
+    except (OSError, ValueError):
+        return 0.0
+    return value / 2 ** 30 if value < 2 ** 60 else 0.0
 
 
 def pid_alive(pid: int) -> bool:
@@ -150,6 +174,9 @@ def main() -> int:
             "manifest_dir": str(MANIFESTS),
             "kernelbench_root": str(KB_ROOT),
             "contract": "dcukb" if os.environ.get("DCUKB_ROOT") else "upstream",
+            "memory_gib": round(memory_gib(), 1),
+            "memory_limit_gib": round(memory_limit_gib(), 1),
+            "memory_guard_gib": MEM_GUARD_GIB,
             "shards": {name: {"running": bool(shard_pid(item["out"])),
                               "restarts": item["restarts"],
                               "done": item.get("done"), "total": item.get("total")}
@@ -206,13 +233,21 @@ def main() -> int:
 
             if item["restarts"] > MAX_RESTARTS:
                 continue
+            used = memory_gib()
+            if used and used > MEM_GUARD_GIB:
+                print("[%s] 内存 %.1f GiB 已超过闸门 %.1f GiB，暂缓启动 %s"
+                      % (now(), used, MEM_GUARD_GIB, name), flush=True)
+                continue
             resume = MANIFESTS / ("run_%s.json" % name)
             resume.write_text(json.dumps({
                 "name": "run_%s" % name, "backend": item["track"], "tasks": remaining,
             }, indent=1, ensure_ascii=False), encoding="utf-8")
             item["proc"] = launch(name, item["track"], resume, out_dir)
-            print("[%s] %s 启动：剩 %d/%d 题 pid=%s"
-                  % (now(), name, len(remaining), len(tasks), item["proc"].pid), flush=True)
+            print("[%s] %s 启动：剩 %d/%d 题 pid=%s 内存=%.1f/~%.1f GiB"
+                  % (now(), name, len(remaining), len(tasks), item["proc"].pid,
+                     memory_gib(), memory_limit_gib()), flush=True)
+            if LAUNCH_STAGGER:
+                time.sleep(LAUNCH_STAGGER)
         write_status()
         time.sleep(POLL)
 
