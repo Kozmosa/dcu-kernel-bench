@@ -58,6 +58,10 @@ LAUNCH_STAGGER = float(os.environ.get("LAUNCH_STAGGER", "6"))
 # allocated memory 0 bytes is allocated by PyTorch" —— 是本进程之外的其他分片占满的。
 # 0 = 不限制（老行为）。
 MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_SHARDS", "0"))
+# 每次启动最多跑几题（0=该分片剩下的全跑完）。ROCm 的 caching allocator 不把显存还给驱动：
+# 同一个进程连着跑多题，VRAM 一路涨（2026-11-25 实测 3 个分片占满 61 GiB，而进程 RSS 只有 2.4 GiB
+# 各——显存都在 device 侧没释放），最后 OOM 把样本打脏。每题换一个进程即可复位。
+TASKS_PER_LAUNCH = int(os.environ.get("TASKS_PER_LAUNCH", "0"))
 CGROUP_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
 CGROUP_V1_CURRENT = pathlib.Path("/sys/fs/cgroup/memory/memory.usage_in_bytes")
 CGROUP_V1_LIMIT = pathlib.Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")
@@ -251,12 +255,13 @@ def main() -> int:
                       % (now(), used, MEM_GUARD_GIB, name), flush=True)
                 continue
             resume = MANIFESTS / ("run_%s.json" % name)
+            batch = remaining[:TASKS_PER_LAUNCH] if TASKS_PER_LAUNCH else remaining
             resume.write_text(json.dumps({
-                "name": "run_%s" % name, "backend": item["track"], "tasks": remaining,
+                "name": "run_%s" % name, "backend": item["track"], "tasks": batch,
             }, indent=1, ensure_ascii=False), encoding="utf-8")
             item["proc"] = launch(name, item["track"], resume, out_dir)
-            print("[%s] %s 启动：剩 %d/%d 题 pid=%s 内存=%.1f/~%.1f GiB"
-                  % (now(), name, len(remaining), len(tasks), item["proc"].pid,
+            print("[%s] %s 启动：剩 %d/%d 题（本次跑 %d）pid=%s 内存=%.1f/~%.1f GiB"
+                  % (now(), name, len(remaining), len(tasks), len(batch), item["proc"].pid,
                      memory_gib(), memory_limit_gib()), flush=True)
             if LAUNCH_STAGGER:
                 time.sleep(LAUNCH_STAGGER)
