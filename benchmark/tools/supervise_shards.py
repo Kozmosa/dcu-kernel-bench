@@ -52,6 +52,12 @@ MAX_RESTARTS = int(os.environ.get("MAX_RESTARTS", "8"))
 # 2026-11-22 用 28 分片直接把 cgroup 打爆（oom-kill 掉 python3 与 sshd，机器要重启）。
 MEM_GUARD_GIB = float(os.environ.get("MEM_GUARD_GIB", "95"))
 LAUNCH_STAGGER = float(os.environ.get("LAUNCH_STAGGER", "6"))
+# 并发上限（同时活着的分片数）。单卡 64 GiB 上每个分片常驻约 3.5~4 GiB，
+# 2026-11-23 用 16 分片（8/track）跑 L1 直接把显存打满：OOM 报错里明确写着
+# "GPU 0 has a total capacity of 63.98 GiB of which 3.29 GiB is free. Of the
+# allocated memory 0 bytes is allocated by PyTorch" —— 是本进程之外的其他分片占满的。
+# 0 = 不限制（老行为）。
+MAX_CONCURRENT = int(os.environ.get("MAX_CONCURRENT_SHARDS", "0"))
 CGROUP_CURRENT = pathlib.Path("/sys/fs/cgroup/memory.current")
 CGROUP_V1_CURRENT = pathlib.Path("/sys/fs/cgroup/memory/memory.usage_in_bytes")
 CGROUP_V1_LIMIT = pathlib.Path("/sys/fs/cgroup/memory/memory.limit_in_bytes")
@@ -66,8 +72,9 @@ def now() -> str:
 
 
 def shard_specs():
-    for track in TRACKS:
-        for index in range(SHARDS):
+    # 按 index 外层、track 内层交错，保证限并发时两条轨一起推进（而不是先把 triton 全跑完）。
+    for index in range(SHARDS):
+        for track in TRACKS:
             name = f"{PREFIX}_{track}_s{index}"
             yield name, track, MANIFESTS / f"{name}.json", ROOT / name
 
@@ -177,6 +184,7 @@ def main() -> int:
             "memory_gib": round(memory_gib(), 1),
             "memory_limit_gib": round(memory_limit_gib(), 1),
             "memory_guard_gib": MEM_GUARD_GIB,
+            "max_concurrent_shards": MAX_CONCURRENT,
             "shards": {name: {"running": bool(shard_pid(item["out"])),
                               "restarts": item["restarts"],
                               "done": item.get("done"), "total": item.get("total")}
@@ -233,6 +241,10 @@ def main() -> int:
 
             if item["restarts"] > MAX_RESTARTS:
                 continue
+            if MAX_CONCURRENT:
+                running = sum(1 for other in state.values() if shard_pid(other["out"]))
+                if running >= MAX_CONCURRENT:
+                    continue
             used = memory_gib()
             if used and used > MEM_GUARD_GIB:
                 print("[%s] 内存 %.1f GiB 已超过闸门 %.1f GiB，暂缓启动 %s"
