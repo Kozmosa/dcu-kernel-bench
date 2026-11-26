@@ -32,6 +32,7 @@
 | LLM 出口 | `/root/llm.env`（含 `OPENAI_*` 与反代 `HTTPS_PROXY`），反向隧道 `-R 17890` |
 | HIP 编译 | `PYTORCH_ROCM_ARCH=gfx928`（否则每个候选按 5 个架构编译，慢 5×） |
 | 评测超时 | `STARK_PAPER_EVAL_TIMEOUT_SECONDS=900`（240s 对 hipcc 太紧） |
+| int-cast 补丁 | `eval.py::_process_input_tensor` 与 `timing.py::measure_ref_program_time` 两处改成"只 cast 浮点张量"，否则带整数索引的题（如 `95_CrossEntropyLoss`）恒判负、且拿不到 speedup（详见 §9.2） |
 
 ## 3. 一条命令开跑
 
@@ -118,3 +119,91 @@ python3 benchmark/tools/flatten_run_root.py \
 - Triton 单轨、8 分片、10 attempts：单体调用 ~2–4 分钟/次、每题最多 10 次 → **约 4–7 小时**
 - 若 `ATTEMPTS=1`：**约 40–60 分钟**
 - 双轨会把 HIP 编译开销叠上来（本轮 HIP 轨修复后约 21 题/小时），建议先只跑 Triton。
+- **实测（2026-11-26 首轮）**：L1 双轨 200 个 task-run、8 分片、10 attempts → **约 10.5 小时**（≈19 个 task-run/小时），
+  另有 16 个 task-run 的串行补跑约 2 小时。
+
+---
+
+## 9. 首轮实测结果（2026-11-26，L1 双轨，200 个 task-run）
+
+分母 100 题/轨；`collect_metrics.py` 口径（**排除 root 候选**，分母 `torch_eager`，10 attempts）。
+
+| 指标 | Triton 轨 | HIP（cuda）轨 |
+|---|---|---|
+| Compile Rate（模块级） | 100/100（100%） | 99/100（99%） |
+| Compile Rate（kernel 级） | 100/100（100%） | 99/100（99%） |
+| Correct Rate | **100/100（100%）** | **99/100（99%）** |
+| Success@1 | 52/100（52%） | 71/100（71%） |
+| Success@5 | 93/100（93%） | 96/100（96%） |
+| Success@10 | 100/100（100%） | 99/100（99%） |
+| Fast1@1 | 16/100（16%） | 22/100（22%） |
+| Fast1@5 | 64/100（64%） | 41/100（41%） |
+| Fast1@10 | 84/100（84%） | 51/100（51%） |
+| Fast1@all | **84/100（84%）** | **51/100（51%）** |
+| Geomean Speedup | **1.82×** | **1.17×** |
+| Median Speedup | 1.40× | 1.08× |
+| Mean Speedup | 3.96× | 2.29× |
+| Best Speedup | 79.78× | 18.42× |
+| First Correct Median | 1.0 | 1.0 |
+| Refine Gain Median | 1.29× | 1.99× |
+
+### 9.1 结论
+
+1. **正确性上 L1 被做穿了**（Triton 100/100、HIP 99/100），唯一的真实失败是
+   HIP 轨 `97_ScaledDotProductAttention`：root 正确，但 10 个候选全部 `cuda_compile_error`
+   （`(32,32,512,1024)` 的三输入 attention 用 HIP C++ 手写，工程难度确实高）。
+2. **速度很差，且这是 L1 的固有属性**：Triton 中位 1.40×、HIP 中位 1.08×，Fast1@all 84% vs 51%。
+   与 dcukb 66 题（HIP geomean 7.41×、Triton 6.66×）差一个数量级——L1 全是 launch-bound 小算子，
+   eager 本来就贴着下限，能抢的空间很小。引用时不要把这两套数字放在同一张表里比"强弱"。
+3. **HIP 轨在 L1 明显吃亏**：同一批题 Triton 84% 能快过 eager，HIP 只有 51%；geomean 1.82× vs 1.17×。
+   原因是多一层 pybind + `load_inline` 调用开销，而 L1 的算子里程碑极短，开销占比被放大。
+4. **`Success@1` 只有 52%/71%**，但 `Success@10` 接近 100%——框架的价值在迭代补救，不在第一枪。
+
+### 9.2 上游 KernelBench 的两个缺陷（本轮踩到并修了，与 DCU 无关）
+
+| # | 位置 | 症状 | 修法 |
+|---|---|---|---|
+| 1 | `src/kernelbench/eval.py` 的 `_process_input_tensor` | 无条件 `input.to(dtype=precision)`，把**整数张量**（类别索引 / mask）也转成 fp32 → `95_CrossEntropyLoss` 的 root 自身抛 `NotImplementedError: "nll_loss_forward_reduce_cuda_kernel_2d_index" not implemented for 'Float'`，整题两轨对任何候选恒判负 | `input.to(dtype=precision) if input.is_floating_point() else input` |
+| 2 | `src/kernelbench/timing.py` 的 `measure_ref_program_time` | 同一处错误在**参考实现计时**里，`inputs`/`init_inputs` 全量 cast → 参考耗时抛异常，`speedup` 记成 `None`（`95` 类题即使算对也没有加速比） | 同上：只 cast 浮点张量 |
+
+两条在 NVIDIA 上同样会触发（不是 ROCm 特有），MLU 那份移植也没修。补丁只改 `if` 条件，不改变浮点张量的行为。
+
+### 9.3 显存：OOM 是资源撞车，不是能力
+
+L1 有一批题输入极大（`batch_size=4096, dim=393216` → 单张量 fp32 就 **6.4 GB**，参考+输出+中间量要 20~25 GB）。
+8 分片并发时一旦两三个这样的题撞在一起就 OOM，报错形如
+`HIP out of memory … 0 bytes free … 12.00 GiB is allocated by PyTorch`。
+
+- 首轮 200 个 task-run 里 **192 个候选**被 OOM 打掉过；其中 6 道题因此 0 正确。
+- **串行（1~2 分片）补跑后，这 6 道全部 correct**（0.25×~3.76×）——证明是环境问题。
+- 另一个独立原因是 ROCm 的 caching allocator **不归还显存**：同一进程连跑多题，VRAM 一路涨到打满
+  （实测 3 个分片占 61 GiB，而四个 python 进程 RSS 各只 2.4 GiB）。
+
+因此本轮给看护器加了两个开关，跑 L1/L2 都应当打开：
+
+```bash
+MAX_CONCURRENT_SHARDS=8      # 同时活着的分片上限（避免把卡打满）
+TASKS_PER_LAUNCH=1           # 每题换一个进程，显存复位
+```
+
+### 9.4 产物与复现
+
+```
+/root/runs/kb_l1b/                  # 主跑（200 个 task-run）
+/root/runs/kb_l1_fix/               # 补跑①：环境失败 8 个 task-run（OOM + int-cast）
+/root/runs/kb_l1_fix2/              # 补跑②：参考计时失败、重测速度 8 个 task-run
+/root/runs/kb_l1_final_{triton,cuda}/   # 合并后的干净产物（后两轮覆盖前一轮）
+/root/runs/kb_l1_final_{triton,cuda}.md # collect_metrics 报告
+```
+
+合并 + 出表的完整命令：
+
+```bash
+# 合并：以 kb_l1_fix2 > kb_l1_fix > kb_l1b 的优先级覆盖，按 track 落成 <alias>_l1_p<pid>/run.json
+python3 /root/dcukb/benchmark/tools/collect_metrics.py \
+  --run-root /root/runs/kb_l1_final_triton --out /root/runs/kb_l1_final_triton.md
+python3 /root/dcukb/benchmark/tools/collect_metrics.py \
+  --run-root /root/runs/kb_l1_final_cuda --out /root/runs/kb_l1_final_cuda.md
+```
+
+本地留档（仓库外）：`dcukb-results-20261126-l1/`（合并产物 + 两份 md + 三轮看护器日志）。
