@@ -252,12 +252,30 @@ mask 不同，root 直通自己都对不上，属**不可判**（上游语义下
 
 | 题 | 现象 | 判定与处理 |
 |---|---|---|
-| cuda `30_Gemm_GroupNorm_Hardtanh` | root 正确，候选 7 次 `cuda_compile_error` | **真实失败**（写不出能编的 HIP kernel），保留在分母 |
-| `66_Matmul_Dropout_Softmax`（两轨） | **root 自己就不正确**，`correctness_error` 10/10 | **不可判**：`nn.Dropout` 训练模式下随机；从分母剔除 |
+| cuda `30_Gemm_GroupNorm_Hardtanh` | root 正确（1.0×），10 个候选里 **7 个 `cuda_compile_error`**（扩展构建失败）；Triton 轨解得 `0.769×` | **真实失败**（HIP 侧写不出能编的 kernel），保留在分母 |
+| `66_Matmul_Dropout_Softmax`（两轨） | **root 直通也判负**，`correctness_error`：`max_difference ≈ 3.1~3.8e-4`、`avg_difference ≈ 6e-6`（fp32 容差 `1e-4`） | **不可判**：参考实现含训练态 `nn.Dropout`，两次 forward 的 mask 不同；从分母剔除 |
 
-`66` 的根子在评测语义，不在实现：上游 KernelBench 在"参考一次、候选一次"之间不重置 RNG，
-Dropout 的 mask 必然不同。若要保留这道题，得给评测器加"每次 forward 前重置种子"或把模型置于
-`eval()`——这两条都会改变语义（丢掉"训练态融合"的考点），故本轮选择剔除并记录。
+`66` 的机制（逐条都有数据支撑）：
+
+- 参考实现是 `Linear(16384→16384) → nn.Dropout(0.2) → softmax(dim=1)`，输入 `128×16384`，
+  权重 16384² ≈ **1.07 GB**；`nn.Module` 默认 `training=True`，dropout 生效。
+- 评测器只在每次 trial 前 `set_seed(trial_seed)`，随后"参考跑一次、候选跑一次"，**两次 forward
+  之间不重置 RNG** → 两个 mask 不同。
+- 差异刚好卡在容差线上：`max_difference` 3.1~3.8e-4（> 1e-4 判负），`avg_difference` 6e-6。
+  原因是 softmax 在 16384 类上归一化，单个被丢掉的元素只挪动 1e-4 量级。
+- **最硬的证据**：`root` 节点（脚手架直通＝与参考逐字节相同的代码）也判负，且它的三个 trial 的
+  `max_difference`（0.000322 / 0.000310 / 0.000380）与多个候选**完全一致**——差异来自 mask，不来自实现。
+- 反过来也说明它测不出东西：若容差是 KernelBench 早期默认的 `1e-2`，这道题"什么都不做"也能通过。
+- 三种修法的取舍：① `model.eval()` → 变成推理态，丢掉训练态考点；② **每次 forward 前重置种子** →
+  对手写 kernel 无效（kernel 不消费 PyTorch 的 RNG），仍然对不上；③ 把参考改成确定性等价版本
+  （p=0 或固定 mask）→ 可判，但属"改题目"。故本轮剔除并记录，不擅自改题。
+
+`30`（L2 HIP）与 `97_ScaledDotProductAttention`（L1 HIP）属同一类：**扩展构建阶段挂掉**，
+且都出现在"通用 / 模板化 fallback kernel"的写法上（`97` 用带 `Metadata{shape[64], strides}` 的通用
+kernel；`30` 用 `scalar_t`/`acc_t` 模板 + `ATen/AccumulateType.h`）。两者在 Triton 轨都能过
+（`0.247×` / `0.769×`），所以不是题不可解，而是 C++ 侧的工程细节——但**存档里拿不到编译器原文**：
+框架把 `runtime_error` 截断到约 200 字符（只剩 `Error building extension … [1/3] ninja …`）。
+要定位到具体一行，需用 `run.json` 里保存的候选代码在机器上重放 `load_inline` 并保留 ninja/hipcc 输出。
 
 ### 10.3 产物
 
